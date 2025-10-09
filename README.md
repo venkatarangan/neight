@@ -26,6 +26,10 @@ So I decided to scratch the itch myself. Using **GPT-5**, **GitHub Copilot**, an
 The twist: I didn’t type code manually except for minor display texts. Everything was AI-generated, refined, and assembled through prompts inside VS Code. I continue to maintain it the same way, as an ongoing experiment in AI-assisted software creation.
 
 ---
+## Screenshot
+![Neight Screenshot](screenshots/neight-5.png)
+
+More screenshots are in the screenshots folder
 
 ## Features
 
