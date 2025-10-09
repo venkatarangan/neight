@@ -1,0 +1,1 @@
+pyinstaller --name Neight --onefile --windowed --icon neight.ico neight.py
