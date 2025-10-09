@@ -1,190 +1,207 @@
-# Neight
+# Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-A lightweight UTF-8 text editor built with Python and Qt (PySide6/PyQt5).
+**Neight** is a lightweight text editor for Windows inspired by Notepad but enhanced with a few thoughtful additions. It’s designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable Windows app entirely through Generative AI.
+
+---
+
+## Why I built Neight
+
+Around **Early 2025**, I ran into a problem.
+In **Windows 11**, with the new **Tamil (India) - Tamil Anjal keyboard layout**, the built-in Notepad.exe started showing rendering issues with Tamil Unicode text. Strangely, everywhere else — browsers, Word, system UI — worked fine. Only Notepad struggled.
+
+The new Notepad (with Copilot integration) probably uses a different text control from the earlier version that had tab support, and something about that broke Tamil input.
+
+I tried alternatives:
+
+* **Sublime Text** works, but it’s paid and overkill for quick Tamil typing.
+* **Notepad++** is powerful but too cluttered.
+* **Visual Studio Code** is great but not for a few quick paragraphs in Tamil and English.
+
+For my use case — daily Tamil social media posts and weekly magazine columns — I needed something simple, fast and predictable.
+
+**iA Writer** came close, but even that failed with Tamil word selection shortcuts.
+
+So I decided to scratch the itch myself. Using **GPT-5**, **GitHub Copilot**, and **Claude Sonnet 4.5 (Preview)**, I generated a new notepad-like app from scratch — **Neight**.
+
+The twist: I didn’t type code manually except for minor display texts. Everything was AI-generated, refined, and assembled through prompts inside VS Code. I continue to maintain it the same way, as an ongoing experiment in AI-assisted software creation.
+
+---
 
 ## Features
 
-- **Line Numbers**: Visual line number sidebar
-- **Word Count & Character Count**: Real-time statistics in status bar
-- **Find & Replace**: Search and replace text with wrap-around support
-- **Auto-save**: Configurable auto-save intervals (2, 5, 15, 30 minutes)
-- **Font Customization**: Choose custom fonts and adjust size with Ctrl+Plus/Minus or mouse wheel
-- **Word Wrap**: Toggle word wrap on/off
-- **Google Search Integration**: Triple-click or right-click selected text to search with Google
-- **Keyboard Layout Switching** (Windows only): Toggle between English India and Tamil Anjal layouts
-- **Settings Persistence**: Remembers window size, font, last opened file, and preferences
+Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 
-## Requirements
+### Familiar Notepad features
 
-- Python 3.9+ (recommended: Python 3.10 or later)
-- PySide6 (or PyQt5 as fallback)
+* File menu with **New**, **Open**, **Save**, **Save As**, and **Exit**
+* Editing options like **Undo**, **Redo**, **Cut**, **Copy**, **Paste**, **Find/Replace**, **Go To**, **Time/Date**
+* Word wrap toggle, custom fonts, and status bar
+* Most keyboard shortcuts (Ctrl+S, Ctrl+F, F5, etc.) work as expected
+* Supports Dark Mode
 
-## Installation
+### Enhancements
 
-### 1. Clone or download this repository
+* **Line numbers** and **column tracking**
+* **Word and character count** (handy for magazine and blog writing)
+* **Auto-save** every 5 minutes (default, configurable)
+* **Remembers**:
 
-```bash
-cd c:\DevTemp\neight
+  * Last opened file
+  * Window size
+  * Font name and size
+* **Quick Google Search**: Select text and press **Ctrl+E** or right-click → “Search with Google”
+* **Language toggle shortcut**:
+
+  * Press **Ctrl key twice quickly** to toggle between Tamil Anjal and English (India)
+  * Or use **Ctrl+,** for English (India) and **Ctrl+.** for Tamil Anjal
+  * Current keyboard layout is shown in the status bar bottom right
+
+---
+
+## Download and Installation
+
+There’s **no Windows installer** yet. To run Neight:
+
+1. Download or clone this repository.
+2. Copy the executable file from
+   `dist\neight.exe`
+   to a folder such as
+   `C:\Program Files\Neight\`
+3. You can pin the copied **neight.exe** to your **Start Menu** or **Taskbar** for quick access.
+
+---
+
+## Building Neight from Source
+
+**Requirements**
+
+* **Python 3.10+**
+* **PySide6** (install using pip)
+
 ```
-
-### 2. Create a virtual environment (recommended)
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-
-```powershell
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-Or install PySide6 directly:
-
-```powershell
 python -m pip install PySide6
 ```
 
-### 4. Run the application
+**To build the executable:**
 
-```powershell
-python neight.py
 ```
-
-## Building an Executable
-
-The project includes a `Neight.spec` file for PyInstaller. To build a standalone executable:
-
-### 1. Install PyInstaller
-
-```powershell
 python -m pip install pyinstaller
+pyinstaller --onefile neight.py
 ```
 
-### 2. Build the executable
+After the build completes, your compiled file will be in the **dist** folder.
 
-```powershell
-pyinstaller Neight.spec
-```
+---
 
-Or use the provided batch file:
+## Running Neight
 
-```powershell
-.\buildme.bat
-```
+* Tested on **Windows 11 (25H2)**
+* Requires Tamil (India) – Tamil Anjal and English (India) keyboard layouts installed
 
-The executable will be created in the `dist` folder.
+Run the app once and it will create a **settings.json** file next to the executable.
+It stores your preferences (font, window size, last opened file, autosave interval, etc.).
 
-## Keyboard Shortcuts
+---
 
-### File Operations
-- **Ctrl+N**: New file
-- **Ctrl+O**: Open file
-- **Ctrl+S**: Save file
-- **Ctrl+Shift+S**: Save As
+## How it works (briefly)
 
-### Editing
-- **Ctrl+Z**: Undo
-- **Ctrl+Y**: Redo
-- **Ctrl+X**: Cut
-- **Ctrl+C**: Copy
-- **Ctrl+V**: Paste
-- **Ctrl+A**: Select All
-- **F5**: Insert time/date
+Neight uses **PySide6**, the official Qt6 Python binding, to handle:
 
-### Find & Replace
-- **Ctrl+F**: Find text
-- **F3**: Find next occurrence
-- **Ctrl+H**: Replace text
-- **Ctrl+G**: Go to line number
+* The text editor (`QPlainTextEdit`)
+* Menus, dialogs, and status bar
+* Persistent settings stored in JSON
+* A small **ctypes** module for Windows API calls to switch keyboard layouts programmatically
 
-### Search
-- **Ctrl+E**: Search selected text with Google
-- **Triple-click**: Select word and search with Google
-- **Right-click selected text**: Context menu with Google search option
+All preferences are remembered automatically, including fonts, window size, and autosave intervals.
 
-### Font & View
-- **Ctrl+Plus** / **Ctrl+Mouse Wheel Up**: Increase font size
-- **Ctrl+Minus** / **Ctrl+Mouse Wheel Down**: Decrease font size
+It’s a single Python file — self-contained and clean — yet offers everything you expect from a modern, minimal text editor.
 
-### Keyboard Layout Switching (Windows only)
-- **Ctrl+,**: Switch to English India layout
-- **Ctrl+.**: Switch to Tamil Anjal layout
-- **Double Ctrl tap**: Toggle between layouts
+---
 
-## Configuration
+## Keyboard Shortcuts (Summary)
 
-Settings are automatically saved to `settings.json` in the same directory as the application. The file stores:
+| Action                        | Shortcut                       |
+| ----------------------------- | ------------------------------ |
+| New File                      | Ctrl+N                         |
+| Open                          | Ctrl+O                         |
+| Save                          | Ctrl+S                         |
+| Save As                       | Ctrl+Shift+S                   |
+| Exit                          | Alt+F4                         |
+| Undo / Redo                   | Ctrl+Z / Ctrl+Y                |
+| Cut / Copy / Paste            | Ctrl+X / Ctrl+C / Ctrl+V       |
+| Find / Replace                | Ctrl+F / Ctrl+H                |
+| Go To Line                    | Ctrl+G                         |
+| Insert Date/Time              | F5                             |
+| Word Wrap                     | Alt+O, W                       |
+| Font                          | Alt+O, F                       |
+| Search Google                 | Ctrl+E                         |
+| Switch Layout (English↔Tamil) | Double Ctrl or Ctrl+, / Ctrl+. |
+| Zoom In / Out                 | Ctrl+Plus / Ctrl+Minus         |
 
-- Window size and maximized state
-- Font family and size
-- Word wrap preference
-- Auto-save interval
-- Default directory for file dialogs
-- Last opened file (auto-loads on startup)
+---
 
-## Qt Backend
+## Configuration and File Structure
 
-The application tries to use **PySide6** first (Qt6). If PySide6 is not available, it falls back to **PyQt5** (Qt5).
-
-To force a specific backend:
-- **Use PySide6**: Install only PySide6
-- **Use PyQt5**: Uninstall PySide6 and install PyQt5
-
-```powershell
-# To switch to PyQt5:
-pip uninstall PySide6
-pip install PyQt5
-```
-
-## Troubleshooting
-
-### Import Error: cannot import name 'QAction' from 'PySide6.QtWidgets'
-
-This occurs with PySide6 6.x because `QAction` and `QShortcut` moved from `QtWidgets` to `QtGui` in Qt6.
-
-**Solution**: The current version of `neight.py` has been fixed to handle this correctly. Make sure you're using the latest version.
-
-### Module Not Found: PyQt5
-
-If you see this error and want to use PyQt5 instead of PySide6:
-
-```powershell
-pip install PyQt5
-```
-
-### Python Version Issues
-
-Neight uses modern Python type hints (e.g., `tuple[str, ...]`). Ensure you're using **Python 3.9 or later**.
-
-Check your Python version:
-
-```powershell
-python --version
-```
-
-## Project Structure
+When you run Neight, it automatically creates:
 
 ```
-neight/
-├── neight.py          # Main application file
-├── neight.ico         # Application icon
-├── icon.py            # Icon generation script
-├── Neight.spec        # PyInstaller build specification
-├── buildme.bat        # Windows batch script for building
-├── requirements.txt   # Python dependencies
-├── settings.json      # User settings (auto-generated)
-├── README.md          # This file
-└── .venv/             # Virtual environment (if created)
+settings.json
 ```
+
+in the same directory as the executable.
+
+This file remembers:
+
+* Last opened file
+* Font family and size
+* Word wrap setting
+* Window size
+* Auto-save interval
+* Last used directory
+
+---
+
+## The Name
+
+The name **Neight** came from **NotepadEnhanced → NotepadE  → N8 → Neight**.
+It’s short, memorable, and unique.
+
+The icon was AI-generated from a Python script written by GPT-5.
+The green tones were chosen to match the colour scheme from my blog [venkatarangan.com](https://venkatarangan.com).
+
+---
+
+## Future Ideas
+
+* Basic **Markdown** support
+* Export to **DOCX** and **PDF**
+* A proper **Windows Installer**
+* Optional **AI features** for translation, rewriting, or lookup
+* Integrate Tamil dictionary (like Tamil Nadu Government’s Sorkuvai)
+
+---
 
 ## License
 
-Generated by ChatGPT for venkatarangan.com.
+This project is licensed under the **MIT License**.
+See the LICENSE file for details.
 
-## Credits
+---
 
-- Built with Python and Qt (PySide6/PyQt5)
-- Designed for simple, fast UTF-8 text editing with Tamil language support
+## Acknowledgement of AI
+
+This project was entirely built using **AI tools**:
+**GPT-5 (ChatGPT)**, **GitHub Copilot**, and **Claude Sonnet 4.5 (Preview)**, with **GPT-5 Codex (Preview)** for improvements.
+I didn’t manually write the code, except for text and configuration tweaks.
+It’s a working demonstration of what’s now possible with AI-driven coding.
+
+---
+
+## Disclaimer
+
+This is a personal, experimental project built for learning and daily use.
+It’s not intended for commercial purposes.
+All third-party trademarks and copyrights belong to their respective owners.
+Use at your own discretion — no guarantees or warranties are provided.
+
