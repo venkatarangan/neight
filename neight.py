@@ -8,10 +8,15 @@ import re
 import time
 import webbrowser
 import ctypes
+import urllib.request
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote_plus
+
+# Version information
+VERSION = "2025.001"
 
 
 try:
@@ -453,6 +458,7 @@ class Notepad(QMainWindow):
 
         self._load_preferences()
         self._update_status_bar()
+        self._update_export_menu_visibility()
 
     # --- UI setup ---
     def _create_actions(self):
@@ -468,6 +474,9 @@ class Notepad(QMainWindow):
 
         self.save_as_act = QAction("Save &As…", self)
         self.save_as_act.setShortcut(QKeySequence("Ctrl+Shift+S"))
+
+        self.export_text_pdf_act = QAction("Export Text to PDF…", self)
+        self.export_md_pdf_act = QAction("Export Markdown to PDF…", self)
 
         self.exit_act = QAction("E&xit", self)
         self.exit_act.setShortcut(QKeySequence.Quit)
@@ -512,6 +521,54 @@ class Notepad(QMainWindow):
         self.search_web_act = QAction("Search with Google", self)
         self.search_web_act.setShortcut(QKeySequence("Ctrl+E"))
 
+        # Insert - Markdown heading actions
+        self.insert_h1_act = QAction("Heading 1", self)
+        self.insert_h1_act.setShortcut(QKeySequence("Ctrl+1"))
+        
+        self.insert_h2_act = QAction("Heading 2", self)
+        self.insert_h2_act.setShortcut(QKeySequence("Ctrl+2"))
+        
+        self.insert_h3_act = QAction("Heading 3", self)
+        self.insert_h3_act.setShortcut(QKeySequence("Ctrl+3"))
+        
+        self.insert_h4_act = QAction("Heading 4", self)
+        self.insert_h4_act.setShortcut(QKeySequence("Ctrl+4"))
+        
+        self.insert_h5_act = QAction("Heading 5", self)
+        self.insert_h5_act.setShortcut(QKeySequence("Ctrl+5"))
+        
+        self.insert_h6_act = QAction("Heading 6", self)
+        self.insert_h6_act.setShortcut(QKeySequence("Ctrl+6"))
+        
+        self.insert_ul_act = QAction("Unordered List", self)
+        self.insert_ol_act = QAction("Ordered List", self)
+        self.insert_checkbox_act = QAction("Checkbox", self)
+        
+        # Insert - Text formatting actions
+        self.insert_emphasis_act = QAction("Emphasis (Italic)", self)
+        self.insert_emphasis_act.setShortcut(QKeySequence("Ctrl+I"))
+        
+        self.insert_strong_act = QAction("Strong (Bold)", self)
+        self.insert_strong_act.setShortcut(QKeySequence("Ctrl+B"))
+        
+        self.insert_strong_emphasis_act = QAction("Strong Emphasis (Bold Italic)", self)
+        self.insert_strong_emphasis_act.setShortcut(QKeySequence("Ctrl+Shift+B"))
+        
+        self.insert_highlight_act = QAction("Highlight", self)
+        self.insert_strikethrough_act = QAction("Strikethrough", self)
+        self.insert_quote_act = QAction("Quote", self)
+        self.insert_code_block_act = QAction("Code Block", self)
+        self.insert_code_block_act.setShortcut(QKeySequence("Ctrl+Shift+K"))
+        
+        # Insert - Special insertions
+        self.insert_image_act = QAction("Image...", self)
+        self.insert_hyperlink_act = QAction("Hyperlink...", self)
+        self.insert_hyperlink_act.setShortcut(QKeySequence("Ctrl+K"))
+        
+        # Insert - Other markdown features
+        self.insert_hr_act = QAction("Horizontal Rule", self)
+        self.insert_table_act = QAction("Table Template", self)
+
         # Format
         self.wrap_act = QAction("Word Wrap", self, checkable=True)
         self.wrap_act.setChecked(True)
@@ -538,7 +595,13 @@ class Notepad(QMainWindow):
         file_menu.addAction(self.save_act)
         file_menu.addAction(self.save_as_act)
         file_menu.addSeparator()
+        file_menu.addAction(self.export_text_pdf_act)
+        file_menu.addAction(self.export_md_pdf_act)
+        file_menu.addSeparator()
         file_menu.addAction(self.exit_act)
+        
+        # Store file menu for later updates
+        self.file_menu = file_menu
 
         edit_menu = menubar.addMenu("&Edit")
         edit_menu.addAction(self.undo_act)
@@ -558,6 +621,42 @@ class Notepad(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.select_all_act)
         edit_menu.addAction(self.time_date_act)
+
+        # Insert menu (Alt+N is handled by the & in "I&nsert")
+        insert_menu = menubar.addMenu("I&nsert")
+        
+        # Headings submenu
+        headings_menu = insert_menu.addMenu("Heading")
+        headings_menu.addAction(self.insert_h1_act)
+        headings_menu.addAction(self.insert_h2_act)
+        headings_menu.addAction(self.insert_h3_act)
+        headings_menu.addAction(self.insert_h4_act)
+        headings_menu.addAction(self.insert_h5_act)
+        headings_menu.addAction(self.insert_h6_act)
+        
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.insert_ul_act)
+        insert_menu.addAction(self.insert_ol_act)
+        insert_menu.addAction(self.insert_checkbox_act)
+        
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.insert_emphasis_act)
+        insert_menu.addAction(self.insert_strong_act)
+        insert_menu.addAction(self.insert_strong_emphasis_act)
+        insert_menu.addAction(self.insert_highlight_act)
+        insert_menu.addAction(self.insert_strikethrough_act)
+        
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.insert_quote_act)
+        insert_menu.addAction(self.insert_code_block_act)
+        
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.insert_image_act)
+        insert_menu.addAction(self.insert_hyperlink_act)
+        
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.insert_hr_act)
+        insert_menu.addAction(self.insert_table_act)
 
         format_menu = menubar.addMenu("F&ormat")
         format_menu.addAction(self.wrap_act)
@@ -579,6 +678,8 @@ class Notepad(QMainWindow):
         self.open_act.triggered.connect(self.open_file)
         self.save_act.triggered.connect(self.save_file)
         self.save_as_act.triggered.connect(self.save_file_as)
+        self.export_text_pdf_act.triggered.connect(self._export_text_to_pdf)
+        self.export_md_pdf_act.triggered.connect(self._export_markdown_to_pdf)
         self.exit_act.triggered.connect(self.close)
 
         # Edit
@@ -608,6 +709,36 @@ class Notepad(QMainWindow):
 
         # Time/Date
         self.time_date_act.triggered.connect(self.insert_time_date)
+
+        # Insert - Headings
+        self.insert_h1_act.triggered.connect(lambda: self._insert_heading(1))
+        self.insert_h2_act.triggered.connect(lambda: self._insert_heading(2))
+        self.insert_h3_act.triggered.connect(lambda: self._insert_heading(3))
+        self.insert_h4_act.triggered.connect(lambda: self._insert_heading(4))
+        self.insert_h5_act.triggered.connect(lambda: self._insert_heading(5))
+        self.insert_h6_act.triggered.connect(lambda: self._insert_heading(6))
+        
+        # Insert - Lists
+        self.insert_ul_act.triggered.connect(self._insert_unordered_list)
+        self.insert_ol_act.triggered.connect(self._insert_ordered_list)
+        self.insert_checkbox_act.triggered.connect(self._insert_checkbox)
+        
+        # Insert - Text formatting
+        self.insert_emphasis_act.triggered.connect(self._insert_emphasis)
+        self.insert_strong_act.triggered.connect(self._insert_strong)
+        self.insert_strong_emphasis_act.triggered.connect(self._insert_strong_emphasis)
+        self.insert_highlight_act.triggered.connect(self._insert_highlight)
+        self.insert_strikethrough_act.triggered.connect(self._insert_strikethrough)
+        self.insert_quote_act.triggered.connect(self._insert_quote)
+        self.insert_code_block_act.triggered.connect(self._insert_code_block)
+        
+        # Insert - Special
+        self.insert_image_act.triggered.connect(self._insert_image)
+        self.insert_hyperlink_act.triggered.connect(self._insert_hyperlink)
+        
+        # Insert - Other
+        self.insert_hr_act.triggered.connect(self._insert_horizontal_rule)
+        self.insert_table_act.triggered.connect(self._insert_table)
 
         # Help
         self.about_act.triggered.connect(self.show_about)
@@ -709,6 +840,19 @@ class Notepad(QMainWindow):
         """Reset the Ctrl press counter."""
         self._ctrl_press_time = 0
 
+    def _update_export_menu_visibility(self):
+        """Update export menu item visibility based on current file extension."""
+        if self.current_path:
+            ext = Path(self.current_path).suffix.lower()
+            # Show "Export Text to PDF" only for .txt files
+            self.export_text_pdf_act.setVisible(ext == '.txt' or ext == '')
+            # Show "Export Markdown to PDF" only for .md files
+            self.export_md_pdf_act.setVisible(ext in ['.md', '.markdown'])
+        else:
+            # No file open - show both options
+            self.export_text_pdf_act.setVisible(True)
+            self.export_md_pdf_act.setVisible(True)
+
     # --- Core features ---
     def new_file(self):
         if not self._maybe_save_changes():
@@ -718,6 +862,7 @@ class Notepad(QMainWindow):
         self.editor.document().setModified(False)
         self._update_title()
         self._update_status_bar()
+        self._update_export_menu_visibility()
         self.status.showMessage("New document", 2000)
 
     def open_file(self):
@@ -727,7 +872,7 @@ class Notepad(QMainWindow):
             self,
             "Open Text File",
             str(self.default_directory),
-            "Text Files (*.txt);;All Files (*)",
+            "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
         if path:
             try:
@@ -739,6 +884,7 @@ class Notepad(QMainWindow):
                 self._update_default_directory(Path(path).parent)
                 self._update_title()
                 self._update_status_bar()
+                self._update_export_menu_visibility()
                 self.status.showMessage(f"Opened: {path}", 2000)
             except UnicodeDecodeError:
                 QMessageBox.critical(self, "Encoding Error", "File is not valid UTF-8.")
@@ -756,12 +902,13 @@ class Notepad(QMainWindow):
             self,
             "Save File As",
             initial_path,
-            "Text Files (*.txt);;All Files (*)",
+            "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
         if not path:
             return False
         self.current_path = path
         self._update_default_directory(Path(path).parent)
+        self._update_export_menu_visibility()
         return self._write_to_path(path)
 
     def _write_to_path(self, path: str) -> bool:
@@ -896,11 +1043,705 @@ class Notepad(QMainWindow):
         now = datetime.now().strftime("%H:%M %d-%m-%Y")  # similar to Notepad style
         self.editor.insertPlainText(now)
 
+    # --- Markdown insertion methods ---
+    def _remove_line_start_markdown(self, cursor):
+        """Remove existing markdown tags at the start of the line."""
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        line_text = cursor.selectedText()
+        
+        # Patterns to remove: headings (#), lists (-, 1.), checkboxes (- [ ])
+        import re
+        # Remove heading markers (1-6 # symbols followed by space)
+        cleaned = re.sub(r'^#{1,6}\s+', '', line_text)
+        # Remove unordered list marker (- followed by space)
+        cleaned = re.sub(r'^-\s+', '', cleaned)
+        # Remove ordered list marker (number followed by . and space)
+        cleaned = re.sub(r'^\d+\.\s+', '', cleaned)
+        # Remove checkbox marker (- [ ] or - [x])
+        cleaned = re.sub(r'^-\s+\[[xX\s]\]\s+', '', cleaned)
+        
+        return cleaned
+    
+    def _insert_heading(self, level: int):
+        """Insert markdown heading at the start of current line, removing existing tags."""
+        cursor = self.editor.textCursor()
+        cleaned_text = self._remove_line_start_markdown(cursor)
+        
+        # Replace entire line with new heading
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        heading_prefix = "#" * level + " "
+        cursor.insertText(heading_prefix + cleaned_text)
+        self.editor.setTextCursor(cursor)
+
+    def _insert_unordered_list(self):
+        """Insert unordered list marker at the start of current line, removing existing tags."""
+        cursor = self.editor.textCursor()
+        cleaned_text = self._remove_line_start_markdown(cursor)
+        
+        # Replace entire line with unordered list
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        cursor.insertText("- " + cleaned_text)
+        self.editor.setTextCursor(cursor)
+
+    def _insert_ordered_list(self):
+        """Insert ordered list marker at the start of current line, removing existing tags."""
+        cursor = self.editor.textCursor()
+        cleaned_text = self._remove_line_start_markdown(cursor)
+        
+        # Replace entire line with ordered list
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        cursor.insertText("1. " + cleaned_text)
+        self.editor.setTextCursor(cursor)
+
+    def _insert_checkbox(self):
+        """Insert checkbox at the start of current line, removing existing tags."""
+        cursor = self.editor.textCursor()
+        cleaned_text = self._remove_line_start_markdown(cursor)
+        
+        # Replace entire line with checkbox
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        cursor.insertText("- [ ] " + cleaned_text)
+        self.editor.setTextCursor(cursor)
+
+    def _remove_text_formatting(self, text: str) -> str:
+        """Remove existing markdown formatting from text."""
+        import re
+        # Remove in order from most specific to least specific
+        # Remove triple asterisks (strong emphasis)
+        cleaned = re.sub(r'\*\*\*(.*?)\*\*\*', r'\1', text)
+        # Remove double asterisks (strong/bold)
+        cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)
+        # Remove single asterisks (emphasis/italic)
+        cleaned = re.sub(r'\*(.*?)\*', r'\1', cleaned)
+        # Remove double equals (highlight)
+        cleaned = re.sub(r'==(.*?)==', r'\1', cleaned)
+        # Remove double tildes (strikethrough)
+        cleaned = re.sub(r'~~(.*?)~~', r'\1', cleaned)
+        # Remove triple backticks (code blocks)
+        cleaned = re.sub(r'```(.*?)```', r'\1', cleaned, flags=re.DOTALL)
+        # Remove single backticks (inline code)
+        cleaned = re.sub(r'`(.*?)`', r'\1', cleaned)
+        return cleaned
+    
+    def _wrap_selection(self, prefix: str, suffix: str = None):
+        """Wrap selected text with markdown formatting, removing existing formatting."""
+        if suffix is None:
+            suffix = prefix
+        
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText()
+            # Remove existing formatting before applying new one
+            cleaned_text = self._remove_text_formatting(selected_text)
+            wrapped_text = f"{prefix}{cleaned_text}{suffix}"
+            cursor.insertText(wrapped_text)
+        else:
+            # No selection - insert markers and place cursor between them
+            cursor.insertText(f"{prefix}{suffix}")
+            # Move cursor back by suffix length
+            for _ in range(len(suffix)):
+                cursor.movePosition(QTextCursor.Left)
+            self.editor.setTextCursor(cursor)
+
+    def _insert_emphasis(self):
+        """Insert emphasis (italic) markdown."""
+        self._wrap_selection("*")
+
+    def _insert_strong(self):
+        """Insert strong (bold) markdown."""
+        self._wrap_selection("**")
+
+    def _insert_strong_emphasis(self):
+        """Insert strong emphasis (bold italic) markdown."""
+        self._wrap_selection("***")
+
+    def _insert_highlight(self):
+        """Insert highlight markdown."""
+        self._wrap_selection("==")
+
+    def _insert_strikethrough(self):
+        """Insert strikethrough markdown."""
+        self._wrap_selection("~~")
+
+    def _insert_quote(self):
+        """Insert quote markdown at the start of current line or selected lines."""
+        cursor = self.editor.textCursor()
+        
+        if cursor.hasSelection():
+            # Handle multiple lines
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            
+            cursor.setPosition(start)
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            start_block = cursor.blockNumber()
+            
+            cursor.setPosition(end)
+            end_block = cursor.blockNumber()
+            
+            cursor.setPosition(start)
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            cursor.beginEditBlock()
+            
+            for _ in range(end_block - start_block + 1):
+                cursor.insertText("> ")
+                cursor.movePosition(QTextCursor.NextBlock)
+            
+            cursor.endEditBlock()
+        else:
+            # Single line
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            cursor.insertText("> ")
+        
+        self.editor.setTextCursor(cursor)
+
+    def _insert_code_block(self):
+        """Insert code block markdown."""
+        cursor = self.editor.textCursor()
+        
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText()
+            # Replace paragraph separator with newline
+            selected_text = selected_text.replace("\u2029", "\n")
+            code_block = f"```\n{selected_text}\n```"
+            cursor.insertText(code_block)
+        else:
+            cursor.insertText("```\n\n```")
+            # Move cursor to the middle line
+            cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor, 4)
+            self.editor.setTextCursor(cursor)
+
+    def _validate_url(self, url: str) -> tuple[bool, str]:
+        """Validate URL by attempting to connect to it.
+        
+        Returns:
+            tuple: (is_valid, normalized_url or error_message)
+        """
+        # Normalize URL
+        url = url.strip()
+        if not url:
+            return False, "URL cannot be empty"
+        
+        # Add https:// if no scheme specified
+        if not url.startswith(("http://", "https://", "ftp://")):
+            url = "https://" + url
+        
+        # Basic URL validation
+        try:
+            # Try to parse the URL
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                return False, "Invalid URL format"
+            
+            # Try to connect
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200 or response.status == 301 or response.status == 302:
+                        return True, url
+                    else:
+                        return False, f"Server returned status code: {response.status}"
+            except urllib.error.HTTPError as e:
+                if e.code in (200, 301, 302, 403):  # 403 might still be a valid URL
+                    return True, url
+                return False, f"HTTP Error: {e.code} - {e.reason}"
+            except urllib.error.URLError as e:
+                return False, f"Connection failed: {e.reason}"
+            except Exception as e:
+                return False, f"Connection error: {str(e)}"
+        except Exception as e:
+            return False, f"Invalid URL: {str(e)}"
+
+    def _insert_image(self):
+        """Insert image with URL validation."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QPushButton, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Insert Image")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout()
+        
+        # URL input
+        url_label = QLabel("Image URL:", dialog)
+        url_input = QLineEdit(dialog)
+        url_input.setPlaceholderText("https://example.com/image.png")
+        
+        # Alt text input
+        alt_label = QLabel("Image description (alt text):", dialog)
+        alt_input = QLineEdit(dialog)
+        alt_input.setPlaceholderText("Image description")
+        
+        # Status label
+        status_label = QLabel("", dialog)
+        status_label.setStyleSheet("color: red;")
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        insert_btn = QPushButton("Insert", dialog)
+        cancel_btn = QPushButton("Cancel", dialog)
+        validate_btn = QPushButton("Validate URL", dialog)
+        
+        button_layout.addWidget(validate_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(insert_btn)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addWidget(url_label)
+        layout.addWidget(url_input)
+        layout.addWidget(alt_label)
+        layout.addWidget(alt_input)
+        layout.addWidget(status_label)
+        layout.addLayout(button_layout)
+        
+        dialog.setLayout(layout)
+        
+        validated_url = [None]  # Use list to store in closure
+        
+        def validate():
+            url = url_input.text().strip()
+            if not url:
+                status_label.setText("Please enter a URL")
+                status_label.setStyleSheet("color: red;")
+                return
+            
+            status_label.setText("Validating...")
+            status_label.setStyleSheet("color: blue;")
+            QApplication.processEvents()
+            
+            is_valid, result = self._validate_url(url)
+            if is_valid:
+                validated_url[0] = result
+                status_label.setText("✓ URL is valid")
+                status_label.setStyleSheet("color: green;")
+                insert_btn.setEnabled(True)
+            else:
+                validated_url[0] = None
+                status_label.setText(f"✗ {result}")
+                status_label.setStyleSheet("color: red;")
+        
+        def insert():
+            url = url_input.text().strip()
+            alt = alt_input.text().strip()
+            
+            if not url:
+                status_label.setText("Please enter a URL")
+                status_label.setStyleSheet("color: red;")
+                return
+            
+            # If not validated yet, validate now
+            if validated_url[0] is None:
+                is_valid, result = self._validate_url(url)
+                if is_valid:
+                    validated_url[0] = result
+                else:
+                    reply = QMessageBox.question(
+                        dialog,
+                        "URL Validation Failed",
+                        f"{result}\n\nDo you want to insert anyway?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply == QMessageBox.No:
+                        return
+                    validated_url[0] = url if not url.startswith(("http://", "https://")) else url
+                    if not validated_url[0].startswith(("http://", "https://")):
+                        validated_url[0] = "https://" + validated_url[0]
+            
+            # Insert markdown
+            markdown = f"![{alt}]({validated_url[0]})"
+            self.editor.insertPlainText(markdown)
+            dialog.accept()
+        
+        validate_btn.clicked.connect(validate)
+        insert_btn.clicked.connect(insert)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        dialog.exec()
+
+    def _insert_hyperlink(self):
+        """Insert hyperlink with URL validation."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QPushButton, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Insert Hyperlink")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout()
+        
+        # Text input
+        text_label = QLabel("Link text:", dialog)
+        text_input = QLineEdit(dialog)
+        text_input.setPlaceholderText("Click here")
+        
+        # URL input
+        url_label = QLabel("URL:", dialog)
+        url_input = QLineEdit(dialog)
+        url_input.setPlaceholderText("https://example.com")
+        
+        # Pre-fill with selection if any
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            text_input.setText(cursor.selectedText())
+        
+        # Status label
+        status_label = QLabel("", dialog)
+        status_label.setStyleSheet("color: red;")
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        insert_btn = QPushButton("Insert", dialog)
+        cancel_btn = QPushButton("Cancel", dialog)
+        validate_btn = QPushButton("Validate URL", dialog)
+        
+        button_layout.addWidget(validate_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(insert_btn)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addWidget(text_label)
+        layout.addWidget(text_input)
+        layout.addWidget(url_label)
+        layout.addWidget(url_input)
+        layout.addWidget(status_label)
+        layout.addLayout(button_layout)
+        
+        dialog.setLayout(layout)
+        
+        validated_url = [None]  # Use list to store in closure
+        
+        def validate():
+            url = url_input.text().strip()
+            if not url:
+                status_label.setText("Please enter a URL")
+                status_label.setStyleSheet("color: red;")
+                return
+            
+            status_label.setText("Validating...")
+            status_label.setStyleSheet("color: blue;")
+            QApplication.processEvents()
+            
+            is_valid, result = self._validate_url(url)
+            if is_valid:
+                validated_url[0] = result
+                status_label.setText("✓ URL is valid")
+                status_label.setStyleSheet("color: green;")
+                insert_btn.setEnabled(True)
+            else:
+                validated_url[0] = None
+                status_label.setText(f"✗ {result}")
+                status_label.setStyleSheet("color: red;")
+        
+        def insert():
+            text = text_input.text().strip()
+            url = url_input.text().strip()
+            
+            if not url:
+                status_label.setText("Please enter a URL")
+                status_label.setStyleSheet("color: red;")
+                return
+            
+            if not text:
+                text = url
+            
+            # If not validated yet, validate now
+            if validated_url[0] is None:
+                is_valid, result = self._validate_url(url)
+                if is_valid:
+                    validated_url[0] = result
+                else:
+                    reply = QMessageBox.question(
+                        dialog,
+                        "URL Validation Failed",
+                        f"{result}\n\nDo you want to insert anyway?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply == QMessageBox.No:
+                        return
+                    validated_url[0] = url if url.startswith(("http://", "https://")) else ("https://" + url)
+            
+            # Insert markdown - replace selection or insert at cursor
+            markdown = f"[{text}]({validated_url[0]})"
+            cursor = self.editor.textCursor()
+            cursor.insertText(markdown)
+            dialog.accept()
+        
+        validate_btn.clicked.connect(validate)
+        insert_btn.clicked.connect(insert)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        dialog.exec()
+
+    def _insert_horizontal_rule(self):
+        """Insert horizontal rule markdown."""
+        cursor = self.editor.textCursor()
+        cursor.insertText("\n---\n")
+
+    def _insert_table(self):
+        """Insert a basic markdown table template."""
+        table = """| Header 1 | Header 2 | Header 3 |
+| -------- | -------- | -------- |
+| Cell 1   | Cell 2   | Cell 3   |
+| Cell 4   | Cell 5   | Cell 6   |
+"""
+        cursor = self.editor.textCursor()
+        cursor.insertText(table)
+
+    # --- PDF Export methods ---
+    def _export_text_to_pdf(self):
+        """Export plain text file to PDF with filename header and page numbers."""
+        # Check if current file is .txt
+        if self.current_path:
+            ext = Path(self.current_path).suffix.lower()
+            if ext not in ['.txt', '']:
+                QMessageBox.information(
+                    self,
+                    "Export Text to PDF",
+                    "This feature is for plain text files (.txt).\nFor Markdown files (.md), use 'Export Markdown to PDF'."
+                )
+                return
+        
+        # Get save location
+        default_name = "Untitled.pdf"
+        if self.current_path:
+            default_name = Path(self.current_path).stem + ".pdf"
+        
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Text to PDF",
+            str(self.default_directory / default_name),
+            "PDF Files (*.pdf)"
+        )
+        
+        if not save_path:
+            return
+        
+        try:
+            from PySide6.QtPrintSupport import QPrinter
+            from PySide6.QtGui import QPageSize, QTextDocument, QTextCursor as QTC
+            from PySide6.QtCore import QSizeF, QMarginsF
+            
+            # Create printer
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(save_path)
+            printer.setPageSize(QPageSize(QPageSize.A4))
+            # Set margins: left, top, right, bottom in millimeters
+            margins = QMarginsF(15, 20, 15, 20)
+            printer.setPageMargins(margins, QPageSize.Unit.Millimeter)
+            
+            # Create document
+            doc = QTextDocument()
+            doc.setDefaultFont(self.editor.font())
+            
+            # Build content with header
+            content = ""
+            if self.current_path:
+                filename = Path(self.current_path).name
+                content = f"{filename}\n{'─' * 80}\n\n"
+            
+            content += self.editor.toPlainText()
+            doc.setPlainText(content)
+            
+            # Print to PDF
+            doc.print(printer)
+            
+            self.status.showMessage(f"Exported to: {save_path}", 3000)
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Text file exported to:\n{save_path}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Could not export to PDF:\n{str(e)}"
+            )
+
+    def _export_markdown_to_pdf(self):
+        """Export markdown file to PDF with proper rendering."""
+        # Check if current file is .md
+        if self.current_path:
+            ext = Path(self.current_path).suffix.lower()
+            if ext not in ['.md', '.markdown']:
+                QMessageBox.information(
+                    self,
+                    "Export Markdown to PDF",
+                    "This feature is for Markdown files (.md).\nFor plain text files (.txt), use 'Export Text to PDF'."
+                )
+                return
+        
+        # Get save location
+        default_name = "Untitled.pdf"
+        if self.current_path:
+            default_name = Path(self.current_path).stem + ".pdf"
+        
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Markdown to PDF",
+            str(self.default_directory / default_name),
+            "PDF Files (*.pdf)"
+        )
+        
+        if not save_path:
+            return
+        
+        try:
+            # Try to import markdown library
+            try:
+                import markdown
+                has_markdown = True
+            except ImportError:
+                has_markdown = False
+            
+            from PySide6.QtPrintSupport import QPrinter
+            from PySide6.QtGui import QPageSize, QTextDocument
+            from PySide6.QtCore import QMarginsF
+            
+            # Create printer
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(save_path)
+            printer.setPageSize(QPageSize(QPageSize.A4))
+            # Set margins: left, top, right, bottom in millimeters
+            margins = QMarginsF(15, 20, 15, 20)
+            printer.setPageMargins(margins, QPageSize.Unit.Millimeter)
+            
+            # Create document
+            doc = QTextDocument()
+            doc.setDefaultFont(self.editor.font())
+            
+            markdown_text = self.editor.toPlainText()
+            
+            if has_markdown:
+                # Convert markdown to HTML
+                html = markdown.markdown(
+                    markdown_text,
+                    extensions=['extra', 'codehilite', 'tables', 'toc']
+                )
+                
+                # Add basic CSS styling
+                styled_html = f"""
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: {self.editor.font().family()}; font-size: {self.editor.font().pointSize()}pt; }}
+                        h1 {{ font-size: 2em; margin-top: 0.67em; margin-bottom: 0.67em; }}
+                        h2 {{ font-size: 1.5em; margin-top: 0.83em; margin-bottom: 0.83em; }}
+                        h3 {{ font-size: 1.17em; margin-top: 1em; margin-bottom: 1em; }}
+                        code {{ background-color: #f4f4f4; padding: 2px 4px; font-family: monospace; }}
+                        pre {{ background-color: #f4f4f4; padding: 10px; overflow-x: auto; }}
+                        blockquote {{ border-left: 3px solid #ccc; margin-left: 0; padding-left: 10px; color: #666; }}
+                        table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
+                        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                        th {{ background-color: #f2f2f2; }}
+                    </style>
+                </head>
+                <body>
+                    {html}
+                </body>
+                </html>
+                """
+                doc.setHtml(styled_html)
+            else:
+                # Fallback: simple text with basic markdown rendering
+                # This is a simplified version if markdown library is not available
+                lines = markdown_text.split('\n')
+                html_lines = []
+                
+                for line in lines:
+                    # Headers
+                    if line.startswith('######'):
+                        html_lines.append(f'<h6>{line[6:].strip()}</h6>')
+                    elif line.startswith('#####'):
+                        html_lines.append(f'<h5>{line[5:].strip()}</h5>')
+                    elif line.startswith('####'):
+                        html_lines.append(f'<h4>{line[4:].strip()}</h4>')
+                    elif line.startswith('###'):
+                        html_lines.append(f'<h3>{line[3:].strip()}</h3>')
+                    elif line.startswith('##'):
+                        html_lines.append(f'<h2>{line[2:].strip()}</h2>')
+                    elif line.startswith('#'):
+                        html_lines.append(f'<h1>{line[1:].strip()}</h1>')
+                    # Horizontal rule
+                    elif line.strip() in ['---', '***', '___']:
+                        html_lines.append('<hr>')
+                    # Lists
+                    elif line.strip().startswith('- '):
+                        html_lines.append(f'<li>{line.strip()[2:]}</li>')
+                    # Bold italic
+                    elif '***' in line:
+                        line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', line)
+                        html_lines.append(f'<p>{line}</p>')
+                    # Bold
+                    elif '**' in line:
+                        line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
+                        html_lines.append(f'<p>{line}</p>')
+                    # Italic
+                    elif '*' in line:
+                        line = re.sub(r'\*(.*?)\*', r'<em>\1</em>', line)
+                        html_lines.append(f'<p>{line}</p>')
+                    else:
+                        if line.strip():
+                            html_lines.append(f'<p>{line}</p>')
+                        else:
+                            html_lines.append('<br>')
+                
+                basic_html = f"""
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: {self.editor.font().family()}; font-size: {self.editor.font().pointSize()}pt; }}
+                        h1 {{ font-size: 2em; }}
+                        h2 {{ font-size: 1.5em; }}
+                        h3 {{ font-size: 1.17em; }}
+                    </style>
+                </head>
+                <body>
+                    {''.join(html_lines)}
+                </body>
+                </html>
+                """
+                doc.setHtml(basic_html)
+            
+            # Print to PDF
+            doc.print(printer)
+            
+            self.status.showMessage(f"Exported to: {save_path}", 3000)
+            
+            msg = f"Markdown file exported to:\n{save_path}"
+            if not has_markdown:
+                msg += "\n\nNote: For better markdown rendering, install the 'markdown' package:\npip install markdown"
+            
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                msg
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Could not export to PDF:\n{str(e)}"
+            )
+
     def show_about(self):
         QMessageBox.information(
             self,
             "About",
-            f"Neight (Using {QT_LIB})\nA lightweight UTF-8 text editor with advanced features, word count, line numbers and more.\nGenerated by Github Copilot for venkatarangan.com."
+            f"Neight v{VERSION} (Using {QT_LIB})\nA lightweight UTF-8 text editor with advanced features, word count, line numbers and more.\nGenerated by Github Copilot for venkatarangan.com."
         )
 
     # --- Preferences ---

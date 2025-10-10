@@ -3,5 +3,8 @@
 # Qt bindings (install one of these):
 PySide6>=6.0.0
 
+# Markdown rendering for PDF export
+markdown>=3.0.0
+
 # Optional: for building standalone executables
 pyinstaller>=5.0.0
