@@ -89,6 +89,7 @@ else:
 # ---------------------
 class SettingsManager:
     def __init__(self, filename: str = "settings.json", legacy_files: tuple[str, ...] = ("config.json",)):
+        # Determine the executable/script directory
         try:
             if getattr(sys, "frozen", False):  # PyInstaller executable
                 base_dir = Path(sys.executable).resolve().parent
@@ -96,8 +97,53 @@ class SettingsManager:
                 base_dir = Path(__file__).resolve().parent
         except Exception:
             base_dir = Path.cwd()
-        self.path = base_dir / filename
+        
+        # Primary path (same folder as executable/script)
+        self.primary_path = base_dir / filename
+        
+        # Fallback path (AppData\Local\Neight)
+        if sys.platform == "win32":
+            appdata = Path.home() / "AppData" / "Local" / "Neight"
+        else:
+            # For non-Windows systems, use appropriate config directory
+            appdata = Path.home() / ".config" / "Neight"
+        self.fallback_path = appdata / filename
+        
+        # Legacy paths for migration
         self.legacy_paths = tuple((base_dir / legacy) for legacy in legacy_files)
+        
+        # Determine which path to use
+        self.path = self._determine_active_path()
+
+    def _determine_active_path(self) -> Path:
+        """Determine which path to use for settings (primary or fallback)."""
+        # If primary path exists and is readable, use it
+        if self.primary_path.exists():
+            try:
+                # Test if we can read it
+                self.primary_path.read_text(encoding="utf-8")
+                return self.primary_path
+            except Exception:
+                pass
+        
+        # If fallback path exists, use it
+        if self.fallback_path.exists():
+            return self.fallback_path
+        
+        # Neither exists - try to determine which one we can write to
+        # Try primary first
+        try:
+            self.primary_path.parent.mkdir(parents=True, exist_ok=True)
+            # Test write permission by creating a temporary file
+            test_file = self.primary_path.parent / ".write_test"
+            test_file.write_text("test", encoding="utf-8")
+            test_file.unlink()
+            return self.primary_path
+        except Exception:
+            pass
+        
+        # Fall back to AppData
+        return self.fallback_path
 
     def _load_file(self, path: Path) -> Optional[dict]:
         try:
@@ -110,10 +156,20 @@ class SettingsManager:
         return None
 
     def load(self) -> dict:
+        # Try to load from the active path
         data = self._load_file(self.path)
         if data is not None:
             return data
 
+        # If active path is fallback, also check primary path
+        if self.path == self.fallback_path:
+            primary_data = self._load_file(self.primary_path)
+            if primary_data is not None:
+                # Migrate to fallback location
+                self.save(primary_data)
+                return primary_data
+        
+        # Check legacy paths for migration
         for legacy_path in self.legacy_paths:
             legacy_data = self._load_file(legacy_path)
             if legacy_data is not None:
@@ -130,8 +186,15 @@ class SettingsManager:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass  # Non-fatal
+        except Exception as e:
+            # If save fails and we're using primary path, try fallback
+            if self.path == self.primary_path:
+                try:
+                    self.path = self.fallback_path
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass  # Non-fatal
 
 
 # -------------------------------------
@@ -761,7 +824,7 @@ class Notepad(QMainWindow):
         if m.isNull():
             # Wrap search from top
             start = self.editor.textCursor()
-            start.movePosition(start.Start)
+            start.movePosition(QTextCursor.Start)
             m = doc.find(text, start)
         if not m.isNull():
             self.editor.setTextCursor(m)
@@ -797,7 +860,7 @@ class Notepad(QMainWindow):
         
         cursor = self.editor.textCursor()
         cursor.beginEditBlock()
-        cursor.movePosition(cursor.Start)
+        cursor.movePosition(QTextCursor.Start)
         self.editor.setTextCursor(cursor)
         
         count = 0
@@ -934,7 +997,8 @@ class Notepad(QMainWindow):
             pass
 
     def change_font(self):
-        font, ok = QFontDialog.getFont(self.editor.font(), self, "Choose Font")
+        current_font = self.editor.font()
+        ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
         if ok:
             self.editor.setFont(font)
             self._save_preferences()
