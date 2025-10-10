@@ -3,7 +3,22 @@
 **Neight** is a lightweight text editor for Windows inspired by Notepad but enhanced with a few thoughtful additions. It’s designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable Windows app entirely through Generative AI.
 
 ---
+### Option 1: Download Pre-built Executable (Recommended)
 
+**Direct Download:**
+- [Download Neight.exe](https://github.com/venkatarangan/neight/raw/main/dist/Neight.exe) (~43 MB)
+
+**Installation Steps:**
+1. Download the executable from the link above
+2. Copy `Neight.exe` to a folder of your choice:
+   - For personal use: `C:\Users\<YourName>\Apps\Neight\`
+   - System-wide (requires admin): `C:\Program Files\Neight\`
+3. **Optional**: Pin `Neight.exe` to your **Start Menu** or **Taskbar** for quick access
+4. Double-click to run!
+
+**Note:** Since there's no Windows installer yet, Windows Defender SmartScreen might show a warning on first run. Click "More info" → "Run anyway" to proceed.
+
+---
 ## Why I built Neight
 
 Around **Early 2025**, I ran into a problem.
@@ -61,17 +76,24 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
   * Current keyboard layout is shown in the status bar bottom right
 
 ---
+## Clone the Repository
 
-## Download and Installation
+If you want the full source code:
 
-There’s **no Windows installer** yet. To run Neight:
+```bash
+git clone https://github.com/venkatarangan/neight.git
+cd neight
+```
 
-1. Download or clone this repository.
-2. Copy the executable file from
-   `dist\neight.exe`
-   to a folder such as
-   `C:\Program Files\Neight\`
-3. You can pin the copied **neight.exe** to your **Start Menu** or **Taskbar** for quick access.
+Then grab `dist\Neight.exe` from the downloaded folder.
+
+### Settings File Location
+
+When you run Neight, it automatically creates a `settings.json` file:
+- **If installed in a writable folder**: Settings are saved in the same folder as the executable
+- **If installed in Program Files**: Settings are saved to `%LOCALAPPDATA%\Neight\settings.json`
+
+The app automatically detects write permissions and chooses the appropriate location.
 
 ---
 
@@ -153,7 +175,13 @@ When you run Neight, it automatically creates:
 settings.json
 ```
 
-in the same directory as the executable.
+**Location:**
+* **Development/Portable:** Same directory as the executable (if writable)
+* **Program Files Install:** `%LOCALAPPDATA%\Neight\settings.json`
+  - Typical path: `C:\Users\<YourName>\AppData\Local\Neight\settings.json`
+
+The app automatically detects write permissions and uses the appropriate location.
+If you move the app from a writable location to Program Files, settings are automatically migrated to AppData.
 
 This file remembers:
 
