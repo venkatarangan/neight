@@ -68,12 +68,46 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
   * Last opened file
   * Window size
   * Font name and size
-* **Quick Google Search**: Select text and press **Ctrl+E** or right-click → “Search with Google”
+* **Quick Google Search**: Select text and press **Ctrl+E** or right-click → "Search with Google"
 * **Language toggle shortcut**:
 
   * Press **Ctrl key twice quickly** to toggle between Tamil Anjal and English (India)
   * Or use **Ctrl+,** for English (India) and **Ctrl+.** for Tamil Anjal
   * Current keyboard layout is shown in the status bar bottom right
+
+### Markdown Support (New in v2025.001!)
+
+* **Complete markdown editing** through the **Insert menu** (Alt+N)
+* **Smart tag replacement**: Prevents tag duplication when editing
+  * Heading changes (e.g., H3 → H2) automatically remove old `###` before adding `##`
+  * Formatting changes (e.g., `*italic*` → bold) remove asterisks before adding `**`
+  * List type changes (ordered ↔ unordered) replace markers cleanly
+  * No more accidentally getting `#####` when you wanted `##`!
+* **Headings**: Ctrl+1 through Ctrl+6 for H1-H6
+* **Text formatting**: Bold (Ctrl+B), Italic (Ctrl+I), Bold Italic (Ctrl+Shift+B)
+* **Lists**: Unordered lists, ordered lists, and checkboxes
+* **Special elements**: Quotes, code blocks (Ctrl+Shift+K), strikethrough, highlights
+* **Images and Hyperlinks** (Ctrl+K):
+  * Insert with URL validation
+  * Automatic https:// prefix
+  * Retry/abort on validation failure
+* **Other elements**: Horizontal rules, table templates
+* **File support**: Open and save `.md` (Markdown) files alongside `.txt` files
+
+### PDF Export (New in v2025.001!)
+
+* **Export Text to PDF**: Export plain text files with filename header and professional formatting (A4)
+  * Available in File menu when `.txt` file is open
+  * Includes filename header with horizontal rule separator
+* **Export Markdown to PDF**: Export markdown files with full rendering (headings, tables, code blocks, etc.)
+  * Available in File menu when `.md` file is open
+  * Full markdown rendering with professional CSS styling
+  * Requires `markdown` Python library (included in requirements.txt)
+* **Professional output**: A4 page size, proper margins, styled content
+* **Font preservation**: Maintains your chosen font in PDF output
+* **Smart menu display**: Export options appear contextually based on current file type
+
+See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documentation.
 
 ---
 ## Clone the Repository
@@ -102,11 +136,18 @@ The app automatically detects write permissions and chooses the appropriate loca
 **Requirements**
 
 * **Python 3.10+**
-* **PySide6** (install using pip)
+* **PySide6** (Qt bindings)
+* **markdown** (for PDF export of markdown files)
 
-```
+```bash
 python -m pip install --upgrade pip
-python -m pip install PySide6
+pip install -r requirements.txt
+```
+
+Or install individually:
+```bash
+pip install PySide6
+pip install markdown
 ```
 
 **To build the executable:**
@@ -164,6 +205,14 @@ It’s a single Python file — self-contained and clean — yet offers everythi
 | Search Google                 | Ctrl+E                         |
 | Switch Layout (English↔Tamil) | Double Ctrl or Ctrl+, / Ctrl+. |
 | Zoom In / Out                 | Ctrl+Plus / Ctrl+Minus         |
+| **Markdown Features**         |                                |
+| Insert Menu                   | Alt+N                          |
+| Heading 1-6                   | Ctrl+1 to Ctrl+6               |
+| Bold                          | Ctrl+B                         |
+| Italic                        | Ctrl+I                         |
+| Bold Italic                   | Ctrl+Shift+B                   |
+| Code Block                    | Ctrl+Shift+K                   |
+| Hyperlink                     | Ctrl+K                         |
 
 ---
 
@@ -206,11 +255,15 @@ The green tones were chosen to match the colour scheme from my blog [venkatarang
 
 ## Future Ideas
 
-* Basic **Markdown** support
-* Export to **DOCX** and **PDF**
+* ~~Basic **Markdown** support~~ ✓ **Implemented in v2025.001!**
+* ~~Export to **PDF**~~ ✓ **Implemented in v2025.001!**
+* Markdown **live preview** pane
+* Export to **DOCX**
 * A proper **Windows Installer**
+* Page numbers in PDF footer
+* Print preview before PDF export
 * Optional **AI features** for translation, rewriting, or lookup
-* Integrate Tamil dictionary (like Tamil Nadu Government’s Sorkuvai)
+* Integrate Tamil dictionary (like Tamil Nadu Government's Sorkuvai)
 
 ---
 
