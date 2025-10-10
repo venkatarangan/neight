@@ -184,3 +184,5 @@ cython_debug/
 # Neight editor settings
 # User-specific configuration file with personal preferences, paths, and window state
 settings.json
+CODE_REVIEW_AND_SUGGESTIONS.md
+CHANGELOG.md

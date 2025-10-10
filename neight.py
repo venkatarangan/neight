@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.001"
+VERSION = "2025.002"
 
 
 try:
@@ -25,7 +25,7 @@ try:
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
-    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut
+    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor
     from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer
     QT_LIB = "PySide6"
 except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
@@ -33,7 +33,7 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut
     )
-    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor
+    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor
     from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer
     QT_LIB = "PyQt5"
 
@@ -277,6 +277,13 @@ class CodeEditor(QPlainTextEdit):
         painter = QPainter(self.lineNumberArea)
         painter.fillRect(event.rect(), self.palette().alternateBase())
 
+        # Determine if we're in dark mode by checking the background lightness
+        bg_color = self.palette().window().color()
+        is_dark_mode = bg_color.lightness() < 128
+        
+        # Use white text for dark mode, black for light mode
+        text_color = QColor(Qt.white if is_dark_mode else Qt.black)
+
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
         top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
@@ -285,7 +292,7 @@ class CodeEditor(QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 number = str(block_number + 1)
-                painter.setPen(self.palette().mid().color())
+                painter.setPen(text_color)
                 painter.drawText(0, int(top), self.lineNumberArea.width() - 6, self.fontMetrics().height(),
                                  Qt.AlignRight, number)
             block = block.next()
@@ -849,9 +856,9 @@ class Notepad(QMainWindow):
             # Show "Export Markdown to PDF" only for .md files
             self.export_md_pdf_act.setVisible(ext in ['.md', '.markdown'])
         else:
-            # No file open - show both options
-            self.export_text_pdf_act.setVisible(True)
-            self.export_md_pdf_act.setVisible(True)
+            # No file saved yet - hide both export options
+            self.export_text_pdf_act.setVisible(False)
+            self.export_md_pdf_act.setVisible(False)
 
     # --- Core features ---
     def new_file(self):

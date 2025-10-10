@@ -2,6 +2,20 @@
 
 All notable changes to Neight will be documented in this file.
 
+## [2025.002] - 2025-10-10
+
+### Added
+- Line numbers now adapt to color scheme: white text in dark mode, black text in light mode
+
+### Changed
+- Export menu items (Export Text to PDF, Export Markdown to PDF) are now hidden until a file is saved
+  - This prevents confusion when no file path exists for the export operation
+  - Export options appear automatically after saving based on file type (.txt or .md)
+
+### Technical
+- Improved dark mode detection using palette background lightness
+- Version number incremented after build as per new versioning policy
+
 ## [2025.001] - 2025-01-XX
 
 ### Added
