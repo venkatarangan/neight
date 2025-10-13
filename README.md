@@ -271,6 +271,14 @@ The green tones were chosen to match the colour scheme from my blog [venkatarang
 
 ---
 
+## Known issues
+
+Tamil text navigation in Qt-based editors (used by Neight via PySide6) has a segmentation quirk: consonant + pulli (virama U+0BCD) + consonant sequences are treated as a single grapheme cluster. That means the caret and selection can jump over the whole unit when you press Left/Right or Backspace, instead of moving between the letters. Examples you might see: “ர்க”, “ண்டு”, “ல்லா”, “த்த”, “ங்கு”, “ப்பி”. Ideally, you should be able to move from “ர்” to “க” (and similar), but Qt currently only lets you land before or after the pair.
+
+Expected behavior is to segment after the pulli for consonant+pulli+consonant (two logical letters), while still keeping consonant+pulli+vowel‑sign as one cluster. Until Qt adjusts Tamil-specific grapheme segmentation, Tamil users may notice unintuitive caret movement and selection in Neight and other Qt apps. If you encounter this, it would help the community to file or upvote a report on the Qt Forums (please search for an existing thread first). A detailed write‑up with code points and reproduction steps is available in [knownbugs/Bug in QT for Tamil text handling.md](knownbugs/Bug%20in%20QT%20for%20Tamil%20text%20handling.md).
+
+---
+
 ## License
 
 This project is licensed under the **MIT License**.
