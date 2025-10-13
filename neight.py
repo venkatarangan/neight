@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.002"
+VERSION = "2025.005"
 
 
 try:
@@ -1534,7 +1534,7 @@ class Notepad(QMainWindow):
         
         try:
             from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QPageSize, QTextDocument, QTextCursor as QTC
+            from PySide6.QtGui import QPageSize, QPageLayout, QTextDocument, QTextCursor as QTC
             from PySide6.QtCore import QSizeF, QMarginsF
             
             # Create printer
@@ -1544,7 +1544,7 @@ class Notepad(QMainWindow):
             printer.setPageSize(QPageSize(QPageSize.A4))
             # Set margins: left, top, right, bottom in millimeters
             margins = QMarginsF(15, 20, 15, 20)
-            printer.setPageMargins(margins, QPageSize.Unit.Millimeter)
+            printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
             
             # Create document
             doc = QTextDocument()
@@ -1560,7 +1560,7 @@ class Notepad(QMainWindow):
             doc.setPlainText(content)
             
             # Print to PDF
-            doc.print(printer)
+            doc.print_(printer)
             
             self.status.showMessage(f"Exported to: {save_path}", 3000)
             QMessageBox.information(
@@ -1613,7 +1613,7 @@ class Notepad(QMainWindow):
                 has_markdown = False
             
             from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QPageSize, QTextDocument
+            from PySide6.QtGui import QPageSize, QPageLayout, QTextDocument
             from PySide6.QtCore import QMarginsF
             
             # Create printer
@@ -1623,7 +1623,7 @@ class Notepad(QMainWindow):
             printer.setPageSize(QPageSize(QPageSize.A4))
             # Set margins: left, top, right, bottom in millimeters
             margins = QMarginsF(15, 20, 15, 20)
-            printer.setPageMargins(margins, QPageSize.Unit.Millimeter)
+            printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
             
             # Create document
             doc = QTextDocument()
@@ -1723,7 +1723,7 @@ class Notepad(QMainWindow):
                 doc.setHtml(basic_html)
             
             # Print to PDF
-            doc.print(printer)
+            doc.print_(printer)
             
             self.status.showMessage(f"Exported to: {save_path}", 3000)
             
