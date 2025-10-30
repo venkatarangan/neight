@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2025.004** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
+**Current Version: 2025.005** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
 
 **Neight** is a lightweight text editor for Windows inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable Windows app entirely through Generative AI.
 
@@ -73,6 +73,8 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
   * Window size
   * Font name and size
 * **Quick Google Search**: Select text and press **Ctrl+E** or right-click → "Search with Google"
+* **Plain-text paste shortcut**: Hold **Shift** with paste (Shift+Ctrl+V or Shift+Insert) to strip formatting
+* **Blank line cleanup**: Edit → Collapse Blank Lines trims consecutive empty rows across the document
 * **Language toggle shortcut**:
 
   * Press **Ctrl key twice quickly** to toggle between Tamil Anjal and English (India)
@@ -173,6 +175,8 @@ After the build completes, your compiled file will be in the **dist** folder.
 Run the app once and it will create a **settings.json** file next to the executable.
 It stores your preferences (font, window size, last opened file, autosave interval, etc.).
 
+When launched through Windows "Open with…", the referenced file now opens with the correct window title and save path.
+
 ---
 
 ## How it works (briefly)
@@ -201,12 +205,14 @@ It’s a single Python file — self-contained and clean — yet offers everythi
 | Exit                          | Alt+F4                         |
 | Undo / Redo                   | Ctrl+Z / Ctrl+Y                |
 | Cut / Copy / Paste            | Ctrl+X / Ctrl+C / Ctrl+V       |
+| Paste Plain Text              | Shift+Ctrl+V (or Shift+Insert) |
 | Find / Replace                | Ctrl+F / Ctrl+H                |
 | Go To Line                    | Ctrl+G                         |
 | Insert Date/Time              | F5                             |
 | Word Wrap                     | Alt+O, W                       |
 | Font                          | Alt+O, F                       |
 | Search Google                 | Ctrl+E                         |
+| Collapse Blank Lines          | Alt+E, (Down), Enter           |
 | Switch Layout (English↔Tamil) | Double Ctrl or Ctrl+, / Ctrl+. |
 | Zoom In / Out                 | Ctrl+Plus / Ctrl+Minus         |
 | **Markdown Features**         |                                |

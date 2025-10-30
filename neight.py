@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.005"
+VERSION = "2025.006"
 
 
 try:
@@ -25,7 +25,7 @@ try:
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
-    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor
+    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication
     from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer
     QT_LIB = "PySide6"
 except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
@@ -33,7 +33,7 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut
     )
-    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor
+    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication
     from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer
     QT_LIB = "PyQt5"
 
@@ -417,12 +417,32 @@ class CodeEditor(QPlainTextEdit):
                     return
         super().keyPressEvent(event)
 
+    def paste_plain_text(self):
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return
+        mime = clipboard.mimeData()
+        if mime and mime.hasText():
+            text = mime.text()
+            if text:
+                self.insertPlainText(text)
+
+    def insertFromMimeData(self, source):
+        if source is not None:
+            if QGuiApplication.keyboardModifiers() & Qt.ShiftModifier:
+                if source.hasText():
+                    text = source.text()
+                    if text:
+                        self.insertPlainText(text)
+                        return
+        super().insertFromMimeData(source)
+
 
 # ---------------------
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
-    def __init__(self):
+    def __init__(self, initial_file: Optional[str] = None):
         super().__init__()
         self.setWindowTitle("Untitled - Neight")
         self.resize(1000, 650)
@@ -430,6 +450,8 @@ class Notepad(QMainWindow):
         self.settings = SettingsManager()
         self.default_directory = Path.home()
         self._restore_maximized = False
+        self._initial_file = initial_file
+        self._last_session_file = None
 
         self.editor = CodeEditor(self)
         self.setCentralWidget(self.editor)
@@ -466,6 +488,9 @@ class Notepad(QMainWindow):
         self._load_preferences()
         self._update_status_bar()
         self._update_export_menu_visibility()
+
+        if initial_file:
+            self._load_initial_path(initial_file)
 
     # --- UI setup ---
     def _create_actions(self):
@@ -527,6 +552,8 @@ class Notepad(QMainWindow):
 
         self.search_web_act = QAction("Search with Google", self)
         self.search_web_act.setShortcut(QKeySequence("Ctrl+E"))
+
+        self.collapse_blank_lines_act = QAction("Collapse Blank Lines", self)
 
         # Insert - Markdown heading actions
         self.insert_h1_act = QAction("Heading 1", self)
@@ -628,6 +655,8 @@ class Notepad(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.select_all_act)
         edit_menu.addAction(self.time_date_act)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.collapse_blank_lines_act)
 
         # Insert menu (Alt+N is handled by the & in "I&nsert")
         insert_menu = menubar.addMenu("I&nsert")
@@ -702,6 +731,7 @@ class Notepad(QMainWindow):
         self.replace_all_act.triggered.connect(self.replace_all)
         self.goto_act.triggered.connect(self.goto_line)
         self.search_web_act.triggered.connect(self._search_web_shortcut)
+        self.collapse_blank_lines_act.triggered.connect(self.collapse_blank_lines)
 
         # Format
         self.wrap_act.toggled.connect(self._toggle_wrap)
@@ -808,6 +838,17 @@ class Notepad(QMainWindow):
             shortcut.activated.connect(lambda d=delta: self._change_font_size(d))
             self._font_shortcuts.append(shortcut)
 
+        plain_paste_sequences = (
+            QKeySequence("Shift+Ctrl+V"),
+            QKeySequence("Shift+Insert"),
+        )
+        self._plain_paste_shortcuts = []
+        for sequence in plain_paste_sequences:
+            shortcut = QShortcut(sequence, self.editor)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self.editor.paste_plain_text)
+            self._plain_paste_shortcuts.append(shortcut)
+
     def _install_layout_shortcuts(self):
         """Install Ctrl+, and Ctrl+. for keyboard layout switching."""
         if sys.platform != "win32":
@@ -872,6 +913,57 @@ class Notepad(QMainWindow):
         self._update_export_menu_visibility()
         self.status.showMessage("New document", 2000)
 
+    def _open_file_path(self, path: Path | str, *, notify_errors: bool = True, show_status: bool = True) -> bool:
+        try:
+            path_obj = Path(path).expanduser()
+        except Exception:
+            if notify_errors:
+                QMessageBox.critical(self, "Error", f"Invalid file path:\n{path}")
+            return False
+
+        if not path_obj.exists() or not path_obj.is_file():
+            if notify_errors:
+                QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
+            return False
+
+        try:
+            text = path_obj.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            if notify_errors:
+                QMessageBox.critical(self, "Encoding Error", "File is not valid UTF-8.")
+            return False
+        except Exception as e:
+            if notify_errors:
+                QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+            return False
+
+        self.editor.setPlainText(text)
+        self.current_path = str(path_obj)
+        self.editor.document().setModified(False)
+        self._update_default_directory(path_obj.parent)
+        self._update_title()
+        self._update_status_bar()
+        self._update_export_menu_visibility()
+        if show_status:
+            self.status.showMessage(f"Opened: {path_obj}", 2000)
+        if not self.autosave_enabled:
+            self._start_autosave()
+        return True
+
+    def _load_initial_path(self, path: str) -> None:
+        if not path:
+            return
+        success = self._open_file_path(path, notify_errors=True, show_status=True)
+        if success:
+            self._last_session_file = None
+        else:
+            self.status.showMessage(f"Could not open {path}", 3000)
+            if self._last_session_file:
+                fallback = self._last_session_file
+                self._last_session_file = None
+                if self._open_file_path(fallback, notify_errors=False, show_status=False):
+                    self.status.showMessage(f"Opened last session file: {fallback}", 3000)
+
     def open_file(self):
         if not self._maybe_save_changes():
             return
@@ -882,21 +974,7 @@ class Notepad(QMainWindow):
             "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
         if path:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    text = f.read()
-                self.editor.setPlainText(text)
-                self.current_path = path
-                self.editor.document().setModified(False)
-                self._update_default_directory(Path(path).parent)
-                self._update_title()
-                self._update_status_bar()
-                self._update_export_menu_visibility()
-                self.status.showMessage(f"Opened: {path}", 2000)
-            except UnicodeDecodeError:
-                QMessageBox.critical(self, "Encoding Error", "File is not valid UTF-8.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+            self._open_file_path(path)
 
     def save_file(self):
         if self.current_path is None:
@@ -1033,6 +1111,60 @@ class Notepad(QMainWindow):
         
         cursor.endEditBlock()
         self.status.showMessage(f"Replaced {count} occurrence(s)", 3000)
+
+    def collapse_blank_lines(self):
+        text = self.editor.toPlainText()
+        if not text:
+            self.status.showMessage("Document is empty", 1500)
+            return
+
+        newline = "\r\n" if "\r\n" in text else "\n"
+        pattern = re.compile(r'(?:\r\n|\r|\n){2,}')
+        matches = list(pattern.finditer(text))
+        if not matches:
+            self.status.showMessage("No extra blank lines found", 2000)
+            return
+
+        collapsed = pattern.sub(newline, text)
+        replacement_length = len(newline)
+        adjustments = []
+        for match in matches:
+            start, end = match.span()
+            diff = (end - start) - replacement_length
+            if diff > 0:
+                adjustments.append((start, end, diff))
+
+        cursor = self.editor.textCursor()
+        old_pos = cursor.position()
+        old_anchor = cursor.anchor()
+
+        def adjust_position(pos: int) -> int:
+            for start, end, diff in adjustments:
+                if pos > end:
+                    pos -= diff
+                elif start < pos <= end:
+                    pos = start + replacement_length
+                    break
+            return pos
+
+        new_pos = adjust_position(old_pos)
+        new_anchor = adjust_position(old_anchor)
+
+        doc_cursor = self.editor.textCursor()
+        doc_cursor.beginEditBlock()
+        doc_cursor.movePosition(QTextCursor.Start)
+        doc_cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+        doc_cursor.insertText(collapsed)
+        doc_cursor.endEditBlock()
+
+        restored_cursor = self.editor.textCursor()
+        restored_cursor.setPosition(new_anchor)
+        mode = QTextCursor.KeepAnchor if new_anchor != new_pos else QTextCursor.MoveAnchor
+        restored_cursor.setPosition(new_pos, mode)
+        self.editor.setTextCursor(restored_cursor)
+
+        blocks_collapsed = len(matches)
+        self.status.showMessage(f"Collapsed {blocks_collapsed} blank block(s)", 3000)
 
     def goto_line(self):
         line_str, ok = QInputDialog.getText(self, "Go To", "Line number:")
@@ -1802,19 +1934,10 @@ class Notepad(QMainWindow):
         # Last opened file
         last_file = data.get("last_opened_file")
         if isinstance(last_file, str) and last_file:
-            last_path = Path(last_file)
-            if last_path.exists() and last_path.is_file():
-                try:
-                    with open(last_path, "r", encoding="utf-8") as f:
-                        text = f.read()
-                    self.editor.setPlainText(text)
-                    self.current_path = str(last_path)
-                    self.editor.document().setModified(False)
-                    self._update_title()
-                    if not self.autosave_enabled:
-                        self._start_autosave()
-                except Exception:
-                    pass
+            if getattr(self, "_initial_file", None):
+                self._last_session_file = last_file
+            else:
+                self._open_file_path(last_file, notify_errors=False, show_status=False)
 
     def _save_preferences(self):
         try:
@@ -1988,7 +2111,8 @@ class Notepad(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    window = Notepad()
+    initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
+    window = Notepad(initial_file=initial_file)
     window.show()
     sys.exit(app.exec())
 
