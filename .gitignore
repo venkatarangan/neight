@@ -186,3 +186,4 @@ cython_debug/
 settings.json
 CODE_REVIEW_AND_SUGGESTIONS.md
 CHANGELOG.md
+deploylocal.bat

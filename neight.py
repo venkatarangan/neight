@@ -16,25 +16,29 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.006"
+VERSION = "2025.007"
 
 
 try:
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
-        QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog
+        QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
+        QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
     from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication
-    from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer
+    from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal
     QT_LIB = "PySide6"
 except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
-        QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut
+        QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
+        QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton
     )
     from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication
-    from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer
+    from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal
     QT_LIB = "PyQt5"
 
 # ------------------------------------
@@ -439,6 +443,236 @@ class CodeEditor(QPlainTextEdit):
 
 
 # ---------------------
+# Find / Replace dialog
+# ---------------------
+class FindReplaceDialog(QDialog):
+    find_next = Signal(str)
+    replace = Signal(str, str)
+    replace_all = Signal(str, str)
+    closed = Signal()
+
+    def __init__(self, parent=None, *, replace_enabled: bool = False):
+        super().__init__(parent)
+        self._replace_enabled = bool(replace_enabled)
+        self.setWindowTitle("Replace" if self._replace_enabled else "Find")
+        self.setModal(False)
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setMinimumWidth(420)
+
+        self.find_edit = QLineEdit(self)
+        self.find_edit.returnPressed.connect(self._emit_find_next)
+
+        form_layout = QGridLayout()
+        form_layout.addWidget(QLabel("Find what:"), 0, 0)
+        form_layout.addWidget(self.find_edit, 0, 1)
+
+        self.replace_edit = None
+        if self._replace_enabled:
+            self.replace_edit = QLineEdit(self)
+            self.replace_edit.returnPressed.connect(self._emit_replace)
+            form_layout.addWidget(QLabel("Replace with:"), 1, 0)
+            form_layout.addWidget(self.replace_edit, 1, 1)
+
+        tip_text = "ℹ️ <a href=\"#\">Escape sequences…</a>"
+        self.tip_label = QLabel(tip_text, self)
+        self.tip_label.setStyleSheet("color: #666666;")
+        self.tip_label.setWordWrap(True)
+        self.tip_label.setTextFormat(Qt.RichText)
+        self.tip_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.tip_label.setOpenExternalLinks(False)
+        self.tip_label.linkActivated.connect(self._show_escape_help)
+        tip_row = 1 if not self._replace_enabled else 2
+        form_layout.addWidget(self.tip_label, tip_row, 0, 1, 2)
+
+        self.find_next_btn = QPushButton("Find Next", self)
+        self.cancel_btn = QPushButton("Close", self)
+
+        button_layout = QVBoxLayout()
+        button_layout.addWidget(self.find_next_btn)
+
+        self.replace_btn = None
+        self.replace_all_btn = None
+        if self._replace_enabled:
+            self.replace_btn = QPushButton("Replace", self)
+            self.replace_all_btn = QPushButton("Replace All", self)
+            button_layout.addWidget(self.replace_btn)
+            button_layout.addWidget(self.replace_all_btn)
+
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addStretch(1)
+
+        main_layout = QHBoxLayout()
+        main_layout.addLayout(form_layout, 1)
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+        self.find_next_btn.clicked.connect(self._emit_find_next)
+        self.cancel_btn.clicked.connect(self.hide)
+        if self._replace_enabled and self.replace_btn and self.replace_all_btn:
+            self.replace_btn.clicked.connect(self._emit_replace)
+            self.replace_all_btn.clicked.connect(self._emit_replace_all)
+
+        self.find_next_btn.setDefault(True)
+
+    def _show_escape_help(self, _link: str = "") -> None:
+        sequences = [
+            ("\\n", "newline"),
+            ("\\r", "carriage return"),
+            ("\\t", "tab"),
+            ("\\f", "form feed"),
+            ("\\v", "vertical tab"),
+            ("\\0", "null character"),
+            ("\\\\", "literal backslash"),
+            ("\\xHH", "byte value (replace HH with two hex digits)"),
+            ("\\u0000", "Unicode code point (replace digits with hex)")
+        ]
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Escape Sequences")
+        dialog.setModal(True)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+
+        info_label = QLabel("Click a sequence to insert it into the selected field.", dialog)
+        layout.addWidget(info_label)
+
+        target_layout = QHBoxLayout()
+        target_label = QLabel("Insert into:", dialog)
+        target_layout.addWidget(target_label)
+
+        button_group = QButtonGroup(dialog)
+        find_radio = QRadioButton("Find", dialog)
+        button_group.addButton(find_radio)
+        target_layout.addWidget(find_radio)
+
+        replace_radio = None
+        if self.replace_edit is not None:
+            replace_radio = QRadioButton("Replace", dialog)
+            button_group.addButton(replace_radio)
+            target_layout.addWidget(replace_radio)
+
+        target_layout.addStretch(1)
+        layout.addLayout(target_layout)
+
+        default_to_replace = bool(self.replace_edit and self.replace_edit.hasFocus())
+        if replace_radio:
+            replace_radio.setChecked(default_to_replace)
+            find_radio.setChecked(not default_to_replace)
+        else:
+            find_radio.setChecked(True)
+
+        grid = QGridLayout()
+        layout.addLayout(grid)
+
+        focus_target = [self.find_edit]
+
+        def resolve_target() -> QLineEdit:
+            if replace_radio and replace_radio.isChecked() and self.replace_edit is not None:
+                return self.replace_edit
+            return self.find_edit
+
+        def handle_insert(seq: str) -> None:
+            target = resolve_target()
+            focus_target[0] = target
+            self._insert_escape_sequence(seq, target)
+
+        for row, (seq, description) in enumerate(sequences):
+            button = QPushButton(seq, dialog)
+            button.clicked.connect(lambda _checked=False, s=seq: handle_insert(s))
+            grid.addWidget(button, row, 0)
+            desc_label = QLabel(description, dialog)
+            grid.addWidget(desc_label, row, 1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
+        button_box.rejected.connect(dialog.reject)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+
+        dialog.exec()
+
+        target = focus_target[0]
+        if target is not None:
+            target.setFocus()
+
+    def _insert_escape_sequence(self, sequence: str, target: Optional[QLineEdit] = None) -> None:
+        if target is None:
+            target = self.find_edit
+        text = target.text()
+        if target.hasSelectedText():
+            start = target.selectionStart()
+            end = start + len(target.selectedText())
+            new_text = text[:start] + sequence + text[end:]
+            target.setText(new_text)
+            target.setCursorPosition(start + len(sequence))
+        else:
+            pos = target.cursorPosition()
+            new_text = text[:pos] + sequence + text[pos:]
+            target.setText(new_text)
+            target.setCursorPosition(pos + len(sequence))
+
+    def set_find_text(self, text: str) -> None:
+        self.find_edit.setText(text)
+        self.find_edit.selectAll()
+
+    def set_replace_text(self, text: str) -> None:
+        if self.replace_edit is None:
+            return
+        self.replace_edit.setText(text)
+        self.replace_edit.selectAll()
+
+    def focus_find_field(self) -> None:
+        self.find_edit.setFocus()
+        self.find_edit.selectAll()
+
+    def focus_replace_field(self) -> None:
+        if self.replace_edit is None:
+            return
+        self.replace_edit.setFocus()
+        self.replace_edit.selectAll()
+
+    def set_default_action(self, action: str) -> None:
+        buttons = [self.find_next_btn, self.replace_btn, self.replace_all_btn, self.cancel_btn]
+        for btn in buttons:
+            if btn is not None:
+                btn.setDefault(False)
+
+        if action == "replace" and self.replace_btn is not None:
+            self.replace_btn.setDefault(True)
+            self.replace_btn.setFocus()
+        elif action == "replace_all" and self.replace_all_btn is not None:
+            self.replace_all_btn.setDefault(True)
+            self.replace_all_btn.setFocus()
+        else:
+            self.find_next_btn.setDefault(True)
+            self.find_next_btn.setFocus()
+
+    def _emit_find_next(self) -> None:
+        self.find_next.emit(self.find_edit.text())
+
+    def _emit_replace(self) -> None:
+        if self.replace_edit is None:
+            return
+        self.replace.emit(self.find_edit.text(), self.replace_edit.text())
+
+    def _emit_replace_all(self) -> None:
+        if self.replace_edit is None:
+            return
+        self.replace_all.emit(self.find_edit.text(), self.replace_edit.text())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.raise_()
+        self.activateWindow()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.closed.emit()
+
+
+# ---------------------
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
@@ -466,6 +700,14 @@ class Notepad(QMainWindow):
         self.status.addPermanentWidget(self.count_label)
         self.status.addPermanentWidget(self.pos_label)
         self.status.addPermanentWidget(self.layout_label)
+
+        self._find_dialog = None
+        self._replace_dialog = None
+        self._last_find = ""
+        self._last_find_raw = ""
+        self._last_replace = ""
+        self._last_replace_raw = ""
+        self._progress_bar = None
 
         self.current_path = None
         self.autosave_timer = QTimer(self)
@@ -1036,81 +1278,261 @@ class Notepad(QMainWindow):
 
     # --- Edit helpers ---
     def find_text(self):
-        text, ok = QInputDialog.getText(self, "Find", "Find what:")
-        if not ok or not text:
-            return
-        self._last_find = text
-        self._find_forward(text)
+        dialog = self._ensure_find_dialog()
+        if self._replace_dialog is not None:
+            self._replace_dialog.hide()
+        selected = self._get_selected_text()
+        if selected:
+            dialog.set_find_text(self._encode_special_sequences(selected))
+        elif self._last_find_raw:
+            dialog.set_find_text(self._last_find_raw)
+        dialog.set_default_action("find")
+        dialog.show()
+        dialog.focus_find_field()
 
     def find_next(self):
-        text = getattr(self, "_last_find", "")
-        if text:
-            self._find_forward(text)
-        else:
-            self.find_text()
+        if not self._last_find:
+            selected = self._get_selected_text()
+            if selected:
+                self._on_find_request(self._encode_special_sequences(selected))
+            else:
+                self.find_text()
+            return
+        self._perform_find_with_progress(self._last_find)
 
-    def _find_forward(self, text: str):
-        cs = self.editor.textCursor()
+    def _find_forward(self, text: str) -> bool:
+        if not text:
+            return False
+        cursor = self.editor.textCursor()
         doc = self.editor.document()
-        m = doc.find(text, cs)
-        if m.isNull():
-            # Wrap search from top
-            start = self.editor.textCursor()
+        match = doc.find(text, cursor)
+        if match.isNull():
+            start = QTextCursor(doc)
             start.movePosition(QTextCursor.Start)
-            m = doc.find(text, start)
-        if not m.isNull():
-            self.editor.setTextCursor(m)
-            self.editor.centerCursor()
-        else:
-            self.status.showMessage("Text not found", 2000)
+            match = doc.find(text, start)
+        if match.isNull():
+            return False
+        self.editor.setTextCursor(match)
+        self.editor.centerCursor()
+        return True
 
     def replace_text(self):
-        find_text, ok1 = QInputDialog.getText(self, "Replace", "Find what:")
-        if not ok1 or not find_text:
-            return
-        replace_with, ok2 = QInputDialog.getText(self, "Replace", "Replace with:")
-        if not ok2:
-            return
-        
-        cursor = self.editor.textCursor()
-        if cursor.hasSelection():
-            selected = cursor.selectedText()
-            if selected == find_text:
-                cursor.insertText(replace_with)
-                self._find_forward(find_text)
-                return
-        
-        self._find_forward(find_text)
+        self._show_replace_dialog(preferred_action="replace")
 
     def replace_all(self):
-        find_text, ok1 = QInputDialog.getText(self, "Replace All", "Find what:")
-        if not ok1 or not find_text:
+        self._show_replace_dialog(preferred_action="replace_all")
+
+    def _ensure_find_dialog(self) -> FindReplaceDialog:
+        if self._find_dialog is None:
+            self._find_dialog = FindReplaceDialog(self, replace_enabled=False)
+            self._find_dialog.find_next.connect(self._on_find_request)
+        return self._find_dialog
+
+    def _ensure_replace_dialog(self) -> FindReplaceDialog:
+        if self._replace_dialog is None:
+            self._replace_dialog = FindReplaceDialog(self, replace_enabled=True)
+            self._replace_dialog.find_next.connect(self._on_find_request)
+            self._replace_dialog.replace.connect(self._on_replace_request)
+            self._replace_dialog.replace_all.connect(self._on_replace_all_request)
+        return self._replace_dialog
+
+    def _show_replace_dialog(self, preferred_action: str) -> None:
+        dialog = self._ensure_replace_dialog()
+        if self._find_dialog is not None:
+            self._find_dialog.hide()
+        selected = self._get_selected_text()
+        if selected:
+            dialog.set_find_text(self._encode_special_sequences(selected))
+        elif self._last_find_raw:
+            dialog.set_find_text(self._last_find_raw)
+        if self._last_replace_raw:
+            dialog.set_replace_text(self._last_replace_raw)
+        dialog.set_default_action(preferred_action)
+        if preferred_action == "replace_all":
+            dialog.focus_replace_field()
+        else:
+            dialog.focus_find_field()
+        dialog.show()
+
+    def _on_find_request(self, raw_query: str) -> None:
+        query = self._decode_special_sequences(raw_query)
+        if not query:
+            self.status.showMessage("Enter text to find", 2000)
             return
-        replace_with, ok2 = QInputDialog.getText(self, "Replace All", "Replace with:")
-        if not ok2:
+        self._last_find_raw = raw_query
+        self._last_find = query
+        self._perform_find_with_progress(query, success_message="Match found")
+
+    def _on_replace_request(self, raw_find: str, raw_replace: str) -> None:
+        find_text = self._decode_special_sequences(raw_find)
+        replace_text = self._decode_special_sequences(raw_replace)
+        if not find_text:
+            self.status.showMessage("Enter text to find", 2000)
             return
-        
+        self._last_find_raw = raw_find
+        self._last_find = find_text
+        self._last_replace_raw = raw_replace
+        self._last_replace = replace_text
+
+        cursor = self.editor.textCursor()
+        current_selection = self._normalize_selected_text(cursor.selectedText())
+        replaced = False
+
+        if current_selection == find_text:
+            cursor.insertText(replace_text)
+            self.editor.setTextCursor(cursor)
+            replaced = True
+        else:
+            if not self._perform_find_with_progress(find_text):
+                return
+            cursor = self.editor.textCursor()
+            current_selection = self._normalize_selected_text(cursor.selectedText())
+            if current_selection == find_text:
+                cursor.insertText(replace_text)
+                self.editor.setTextCursor(cursor)
+                replaced = True
+
+        if replaced:
+            self.status.showMessage("Replaced 1 occurrence", 2000)
+            if not self._find_forward(find_text):
+                self.status.showMessage("No further matches", 2000)
+
+    def _on_replace_all_request(self, raw_find: str, raw_replace: str) -> None:
+        find_text = self._decode_special_sequences(raw_find)
+        replace_text = self._decode_special_sequences(raw_replace)
+        if not find_text:
+            self.status.showMessage("Enter text to find", 2000)
+            return
+        self._last_find_raw = raw_find
+        self._last_find = find_text
+        self._last_replace_raw = raw_replace
+        self._last_replace = replace_text
+
+        self._show_progress_indicator("Replacing…")
+        count = self._replace_all_occurrences(find_text, replace_text)
+        if count == 0:
+            self._hide_progress_indicator("No matches found", 2000)
+        else:
+            self._hide_progress_indicator(f"Replaced {count} occurrence(s)", 3000)
+
+    def _perform_find_with_progress(self, text: str, success_message: Optional[str] = None) -> bool:
+        if not text:
+            return False
+        self._show_progress_indicator("Searching…")
+        QApplication.processEvents()
+        found = self._find_forward(text)
+        if found:
+            if success_message:
+                self._hide_progress_indicator(success_message, 1500)
+            else:
+                self._hide_progress_indicator()
+        else:
+            self._hide_progress_indicator("Text not found", 2000)
+        return found
+
+    def _replace_all_occurrences(self, find_text: str, replace_text: str) -> int:
         cursor = self.editor.textCursor()
         cursor.beginEditBlock()
         cursor.movePosition(QTextCursor.Start)
         self.editor.setTextCursor(cursor)
-        
+
         count = 0
         doc = self.editor.document()
-        
+
         while True:
-            found = doc.find(find_text, cursor)
-            if found.isNull():
+            match = doc.find(find_text, cursor)
+            if match.isNull():
                 break
-            found.insertText(replace_with)
-            cursor = found
+            match.insertText(replace_text)
+            cursor = match
             count += 1
-            if count % 10 == 0:
-                self.status.showMessage(f"Replaced {count} occurrences...", 500)
+            if count % 50 == 0:
+                self.status.showMessage(f"Replacing… {count}", 0)
                 QApplication.processEvents()
-        
+
         cursor.endEditBlock()
-        self.status.showMessage(f"Replaced {count} occurrence(s)", 3000)
+        return count
+
+    def _show_progress_indicator(self, message: str) -> None:
+        self.status.showMessage(message)
+        if self._progress_bar is None:
+            bar = QProgressBar(self.status)
+            bar.setMaximum(0)
+            bar.setMinimum(0)
+            bar.setTextVisible(False)
+            bar.setFixedWidth(100)
+            self.status.addPermanentWidget(bar)
+            self._progress_bar = bar
+
+    def _hide_progress_indicator(self, message: Optional[str] = None, timeout: int = 0) -> None:
+        if self._progress_bar is not None:
+            self.status.removeWidget(self._progress_bar)
+            self._progress_bar.deleteLater()
+            self._progress_bar = None
+        if message:
+            self.status.showMessage(message, timeout if timeout else 0)
+        else:
+            self.status.clearMessage()
+
+    def _get_selected_text(self) -> str:
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            return ""
+        return self._normalize_selected_text(cursor.selectedText())
+
+    @staticmethod
+    def _normalize_selected_text(text: str) -> str:
+        if not text:
+            return ""
+        return text.replace("\u2029", "\n")
+
+    @staticmethod
+    def _encode_special_sequences(text: str) -> str:
+        if not text:
+            return ""
+        replacements = (
+            ("\\", "\\\\"),
+            ("\r", "\\r"),
+            ("\n", "\\n"),
+            ("\t", "\\t"),
+            ("\f", "\\f"),
+            ("\v", "\\v"),
+        )
+        encoded = text
+        for src, repl in replacements:
+            encoded = encoded.replace(src, repl)
+        return encoded
+
+    @staticmethod
+    def _decode_special_sequences(text: str) -> str:
+        if not text:
+            return ""
+        pattern = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[nrtfv0\\\\])")
+
+        def replace(match: re.Match) -> str:
+            seq = match.group(1)
+            mapping = {
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+                "f": "\f",
+                "v": "\v",
+                "0": "\0",
+                "\\": "\\",
+            }
+            if seq.startswith("x") and len(seq) == 3:
+                try:
+                    return chr(int(seq[1:], 16))
+                except ValueError:
+                    return "\\" + seq
+            if seq.startswith("u") and len(seq) == 5:
+                try:
+                    return chr(int(seq[1:], 16))
+                except ValueError:
+                    return "\\" + seq
+            return mapping.get(seq, "\\" + seq)
+
+        return pattern.sub(replace, text)
 
     def collapse_blank_lines(self):
         text = self.editor.toPlainText()
@@ -1125,8 +1547,9 @@ class Notepad(QMainWindow):
             self.status.showMessage("No extra blank lines found", 2000)
             return
 
-        collapsed = pattern.sub(newline, text)
-        replacement_length = len(newline)
+        replacement = newline * 2
+        collapsed = pattern.sub(replacement, text)
+        replacement_length = len(replacement)
         adjustments = []
         for match in matches:
             start, end = match.span()
