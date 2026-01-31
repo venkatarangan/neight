@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.007"
+VERSION = "2025.008"
 
 
 try:
@@ -24,10 +24,10 @@ try:
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
         QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
-    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication
+    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication, QTextDocument
     from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal
     QT_LIB = "PySide6"
 except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
@@ -35,9 +35,9 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
         QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit
     )
-    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication
+    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument
     from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal
     QT_LIB = "PyQt5"
 
@@ -421,6 +421,21 @@ class CodeEditor(QPlainTextEdit):
                     return
         super().keyPressEvent(event)
 
+        nav_keys = {
+            Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down,
+            Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown
+        }
+        if event.key() in nav_keys:
+            handler = getattr(self.window(), "_clear_word_highlight_on_navigation", None)
+            if callable(handler):
+                handler()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        handler = getattr(self.window(), "_clear_word_highlight_on_blur", None)
+        if callable(handler):
+            handler()
+
     def paste_plain_text(self):
         clipboard = QGuiApplication.clipboard()
         if clipboard is None:
@@ -694,9 +709,12 @@ class Notepad(QMainWindow):
         self.setStatusBar(self.status)
 
         # Status widgets
+        self.word_match_label = QLabel("", self)
+        self.word_match_label.setMinimumWidth(self.word_match_label.fontMetrics().horizontalAdvance("Matches: 0000"))
         self.count_label = QLabel("Words: 0 | Chars: 0", self)
         self.pos_label = QLabel("Ln 1, Col 1", self)
         self.layout_label = QLabel("Keyboard: English India", self)
+        self.status.addPermanentWidget(self.word_match_label)
         self.status.addPermanentWidget(self.count_label)
         self.status.addPermanentWidget(self.pos_label)
         self.status.addPermanentWidget(self.layout_label)
@@ -708,6 +726,9 @@ class Notepad(QMainWindow):
         self._last_replace = ""
         self._last_replace_raw = ""
         self._progress_bar = None
+        self._word_highlight_selections = []
+        self._current_highlight_word = None
+        self._base_extra_selections = []
 
         self.current_path = None
         self.autosave_timer = QTimer(self)
@@ -1024,7 +1045,9 @@ class Notepad(QMainWindow):
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
+        self.editor.selectionChanged.connect(self._update_word_highlights)
         self.editor.cursorPositionChanged.connect(self._update_status_bar)
+        self.editor.cursorPositionChanged.connect(self._update_word_highlights)
 
         # Update window title on modification
         self.editor.modificationChanged.connect(self._update_title)
@@ -2511,6 +2534,86 @@ class Notepad(QMainWindow):
 
     def _on_text_changed(self):
         self._update_status_bar()
+        self._update_word_highlights()
+
+    def _clear_word_highlight_on_blur(self):
+        self._clear_word_highlights()
+        self._update_word_match_status(None, 0)
+
+    def _clear_word_highlight_on_navigation(self):
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            return
+        self._clear_word_highlights()
+        self._update_word_match_status(None, 0)
+
+    @staticmethod
+    def _is_single_word(text: str) -> bool:
+        if not text:
+            return False
+        return not re.search(r"\s", text)
+
+    def _update_word_highlights(self):
+        # Highlight all occurrences of the selected word; clear when selection disappears
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            self._clear_word_highlights()
+            self._update_word_match_status(None, 0)
+            return
+
+        selected = self._normalize_selected_text(cursor.selectedText())
+        if not self._is_single_word(selected):
+            self._clear_word_highlights()
+            self._update_word_match_status(None, 0)
+            return
+
+        self._clear_word_highlights()
+        count = self._apply_word_highlights(selected)
+        self._update_word_match_status(selected, count)
+
+    def _apply_word_highlights(self, word: str) -> int:
+        doc = self.editor.document()
+        search_cursor = QTextCursor(doc)
+        matches = []
+        flags = QTextDocument.FindWholeWords
+
+        while True:
+            match_cursor = doc.find(word, search_cursor, flags)
+            if match_cursor.isNull():
+                break
+
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = match_cursor
+            fmt = selection.format
+            fmt.setBackground(QColor("yellow"))
+            selection.format = fmt
+            matches.append(selection)
+
+            search_cursor = QTextCursor(match_cursor)
+            search_cursor.setPosition(match_cursor.selectionEnd())
+
+        base_extras = list(self.editor.extraSelections())
+        merged = base_extras + matches
+        self.editor.setExtraSelections(merged)
+
+        self._base_extra_selections = base_extras
+        self._word_highlight_selections = matches
+        self._current_highlight_word = word
+        return len(matches)
+
+    def _clear_word_highlights(self):
+        if not self._word_highlight_selections and not self._current_highlight_word:
+            return
+        self.editor.setExtraSelections(self._base_extra_selections)
+        self._word_highlight_selections = []
+        self._current_highlight_word = None
+        self._base_extra_selections = []
+
+    def _update_word_match_status(self, active_word: Optional[str], count: int):
+        if active_word is None:
+            self.word_match_label.setText("")
+            return
+        self.word_match_label.setText(f"Matches: {count}")
 
     def _update_status_bar(self):
         text = self.editor.toPlainText()
