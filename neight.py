@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2025.008"
+VERSION = "2026.001"
 
 
 try:
