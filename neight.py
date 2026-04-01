@@ -10,13 +10,14 @@ import webbrowser
 import ctypes
 import urllib.request
 import tempfile
+import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.001"
+VERSION = "2026.002"
 
 
 try:
@@ -24,7 +25,8 @@ try:
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
         QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
+        QMenu, QCheckBox
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
     from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication, QTextDocument
@@ -35,7 +37,8 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
         QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
+        QMenu, QCheckBox
     )
     from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument
     from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal
@@ -85,12 +88,92 @@ if sys.platform == "win32":
         """Switch to English India keyboard layout."""
         hkl = load_hkl(EN_IN)
         activate_hkl(hkl)
+
+    def get_current_layout() -> int:
+        """Return 1 if the active keyboard layout is Tamil Anjal, else 0.
+        Does NOT switch anything — read-only."""
+        # GetKeyboardLayout(0) returns the HKL for the calling thread.
+        # The low word is the language identifier (LANGID).
+        hkl = user32.GetKeyboardLayout(0)
+        lang_id = hkl & 0xFFFF
+        return 1 if lang_id == 0x0449 else 0  # 0x0449 = Tamil
+
+    def get_current_layout_label() -> str:
+        """Return a display string for the currently active keyboard layout.
+        Uses GetKeyboardLayoutNameW to read the exact KLID without switching."""
+        buf = ctypes.create_unicode_buffer(9)  # KL_NAMELENGTH = 9
+        if user32.GetKeyboardLayoutNameW(buf):
+            klid = buf.value.upper()
+            if klid == "00030449":
+                return "Keyboard: Tamil Anjal"
+            if klid == "00004009":
+                return "Keyboard: English India"
+        return "Keyboard: System Default"
+
+    def get_installed_ime_list() -> list:
+        """Return list of (klid, name) for all keyboard layouts installed for the current user.
+        Reads from the registry without activating or changing any layout."""
+        import winreg
+        results = []
+        try:
+            # Resolve substitutes: some preload entries point to a substitute KLID (e.g. IMEs)
+            substitutes: dict[str, str] = {}
+            try:
+                sub_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Keyboard Layout\Substitutes")
+                i = 0
+                while True:
+                    try:
+                        name, value, _ = winreg.EnumValue(sub_key, i)
+                        substitutes[name.upper().zfill(8)] = value.upper().zfill(8)
+                        i += 1
+                    except OSError:
+                        break
+                winreg.CloseKey(sub_key)
+            except Exception:
+                pass
+
+            # Enumerate preloaded layouts for the current user
+            preload_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Keyboard Layout\Preload")
+            i = 0
+            while True:
+                try:
+                    _, klid_raw, _ = winreg.EnumValue(preload_key, i)
+                    klid = klid_raw.upper().zfill(8)
+                    actual_klid = substitutes.get(klid, klid)
+                    # Look up display name in HKLM
+                    try:
+                        layout_key = winreg.OpenKey(
+                            winreg.HKEY_LOCAL_MACHINE,
+                            rf"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\{actual_klid}"
+                        )
+                        layout_name, _ = winreg.QueryValueEx(layout_key, "Layout Text")
+                        winreg.CloseKey(layout_key)
+                    except Exception:
+                        layout_name = "Unknown"
+                    results.append((actual_klid, layout_name))
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(preload_key)
+        except Exception:
+            pass
+        return results
+
 else:
     def switch_to_tamil_anjal():
         pass
 
     def switch_to_english_india():
         pass
+
+    def get_current_layout() -> int:
+        return 0
+
+    def get_current_layout_label() -> str:
+        return "Keyboard: System Default"
+
+    def get_installed_ime_list() -> list:
+        return []
 
 
 # ---------------------
@@ -695,6 +778,7 @@ class Notepad(QMainWindow):
         super().__init__()
         self.setWindowTitle("Untitled - Neight")
         self.resize(1000, 650)
+        self.setMinimumWidth(520)  # Ensures the right-pinned Settings menu is never cut off
 
         self.settings = SettingsManager()
         self.default_directory = Path.home()
@@ -713,7 +797,7 @@ class Notepad(QMainWindow):
         self.word_match_label.setMinimumWidth(self.word_match_label.fontMetrics().horizontalAdvance("Matches: 0000"))
         self.count_label = QLabel("Words: 0 | Chars: 0", self)
         self.pos_label = QLabel("Ln 1, Col 1", self)
-        self.layout_label = QLabel("Keyboard: English India", self)
+        self.layout_label = QLabel(get_current_layout_label(), self)
         self.status.addPermanentWidget(self.word_match_label)
         self.status.addPermanentWidget(self.count_label)
         self.status.addPermanentWidget(self.pos_label)
@@ -736,12 +820,18 @@ class Notepad(QMainWindow):
         self.autosave_enabled = False
         
         # Keyboard layout switching state
-        self._current_layout = 0  # 0 = English India, 1 = Tamil Anjal
+        # Detect the current system layout without switching anything.
+        self._current_layout = get_current_layout()  # 0 = English India, 1 = Tamil Anjal
         self._ctrl_press_time = 0  # For double Ctrl detection
         self._ctrl_press_timer = QTimer(self)
         self._ctrl_press_timer.setSingleShot(True)
         self._ctrl_press_timer.timeout.connect(self._reset_ctrl_press)
-        
+
+        # Keyboard quick switch settings (defaults; overridden properly in _load_preferences)
+        self._quick_switch_enabled = True
+        self._force_anjal_english = True
+        self._installed_imes = []  # Populated in _load_preferences
+
         self._create_actions()
         self._create_menus()
         self._connect_signals()
@@ -879,8 +969,12 @@ class Notepad(QMainWindow):
         self.autosave_15min_act = QAction("Every 15 minutes", self, checkable=True)
         self.autosave_30min_act = QAction("Every 30 minutes", self, checkable=True)
 
+        # Settings
+        self.keyboards_act = QAction("Keyboards…", self)
+
         # Help
         self.about_act = QAction("About", self)
+        self.debug_info_act = QAction("Debug Info", self)
 
     def _create_menus(self):
         menubar = self.menuBar()
@@ -961,15 +1055,20 @@ class Notepad(QMainWindow):
         format_menu.addAction(self.wrap_act)
         format_menu.addAction(self.font_act)
 
-        autosave_menu = format_menu.addMenu("Auto-save")
+        settings_menu = menubar.addMenu("&Settings")
+        autosave_menu = settings_menu.addMenu("Auto-save")
         autosave_menu.addAction(self.autosave_disabled_act)
         autosave_menu.addAction(self.autosave_2min_act)
         autosave_menu.addAction(self.autosave_5min_act)
         autosave_menu.addAction(self.autosave_15min_act)
         autosave_menu.addAction(self.autosave_30min_act)
+        settings_menu.addSeparator()
+        settings_menu.addAction(self.keyboards_act)
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction(self.about_act)
+        help_menu.addSeparator()
+        help_menu.addAction(self.debug_info_act)
 
     def _connect_signals(self):
         # File
@@ -1040,8 +1139,12 @@ class Notepad(QMainWindow):
         self.insert_hr_act.triggered.connect(self._insert_horizontal_rule)
         self.insert_table_act.triggered.connect(self._insert_table)
 
+        # Settings
+        self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
+
         # Help
         self.about_act.triggered.connect(self.show_about)
+        self.debug_info_act.triggered.connect(self._show_debug_info)
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
@@ -1063,23 +1166,22 @@ class Notepad(QMainWindow):
         if sys.platform != "win32":
             super().keyReleaseEvent(event)
             return
-        
-        # Check if Ctrl key was released
+
+        # Only track double-Ctrl presses when quick switch is enabled
         if event.key() in (Qt.Key_Control, Qt.Key_Meta):
-            current_time = time.time()
-            
-            # If this is the second Ctrl press within 500ms, toggle layout
-            if self._ctrl_press_time > 0 and (current_time - self._ctrl_press_time) < 0.5:
-                # Toggle to the other layout
-                new_layout = 1 - self._current_layout
-                self._toggle_keyboard_layout(new_layout)
-                self._ctrl_press_time = 0  # Reset
-                self._ctrl_press_timer.stop()
-            else:
-                # First Ctrl press - start timer
-                self._ctrl_press_time = current_time
-                self._ctrl_press_timer.start(500)  # 500ms timeout
-        
+            if getattr(self, '_quick_switch_enabled', False):
+                current_time = time.time()
+
+                # Second Ctrl release within 500 ms — trigger the switch
+                if self._ctrl_press_time > 0 and (current_time - self._ctrl_press_time) < 0.5:
+                    self._quick_switch()
+                    self._ctrl_press_time = 0  # Reset
+                    self._ctrl_press_timer.stop()
+                else:
+                    # First Ctrl release — open the detection window
+                    self._ctrl_press_time = current_time
+                    self._ctrl_press_timer.start(500)  # 500 ms timeout
+
         super().keyReleaseEvent(event)
 
     def _install_shortcuts(self):
@@ -1139,16 +1241,68 @@ class Notepad(QMainWindow):
             if target_layout == 0:
                 switch_to_english_india()
                 self.layout_label.setText("Keyboard: English India")
-                print("DEBUG: Switched to English India")  # Debug output
             else:
                 switch_to_tamil_anjal()
                 self.layout_label.setText("Keyboard: Tamil Anjal")
-                print("DEBUG: Switched to Tamil Anjal")  # Debug output
-        except Exception as e:
-            error_msg = f"Layout switch failed: {e}"
-            self.layout_label.setText(f"Keyboard: Error")
-            print(f"DEBUG: {error_msg}")  # Debug output
-    
+        except Exception:
+            self.layout_label.setText("Keyboard: Error")
+
+    def _quick_switch(self):
+        """Execute the double-Ctrl quick language switch.
+
+        In 'force' mode (force_anjal_english=True): always toggles between
+        English India and Tamil Anjal, regardless of other installed layouts.
+        In 'dynamic' mode (force_anjal_english=False): toggles between the
+        first two layouts in the user's installed keyboard layout list.
+        All errors are caught; the app never crashes from a failed switch.
+        """
+        if sys.platform != "win32":
+            return
+        if not getattr(self, '_quick_switch_enabled', False):
+            return
+        try:
+            if getattr(self, '_force_anjal_english', True):
+                # Force mode: toggle between English India (0) and Tamil Anjal (1)
+                new_layout = 1 - self._current_layout
+                self._toggle_keyboard_layout(new_layout)
+            else:
+                # Dynamic mode: toggle between the first two installed IMEs
+                imes = getattr(self, '_installed_imes', [])
+                if len(imes) < 2:
+                    # Not enough layouts available — nothing to switch.
+                    # (_quick_switch_enabled is always False at this point due to
+                    # the startup check in _load_preferences, but guard explicitly
+                    # here so no hardcoded Tamil/English layout is ever forced.)
+                    return
+
+                klid0, name0 = imes[0]
+                klid1, name1 = imes[1]
+
+                # Read the currently active KLID without switching anything
+                try:
+                    buf = ctypes.create_unicode_buffer(9)
+                    current_klid = buf.value.upper().zfill(8) if user32.GetKeyboardLayoutNameW(buf) else ""
+                except Exception:
+                    current_klid = ""
+
+                # Switch to the other layout in the pair
+                if current_klid == klid0.upper().zfill(8):
+                    target_klid, target_name = klid1, name1
+                    self._current_layout = 1
+                else:
+                    target_klid, target_name = klid0, name0
+                    self._current_layout = 0
+
+                try:
+                    hkl = load_hkl(target_klid)
+                    activate_hkl(hkl)
+                    self.layout_label.setText(f"Keyboard: {target_name}")
+                except Exception as e:
+                    self.layout_label.setText("Keyboard: Error")
+        except Exception:
+            # Safety net: never let a quick-switch failure crash the app
+            pass
+
     def _reset_ctrl_press(self):
         """Reset the Ctrl press counter."""
         self._ctrl_press_time = 0
@@ -2329,6 +2483,215 @@ class Notepad(QMainWindow):
             f"Neight v{VERSION} (Using {QT_LIB})\nA lightweight UTF-8 text editor with advanced features, word count, line numbers and more.\nGenerated by Github Copilot for venkatarangan.com."
         )
 
+    def _show_debug_info(self):
+        """Show a dialog with diagnostic information useful for bug reports."""
+        lines = []
+
+        # Neight version
+        try:
+            lines.append(f"Neight Version      : {VERSION}")
+        except Exception:
+            lines.append("Neight Version      : N/A")
+
+        # Windows OS version
+        try:
+            release, ver, csd, ptype = platform.win32_ver()
+            lines.append(f"Windows Version     : {release}  (Build {ver})")
+        except Exception:
+            try:
+                lines.append(f"OS Version          : {platform.platform()}")
+            except Exception:
+                lines.append("OS Version          : N/A")
+
+        # Screen resolution
+        try:
+            screen = QGuiApplication.primaryScreen()
+            sz = screen.size()
+            dpr = screen.devicePixelRatio()
+            lines.append(f"Screen Resolution   : {sz.width()} x {sz.height()} px  (DPR {dpr:.1f})")
+        except Exception:
+            lines.append("Screen Resolution   : N/A")
+
+        # Python version
+        try:
+            lines.append(f"Python Version      : {sys.version}")
+        except Exception:
+            lines.append("Python Version      : N/A")
+
+        # Qt / binding version
+        try:
+            if QT_LIB == "PySide6":
+                import PySide6.QtCore as _qtcore
+                import PySide6 as _ps6
+                lines.append(f"Qt Runtime          : PySide6 {_ps6.__version__}  (Qt {_qtcore.__version__})")
+            else:
+                from PyQt5.QtCore import QT_VERSION_STR as _qt_ver
+                from PyQt5.QtCore import PYQT_VERSION_STR as _pyqt_ver
+                lines.append(f"Qt Runtime          : PyQt5 {_pyqt_ver}  (Qt {_qt_ver})")
+        except Exception:
+            lines.append(f"Qt Runtime          : {QT_LIB} (version unavailable)")
+
+        # Installed keyboard layouts / IMEs
+        lines.append("")
+        lines.append("Installed Keyboard Layouts / IMEs:")
+        try:
+            ime_list = get_installed_ime_list()
+            if ime_list:
+                for klid, name in ime_list:
+                    lines.append(f"  [{klid}]  {name}")
+            else:
+                lines.append("  (none found)")
+        except Exception:
+            lines.append("  N/A")
+
+        text = "\n".join(lines)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Debug Info")
+        dialog.setMinimumSize(560, 420)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        layout = QVBoxLayout(dialog)
+
+        intro = QLabel(
+            "The information below describes your system environment. "
+            "You can copy and paste it when reporting issues or bugs.",
+            dialog
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        text_box = QTextEdit(dialog)
+        text_box.setReadOnly(True)
+        text_box.setPlainText(text)
+        text_box.setFont(QFont("Consolas", 9))
+        layout.addWidget(text_box)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+
+        dialog.exec()
+
+    def _show_keyboards_dialog(self):
+        """Show the Keyboards settings dialog.
+
+        Lets the user configure the double-Ctrl quick language switch:
+          - Enable / disable the feature (auto-disabled when <2 IMEs are installed).
+          - Choose whether to always use Tamil Anjal ↔ English (India) as the pair,
+            or to use whatever the first two installed layouts happen to be.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Keyboard Settings")
+        dialog.setMinimumWidth(500)
+
+        outer = QVBoxLayout(dialog)
+        outer.setSpacing(10)
+
+        installed_imes = getattr(self, '_installed_imes', [])
+        ime_count = len(installed_imes)
+
+        # Read persisted settings directly from the file so the dialog always
+        # reflects the last-saved state rather than potentially stale in-memory values.
+        try:
+            saved = self.settings.load()
+        except Exception:
+            saved = {}
+        saved_qs = bool(saved.get("quick_switch_enabled", True))
+        saved_force = bool(saved.get("force_anjal_english", True))
+
+        # ── Quick-switch master toggle ──────────────────────────────────────
+        quick_switch_cb = QCheckBox(
+            "Enable quick language switch by double-pressing the Ctrl key", dialog
+        )
+        quick_switch_cb.setChecked(saved_qs)
+
+        if ime_count < 2:
+            # Feature is unavailable — explain why and lock the checkbox
+            quick_switch_cb.setChecked(False)
+            quick_switch_cb.setEnabled(False)
+            unavail_label = QLabel(
+                "Quick switch requires at least two keyboard layouts to be installed. "
+                "Only one layout was detected on this system; the feature has been "
+                "turned off automatically.",
+                dialog
+            )
+            unavail_label.setWordWrap(True)
+            unavail_label.setStyleSheet("color: gray; font-style: italic;")
+            outer.addWidget(unavail_label)
+
+        outer.addWidget(quick_switch_cb)
+
+        # ── Info label — only shown when >2 IMEs are present ────────────────
+        info_label = QLabel(dialog)
+        info_label.setWordWrap(True)
+        if ime_count > 2 and len(installed_imes) >= 2:
+            first_name = installed_imes[0][1]
+            second_name = installed_imes[1][1]
+            info_label.setText(
+                f"\u26a0\u202f More than two keyboard layouts are installed on this system. "
+                f"When quick switch is active it will toggle only between the first two "
+                f"layouts listed in your Windows keyboard settings \u2014 currently "
+                f"\u201c{first_name}\u201d and \u201c{second_name}\u201d. "
+                f"To always switch between Tamil Anjal and English (India) instead, "
+                f"enable the option below."
+            )
+            info_label.setStyleSheet("color: #8B6914; background: #FFF8DC; "
+                                     "border: 1px solid #DEB887; border-radius: 4px; "
+                                     "padding: 6px;")
+        outer.addWidget(info_label)
+
+        # ── Force Tamil Anjal / English India pair ───────────────────────────
+        force_cb = QCheckBox(
+            "Always switch between Tamil Anjal and English (India),\n"
+            "even when other keyboard layouts are installed",
+            dialog
+        )
+        force_cb.setChecked(saved_force)
+        outer.addWidget(force_cb)
+
+        # ── Dynamic visibility: update labels/checkboxes as user toggles ────
+        def _refresh_visibility():
+            enabled = quick_switch_cb.isEnabled() and quick_switch_cb.isChecked()
+            info_label.setVisible(enabled and ime_count > 2)
+            force_cb.setVisible(enabled)
+            force_cb.setEnabled(enabled)
+
+        quick_switch_cb.toggled.connect(lambda _checked: _refresh_visibility())
+        _refresh_visibility()
+
+        # ── OK / Cancel ──────────────────────────────────────────────────────
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        outer.addWidget(btn_box)
+
+        if dialog.exec():
+            new_qs = bool(quick_switch_cb.isChecked() and quick_switch_cb.isEnabled())
+            new_force = bool(force_cb.isChecked())
+
+            # Update in-memory state immediately
+            self._quick_switch_enabled = new_qs
+            self._force_anjal_english = new_force
+
+            # If quick switch was just disabled, clear any pending Ctrl-press state
+            # so a stale first-press cannot accidentally fire a layout switch later.
+            if not new_qs:
+                self._ctrl_press_time = 0
+                try:
+                    self._ctrl_press_timer.stop()
+                except Exception:
+                    pass
+
+            # Persist to settings file
+            try:
+                data = self.settings.load()
+                data["quick_switch_enabled"] = new_qs
+                data["force_anjal_english"] = new_force
+                self.settings.save(data)
+            except Exception:
+                pass
+
     # --- Preferences ---
     def _load_preferences(self):
         data = self.settings.load()
@@ -2376,7 +2739,20 @@ class Notepad(QMainWindow):
                 self.editor.setFont(font)
             except Exception:
                 pass
-        
+
+        # Keyboard quick switch settings
+        try:
+            self._installed_imes = get_installed_ime_list()
+        except Exception:
+            self._installed_imes = []
+        ime_count = len(self._installed_imes)
+        # If fewer than two layouts are installed, quick switch is impossible
+        if ime_count < 2:
+            self._quick_switch_enabled = False
+        else:
+            self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
+        self._force_anjal_english = bool(data.get("force_anjal_english", True))
+
         # Last opened file
         last_file = data.get("last_opened_file")
         if isinstance(last_file, str) and last_file:
@@ -2408,6 +2784,8 @@ class Notepad(QMainWindow):
                 "window_maximized": bool(self.isMaximized()),
                 "autosave_interval": autosave_interval,
                 "last_opened_file": self.current_path if self.current_path else "",
+                "quick_switch_enabled": getattr(self, '_quick_switch_enabled', True),
+                "force_anjal_english": getattr(self, '_force_anjal_english', True),
             })
             self.settings.save(data)
         except Exception:

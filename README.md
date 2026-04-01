@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2025.007** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
+**Current Version: 2026.001** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
 
 **Neight** is a lightweight text editor for Windows inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable Windows app entirely through Generative AI.
 
@@ -46,7 +46,7 @@ The twist: I didn’t type code manually except for minor display texts. Everyth
 
 ---
 ## Screenshot
-![Neight Screenshot](screenshots/neight-5.png)
+![Neight Screenshot](screenshots/neight-1.png)
 
 More screenshots are in the screenshots folder
 
@@ -66,7 +66,7 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 
 * **Line numbers** and **column tracking**
 * **Word and character count** (handy for magazine and blog writing)
-* **Auto-save** every 5 minutes (default, configurable)
+* **Auto-save** every 5 minutes (default, configurable) — interval is set under **Settings → Auto-save**
 * **Remembers**:
 
   * Last opened file
@@ -75,11 +75,15 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Quick Google Search**: Select text and press **Ctrl+E** or right-click → "Search with Google"
 * **Plain-text paste shortcut**: Hold **Shift** with paste (Shift+Ctrl+V or Shift+Insert) to strip formatting
 * **Blank line cleanup**: Edit → Collapse Blank Lines trims consecutive empty rows across the document
-* **Language toggle shortcut**:
+* **Settings menu** (Alt+S): A dedicated menu between Format and Help in the menu bar. Houses Auto-save controls and the new Keyboards settings.
+* **Language toggle / keyboard switching**:
 
-  * Press **Ctrl key twice quickly** to toggle between Tamil Anjal and English (India)
-  * Or use **Ctrl+,** for English (India) and **Ctrl+.** for Tamil Anjal
-  * Current keyboard layout is shown in the status bar bottom right
+  * Press **Ctrl key twice quickly** to toggle between your two active keyboard layouts
+  * Or use **Ctrl+,** for the first layout and **Ctrl+.** for the second
+  * Works with **any two keyboard layouts** — not limited to Tamil Anjal and English (India)
+  * Fully configurable via **Settings → Keyboards…** (see details below)
+  * Current keyboard layout is always shown in the bottom-right corner of the status bar
+* **Debug Info** (Help → Debug Info): Opens a panel showing Qt version, Python version, operating system details, active keyboard layout, and the path to your settings file — handy for troubleshooting or bug reports
 * **Word match highlighting (New in v2025.007)**: Selecting a single word highlights all occurrences in yellow and shows the match count on the left of the status bar; highlights clear automatically when you move the caret away or lose focus
 
 ### Markdown Support (New in v2025.001!)
@@ -117,6 +121,94 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documentation.
 
 ---
+
+## What's New in v2026.001
+
+### Bug Fix: No More Unwanted Keyboard Switching at Startup
+
+Previously, Neight would switch your active keyboard layout to **Tamil Anjal** every time it launched — even if you didn't have that layout installed. Anyone using a different pair of keyboards (e.g., English US + French, or English UK + Devanagari) would find their keyboard layout silently changed just by opening the app.
+
+This is now fixed. Neight reads your current layout at startup without touching it.
+
+---
+
+### New: Settings Menu (Alt+S)
+
+A new top-level **Settings** menu has been added to the menu bar, positioned between Format and Help. It gives app configuration options a proper home.
+
+- **Auto-save** has moved from the Format menu into Settings → Auto-save *(same options, new location)*
+- **Keyboards…** — a new dialog described below
+
+---
+
+### New: Debug Info (Help → Debug Info)
+
+A new **Debug Info** option has been added under the Help menu. It opens a small read-only panel showing:
+
+| Item | What it tells you |
+| --- | --- |
+| Qt library | Whether PySide6 or PyQt5 is running, and the version number |
+| Python version | The Python interpreter version in use |
+| Operating system | Windows version and platform details |
+| Active keyboard layout | The layout that is currently active when you open the dialog |
+| Settings file path | Exactly where Neight is reading and writing your settings |
+
+This is most useful when something isn't working as expected and you want to share details in a bug report.
+
+---
+
+### New: Settings → Keyboards… — A Plain-English Guide
+
+![Neight Keyboards screen screenshot](screenshots/neight-3.png)
+
+#### What is the double-Ctrl quick switch?
+
+Neight has a feature that lets you switch between two keyboard layouts by **pressing the Ctrl key twice quickly** (within half a second). This is designed for bilingual users — particularly Tamil/English writers — who want a fast way to flip between languages without reaching for the mouse.
+
+When you switch, the layout name (e.g., *Keyboard: Tamil Anjal*) updates in the bottom-right corner of the status bar so you always know what's active.
+
+#### Where is the dialog?
+
+Go to **Settings → Keyboards…** in the menu bar. Settings is also accessible with the keyboard shortcut **Alt+S**.
+
+#### What does the dialog let you control?
+
+**1. Enable or disable the feature entirely**
+
+The top checkbox — *"Enable quick language switch by double-pressing the Ctrl key"* — turns the whole feature on or off.
+
+- **Off**: Pressing Ctrl twice does nothing special. Neight behaves like a normal text editor.
+- **On**: Two quick Ctrl presses will switch between your two chosen layouts.
+
+> **Automatic disable:** If Windows reports that only one keyboard layout is installed on your system, the checkbox is automatically ticked off and greyed out. There is nothing to switch between, so the feature isn't available.
+
+**2. Which two layouts to switch between**
+
+When the feature is enabled and you have more than one layout installed, a second option appears:
+
+> *"Always switch between Tamil Anjal and English (India), even when other keyboard layouts are installed"*
+
+- **Tick this** if you specifically use Tamil Anjal and English (India) and always want to toggle between exactly those two — regardless of what else is installed in Windows.
+- **Leave it unticked** if you want Neight to use your own first two installed keyboard layouts, whatever they are. For example, if your first two layouts are *English (United States)* and *French (France)*, Neight will switch between those two.
+
+> **If you have more than two layouts installed:** A yellow notice will appear in the dialog telling you which two layouts are currently first in your Windows keyboard settings. Those are the ones Neight will switch between if the Tamil/English option is unticked. To take full control over the pair, tick that option.
+
+**3. What about users who don't have Tamil Anjal installed?**
+
+Nothing is ever forced on you. If you leave the Tamil/English option unticked, Neight switches strictly between your own first two installed layouts and never touches Tamil Anjal or English (India). Those layout identifiers only come into play if *you* explicitly tick that checkbox.
+
+#### Step-by-step: how to set it up
+
+1. Open **Settings → Keyboards…**
+2. Tick *"Enable quick language switch by double-pressing the Ctrl key"* if it isn't already ticked
+3. If you want to always switch between Tamil Anjal and English (India) specifically, tick the second option
+4. Click **OK** to save
+5. Press Ctrl twice quickly inside your document — the layout will switch and the status bar will update
+
+Your choices are saved automatically to the settings file and remembered the next time you open Neight.
+
+---
+
 ## Clone the Repository
 
 If you want the full source code:
@@ -171,7 +263,7 @@ After the build completes, your compiled file will be in the **dist** folder.
 ## Running Neight
 
 * Tested on **Windows 11 (25H2)**
-* Requires Tamil (India) – Tamil Anjal and English (India) keyboard layouts installed
+* Works with any keyboard layouts — no specific layouts are required
 
 Run the app once and it will create a **settings.json** file next to the executable.
 It stores your preferences (font, window size, last opened file, autosave interval, etc.).
@@ -251,6 +343,8 @@ This file remembers:
 * Window size
 * Auto-save interval
 * Last used directory
+* Quick-switch enabled/disabled (`quick_switch_enabled`)
+* Whether to force Tamil Anjal ↔ English (India) pair (`force_anjal_english`)
 
 ---
 
@@ -296,7 +390,7 @@ See the LICENSE file for details.
 ## Acknowledgement of AI
 
 This project was entirely built using **AI tools**:
-**GPT-5 (ChatGPT)**, **GitHub Copilot**, and **Claude Sonnet 4.5 (Preview)**, with **GPT-5 Codex (Preview)** for improvements.
+**GPT-5 (ChatGPT)**, **GitHub Copilot**, and **Claude Sonnet 4.6 (Preview)**, with **GPT-5 Codex (Preview)** for improvements.
 I didn’t manually write the code, except for text and configuration tweaks.
 It’s a working demonstration of what’s now possible with AI-driven coding.
 
