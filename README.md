@@ -389,10 +389,13 @@ See the LICENSE file for details.
 
 ## Acknowledgement of AI
 
-This project was entirely built using **AI tools**:
+The first version of this project was built entirely using **AI tools**:
 **GPT-5 (ChatGPT)**, **GitHub Copilot**, and **Claude Sonnet 4.6 (Preview)**, with **GPT-5 Codex (Preview)** for improvements.
-I didn’t manually write the code, except for text and configuration tweaks.
-It’s a working demonstration of what’s now possible with AI-driven coding.
+No code was written manually — only text and configuration tweaks.
+
+Later versions have continued the same AI-assisted approach, always using the latest available models. For example, **v2026.002** was enhanced using **Claude Sonnet 4.6 High** inside GitHub Copilot.
+
+Neight is a living demonstration of what's now possible with AI-driven software development — and it keeps getting better as the models do.
 
 ---
 
