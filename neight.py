@@ -3,6 +3,7 @@
 # python -m pip install pyinstaller
 
 import sys
+import os
 import json
 import re
 import time
@@ -16,7 +17,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.002"
+VERSION = "2026.003"
 
 
 try:
@@ -90,43 +91,37 @@ if sys.platform == "win32":
         # The function returns the previously active HKL, so result could be any value
         # We don't check for error here as the function typically succeeds
 
-    # Tamil Anjal keyboard layout identifier
-    # 0x0449 = Tamil language, 0003 = Tamil Anjal input method
-    TAMIL_ANJAL = "00030449"
-    
-    # English India keyboard layout identifier
-    # 0x4009 = English (India)
-    EN_IN = "00004009"
-
     def switch_to_tamil_anjal():
-        """Switch to Tamil Anjal keyboard layout."""
-        hkl = load_hkl(TAMIL_ANJAL)
-        activate_hkl(hkl)
+        """Switch to the detected Tamil keyboard layout."""
+        if TAMIL_CHOICE:
+            hkl = load_hkl(TAMIL_CHOICE)
+            activate_hkl(hkl)
 
     def switch_to_english_india():
-        """Switch to English India keyboard layout."""
-        hkl = load_hkl(EN_IN)
-        activate_hkl(hkl)
+        """Switch to the detected English keyboard layout."""
+        if ENGLISH_CHOICE:
+            hkl = load_hkl(ENGLISH_CHOICE)
+            activate_hkl(hkl)
 
     def get_current_layout() -> int:
-        """Return 1 if the active keyboard layout is Tamil Anjal, else 0.
+        """Return 1 if the active keyboard layout matches the detected Tamil choice, else 0.
         Does NOT switch anything — read-only."""
-        # GetKeyboardLayout(0) returns the HKL for the calling thread.
-        # The low word is the language identifier (LANGID).
-        hkl = user32.GetKeyboardLayout(0)
-        lang_id = hkl & 0xFFFF
-        return 1 if lang_id == 0x0449 else 0  # 0x0449 = Tamil
-
-    def get_current_layout_label() -> str:
-        """Return a display string for the currently active keyboard layout.
-        Uses GetKeyboardLayoutNameW to read the exact KLID without switching."""
+        if not TAMIL_CHOICE:
+            return 0
         buf = ctypes.create_unicode_buffer(9)  # KL_NAMELENGTH = 9
         if user32.GetKeyboardLayoutNameW(buf):
-            klid = buf.value.upper()
-            if klid == "00030449":
-                return "Keyboard: Tamil Anjal"
-            if klid == "00004009":
-                return "Keyboard: English India"
+            return 1 if buf.value.upper().zfill(8) == TAMIL_CHOICE else 0
+        return 0
+
+    def get_current_layout_label() -> str:
+        """Return a display string for the currently active keyboard layout."""
+        buf = ctypes.create_unicode_buffer(9)  # KL_NAMELENGTH = 9
+        if user32.GetKeyboardLayoutNameW(buf):
+            klid = buf.value.upper().zfill(8)
+            if TAMIL_CHOICE and klid == TAMIL_CHOICE:
+                return f"Keyboard: {TAMIL_CHOICE_NAME}"
+            if ENGLISH_CHOICE and klid == ENGLISH_CHOICE:
+                return f"Keyboard: {ENGLISH_CHOICE_NAME}"
         return "Keyboard: System Default"
 
     def get_installed_ime_list() -> list:
@@ -184,10 +179,6 @@ elif sys.platform == "darwin":
     # Uses Text Input Services (TIS) via Carbon framework through ctypes.
     # No extra packages required.
     # ------------------------------------
-
-    # macOS input source bundle IDs
-    TAMIL_ANJAL_MAC = "com.apple.inputmethod.Tamil.TamilAnjalIM"
-    EN_IN_MAC = "com.apple.keylayout.EnglishIndia"
 
     _kCFStringEncodingUTF8 = 0x08000100
     _macos_cf = None
@@ -290,23 +281,25 @@ elif sys.platform == "darwin":
             return ""
 
     def switch_to_tamil_anjal():
-        """Switch to Tamil Anjal keyboard layout."""
-        _macos_select_source(TAMIL_ANJAL_MAC)
+        """Switch to the detected Tamil input source."""
+        if TAMIL_CHOICE:
+            _macos_select_source(TAMIL_CHOICE)
 
     def switch_to_english_india():
-        """Switch to English India keyboard layout."""
-        _macos_select_source(EN_IN_MAC)
+        """Switch to the detected English input source."""
+        if ENGLISH_CHOICE:
+            _macos_select_source(ENGLISH_CHOICE)
 
     def get_current_layout() -> int:
         sid = _macos_current_source_id()
-        return 1 if "Tamil" in sid else 0
+        return 1 if (TAMIL_CHOICE and sid == TAMIL_CHOICE) else 0
 
     def get_current_layout_label() -> str:
         sid = _macos_current_source_id()
-        if "Tamil" in sid:
-            return "Keyboard: Tamil Anjal"
-        if EN_IN_MAC in sid:
-            return "Keyboard: English India"
+        if TAMIL_CHOICE and sid == TAMIL_CHOICE:
+            return f"Keyboard: {TAMIL_CHOICE_NAME}"
+        if ENGLISH_CHOICE and sid == ENGLISH_CHOICE:
+            return f"Keyboard: {ENGLISH_CHOICE_NAME}"
         return "Keyboard: System Default"
 
     def get_installed_ime_list() -> list:
@@ -354,11 +347,76 @@ else:
 # ------------------------------------
 # Cross-platform keyboard helpers
 # ------------------------------------
+
+# Auto-detected keyboard choices — populated at startup by _init_keyboard_choices().
+# Platform-native identifiers: KLID string on Windows, bundle-ID string on macOS.
+TAMIL_CHOICE: Optional[str] = None
+ENGLISH_CHOICE: Optional[str] = None
+TAMIL_CHOICE_NAME: str = "Tamil"
+ENGLISH_CHOICE_NAME: str = "English"
+
+
+def _is_tamil_ime(klid: str) -> bool:
+    """Return True if the given platform-native keyboard ID belongs to a Tamil layout."""
+    if sys.platform == "darwin":
+        return "tamil" in klid.lower()
+    if sys.platform == "win32":
+        try:
+            # KLID format: 8 hex digits; last 4 are the LANGID.
+            # Primary language bits (low 10 bits of LANGID): 0x049 = Tamil.
+            return (int(klid[-4:], 16) & 0x3FF) == 0x049
+        except Exception:
+            return False
+    return False
+
+
+def _is_english_ime(klid: str) -> bool:
+    """Return True if the given platform-native keyboard ID belongs to an English layout."""
+    if sys.platform == "darwin":
+        # Any non-Tamil layout is considered English-family for our purposes.
+        return not _is_tamil_ime(klid)
+    if sys.platform == "win32":
+        try:
+            # Primary language bits: 0x009 = English.
+            return (int(klid[-4:], 16) & 0x3FF) == 0x009
+        except Exception:
+            return False
+    return False
+
+
+def _init_keyboard_choices(installed_imes: Optional[list] = None) -> None:
+    """Scan installed IMEs and set TAMIL_CHOICE / ENGLISH_CHOICE module globals.
+
+    Accepts an already-fetched list to avoid a second call to get_installed_ime_list().
+    If omitted the list is fetched internally.
+    """
+    global TAMIL_CHOICE, ENGLISH_CHOICE, TAMIL_CHOICE_NAME, ENGLISH_CHOICE_NAME
+    if installed_imes is None:
+        try:
+            installed_imes = get_installed_ime_list()
+        except Exception:
+            return
+    tamil_id = tamil_name = english_id = english_name = None
+    for klid, name in installed_imes:
+        if tamil_id is None and _is_tamil_ime(klid):
+            tamil_id, tamil_name = klid, name
+        elif english_id is None and _is_english_ime(klid):
+            english_id, english_name = klid, name
+        if tamil_id and english_id:
+            break
+    if tamil_id:
+        TAMIL_CHOICE = tamil_id
+        TAMIL_CHOICE_NAME = tamil_name
+    if english_id:
+        ENGLISH_CHOICE = english_id
+        ENGLISH_CHOICE_NAME = english_name
+
+
 def _get_current_klid() -> str:
     """Return the active keyboard layout identifier in a platform-native format.
 
     Windows: 8-character uppercase hex KLID (e.g. "00030449")
-    macOS:   bundle-ID string  (e.g. "com.apple.inputmethod.Tamil.TamilAnjalIM")
+    macOS:   bundle-ID string  (e.g. "com.apple.inputmethod.Tamil.AnjalIM")
     Other:   empty string
     """
     if sys.platform == "win32":
@@ -1449,8 +1507,8 @@ class Notepad(QMainWindow):
     def _toggle_keyboard_layout(self, target_layout):
         """Switch to the first (0) or second (1) keyboard layout.
 
-        In force mode (_force_anjal_english=True): always uses the hardcoded
-        English India / Tamil Anjal pair.
+        In force mode (_force_anjal_english=True): always uses the auto-detected
+        English / Tamil pair (ENGLISH_CHOICE / TAMIL_CHOICE).
         In dynamic mode (_force_anjal_english=False): uses the first two entries
         in the user's installed keyboard layout list, matching the behaviour of
         the double-Ctrl quick switch.
@@ -1461,13 +1519,13 @@ class Notepad(QMainWindow):
         self._current_layout = target_layout
         try:
             if getattr(self, '_force_anjal_english', True):
-                # Force mode: always use the Tamil Anjal / English India pair
+                # Force mode: use the auto-detected Tamil / English pair
                 if target_layout == 0:
                     switch_to_english_india()
-                    self.layout_label.setText("Keyboard: English India")
+                    self.layout_label.setText(f"Keyboard: {ENGLISH_CHOICE_NAME}")
                 else:
                     switch_to_tamil_anjal()
-                    self.layout_label.setText("Keyboard: Tamil Anjal")
+                    self.layout_label.setText(f"Keyboard: {TAMIL_CHOICE_NAME}")
             else:
                 # Dynamic mode: use whatever the first two installed layouts are
                 imes = getattr(self, '_installed_imes', [])
@@ -1985,6 +2043,11 @@ class Notepad(QMainWindow):
         doc_cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
         doc_cursor.insertText(collapsed)
         doc_cursor.endEditBlock()
+
+        doc_len = self.editor.document().characterCount()
+        # Clamp positions to valid range to avoid Qt "out of range" warnings.
+        new_anchor = max(0, min(new_anchor, doc_len))
+        new_pos = max(0, min(new_pos, doc_len))
 
         restored_cursor = self.editor.textCursor()
         restored_cursor.setPosition(new_anchor)
@@ -2788,7 +2851,7 @@ class Notepad(QMainWindow):
 
         Lets the user configure the double-Ctrl quick language switch:
           - Enable / disable the feature (auto-disabled when <2 IMEs are installed).
-          - Choose whether to always use Tamil Anjal ↔ English (India) as the pair,
+          - Choose whether to always use the auto-detected Tamil ↔ English pair,
             or to use whatever the first two installed layouts happen to be.
         """
         dialog = QDialog(self)
@@ -2838,26 +2901,49 @@ class Notepad(QMainWindow):
         if ime_count > 2 and len(installed_imes) >= 2:
             first_name = installed_imes[0][1]
             second_name = installed_imes[1][1]
+            # Build a description of the detected Tamil/English pair for the hint
+            if TAMIL_CHOICE and ENGLISH_CHOICE:
+                pair_desc = f"\u201c{TAMIL_CHOICE_NAME}\u201d and \u201c{ENGLISH_CHOICE_NAME}\u201d"
+                force_hint = f"To always switch between the detected Tamil and English keyboards ({pair_desc}) instead, enable the option below."
+            else:
+                force_hint = "No Tamil/English keyboard pair could be auto-detected on this system."
             info_label.setText(
                 f"\u26a0\u202f More than two keyboard layouts are installed on this system. "
                 f"When quick switch is active it will toggle only between the first two "
                 f"layouts listed in your system keyboard settings \u2014 currently "
                 f"\u201c{first_name}\u201d and \u201c{second_name}\u201d. "
-                f"To always switch between Tamil Anjal and English (India) instead, "
-                f"enable the option below."
+                f"{force_hint}"
             )
             info_label.setStyleSheet("color: #8B6914; background: #FFF8DC; "
                                      "border: 1px solid #DEB887; border-radius: 4px; "
                                      "padding: 6px;")
         outer.addWidget(info_label)
 
-        # ── Force Tamil Anjal / English India pair ───────────────────────────
-        force_cb = QCheckBox(
-            "Always switch between Tamil Anjal and English (India),\n"
-            "even when other keyboard layouts are installed",
-            dialog
-        )
-        force_cb.setChecked(saved_force)
+        # ── Force auto-detected Tamil / English pair ─────────────────────────
+        # Build checkbox label showing which keyboards were detected.
+        if TAMIL_CHOICE and ENGLISH_CHOICE:
+            force_label = (
+                f"Always switch between {TAMIL_CHOICE_NAME} and {ENGLISH_CHOICE_NAME} "
+                f"(auto-detected),\neven when other keyboard layouts are installed"
+            )
+            force_cb_enabled = True
+        else:
+            detected_parts = []
+            if TAMIL_CHOICE:
+                detected_parts.append(f"Tamil: {TAMIL_CHOICE_NAME}")
+            if ENGLISH_CHOICE:
+                detected_parts.append(f"English: {ENGLISH_CHOICE_NAME}")
+            missing = "Tamil" if not TAMIL_CHOICE else "English"
+            force_label = (
+                f"Always switch between auto-detected Tamil and English keyboards\n"
+                f"(no {missing} keyboard detected \u2014 option unavailable)"
+            )
+            force_cb_enabled = False
+
+        force_cb = QCheckBox(force_label, dialog)
+        force_cb.setChecked(saved_force and force_cb_enabled)
+        if not force_cb_enabled:
+            force_cb.setEnabled(False)
         outer.addWidget(force_cb)
 
         # ── Dynamic visibility: update labels/checkboxes as user toggles ────
@@ -2865,7 +2951,8 @@ class Notepad(QMainWindow):
             enabled = quick_switch_cb.isEnabled() and quick_switch_cb.isChecked()
             info_label.setVisible(enabled and ime_count > 2)
             force_cb.setVisible(enabled)
-            force_cb.setEnabled(enabled)
+            # Respect whether a Tamil/English pair was actually detected
+            force_cb.setEnabled(enabled and force_cb_enabled)
 
         quick_switch_cb.toggled.connect(lambda _checked: _refresh_visibility())
         _refresh_visibility()
@@ -2955,6 +3042,8 @@ class Notepad(QMainWindow):
             self._installed_imes = get_installed_ime_list()
         except Exception:
             self._installed_imes = []
+        # Detect first Tamil and first English from installed layouts
+        _init_keyboard_choices(self._installed_imes)
         ime_count = len(self._installed_imes)
         # If fewer than two layouts are installed, quick switch is impossible
         if ime_count < 2:
@@ -3224,6 +3313,11 @@ class Notepad(QMainWindow):
 
 
 def main():
+    # Suppress Qt font-database warnings about missing OpenType support for certain
+    # scripts (e.g. script 16 = Tamil on macOS with .AppleSystemUIFont).  Must be
+    # set before QApplication is constructed.
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.text.font.db=false")
+
     app = QApplication(sys.argv)
     initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
     window = Notepad(initial_file=initial_file)

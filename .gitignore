@@ -187,3 +187,7 @@ settings.json
 CODE_REVIEW_AND_SUGGESTIONS.md
 CHANGELOG.md
 deploylocal.bat
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
