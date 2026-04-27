@@ -10,10 +10,11 @@
 ### Option 1: Download Pre-built Executable (Recommended)
 
 **Direct Download:**
-- [Download Neight.exe](https://github.com/venkatarangan/neight/raw/main/dist/Neight.exe) (~43 MB)
+- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/raw/main/dist/Neight.exe) (~43 MB)
+- **macOS (Apple Silicon / arm64):** [Download Neight](https://github.com/venkatarangan/neight/raw/main/dist/Neight) (~38 MB) — standalone single-file executable, no installer needed
 
-**Installation Steps:**
-1. Download the executable from the link above
+**Windows installation:**
+1. Download `Neight.exe` from the link above
 2. Copy `Neight.exe` to a folder of your choice:
    - For personal use: `C:\Users\<YourName>\Apps\Neight\`
    - System-wide (requires admin): `C:\Program Files\Neight\`
@@ -21,6 +22,20 @@
 4. Double-click to run!
 
 **Note:** Since there's no Windows installer yet, Windows Defender SmartScreen might show a warning on first run. Click "More info" → "Run anyway" to proceed.
+
+**macOS installation:**
+1. Download the `Neight` file from the link above
+2. Open Terminal and make it executable:
+   ```bash
+   chmod +x ~/Downloads/Neight
+   ```
+3. Run it directly:
+   ```bash
+   ~/Downloads/Neight
+   ```
+   Or move it to `/Applications` first, then double-click via Finder (right-click → Open on first run to bypass Gatekeeper).
+
+> **Note:** The current macOS build is a single-file arm64 executable built on an Apple Silicon Mac mini. It has not been notarised by Apple, so macOS Gatekeeper will ask you to confirm the first time you open it.
 
 ---
 ## Why I built Neight
@@ -124,11 +139,20 @@ See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documenta
 
 ## What's New in v2026.002
 
-### macOS Support
+### macOS Support — Including Pre-built Binary
 
-Neight now runs on **macOS** in addition to Windows. The keyboard layout switching feature — including the double-Ctrl quick switch and the **Settings → Keyboards…** dialog — works on macOS using the native Text Input Services (TIS) framework via the Carbon framework. No extra packages are required. The macOS implementation mirrors the Windows behavior: it reads and switches input sources using their bundle IDs (e.g., `com.apple.inputmethod.Tamil.TamilAnjalIM`) without any third-party dependencies.
+Neight now runs on **macOS** in addition to Windows. A pre-built standalone executable for **Apple Silicon (arm64)** is available in `dist/Neight` (~38 MB) — see the [Download](#option-1-download-pre-built-executable-recommended) section above.
 
-> **Note:** A pre-built macOS application bundle (`.app`) is not yet available. Running from source using Python and PySide6 works. A macOS build is planned — see the [Future Ideas](#future-ideas) section.
+The keyboard layout switching feature — including the double-Ctrl quick switch and the **Settings → Keyboards…** dialog — works on macOS using the native Text Input Services (TIS) framework via the Carbon framework. No extra packages are required. The macOS implementation mirrors the Windows behaviour: it reads and switches input sources using their bundle IDs without any third-party dependencies.
+
+### Generic Tamil/English Keyboard Auto-Detection
+
+The keyboard switching feature is no longer tied to specific layout names. Previously the app looked only for `Tamil Anjal` and `English (India)` specifically. Now, at startup, Neight **automatically scans your installed keyboard layouts** and selects:
+
+- The **first Tamil layout** found (any locale — Tamil Nadu, Sri Lanka, Singapore, etc.)
+- The **first English layout** found (any locale — India, US, UK, Australia, etc.)
+
+This means the feature works correctly for any user regardless of which specific Tamil or English keyboard variant they have installed. The **Settings → Keyboards…** dialog now shows the actual detected keyboard names in the option label rather than fixed text.
 
 ---
 
@@ -196,16 +220,18 @@ The top checkbox — *"Enable quick language switch by double-pressing the Ctrl 
 
 When the feature is enabled and you have more than one layout installed, a second option appears:
 
-> *"Always switch between Tamil Anjal and English (India), even when other keyboard layouts are installed"*
+> *"Always switch between [detected Tamil keyboard] and [detected English keyboard] (auto-detected), even when other keyboard layouts are installed"*
 
-- **Tick this** if you specifically use Tamil Anjal and English (India) and always want to toggle between exactly those two — regardless of what else is installed in Windows.
+Neight auto-detects the first Tamil and first English keyboard installed on your system at startup. The option label shows the actual keyboard names it found (for example: *"Always switch between Tamil Anjal and ABC – India (auto-detected)"*).
+
+- **Tick this** if you want to always toggle between your Tamil and English keyboards specifically — regardless of what else is installed or where they appear in your system's layout order.
 - **Leave it unticked** if you want Neight to use your own first two installed keyboard layouts, whatever they are. For example, if your first two layouts are *English (United States)* and *French (France)*, Neight will switch between those two.
 
-> **If you have more than two layouts installed:** A yellow notice will appear in the dialog telling you which two layouts are currently first in your Windows keyboard settings. Those are the ones Neight will switch between if the Tamil/English option is unticked. To take full control over the pair, tick that option.
+> **If you have more than two layouts installed:** A yellow notice will appear in the dialog telling you which two layouts are currently first in your system keyboard settings. Those are the ones Neight will switch between if the auto-detected Tamil/English option is unticked. To always use the Tamil/English pair, tick that option.
 
-**3. What about users who don't have Tamil Anjal installed?**
+**3. What about users who don't have a Tamil keyboard installed?**
 
-Nothing is ever forced on you. If you leave the Tamil/English option unticked, Neight switches strictly between your own first two installed layouts and never touches Tamil Anjal or English (India). Those layout identifiers only come into play if *you* explicitly tick that checkbox.
+Nothing is ever forced on you. If Neight cannot find a Tamil or English keyboard during its scan, the forced-pair option is shown but greyed out. If you leave the Tamil/English option unticked, Neight switches strictly between your own first two installed layouts.
 
 #### Step-by-step: how to set it up
 
@@ -293,22 +319,22 @@ Or manually:
 
 ```bash
 pip3 install pyinstaller
-pyinstaller --name Neight --onefile --windowed neight.py
+pyinstaller --name Neight --onefile --windowed --icon neight.icns neight.py
 ```
 
-The output will be `dist/Neight.app` — a standard macOS app bundle you can copy to `/Applications`.
+The build produces **two outputs** in the `dist/` folder:
+- `dist/Neight` — a standalone single-file Mach-O executable (arm64 on Apple Silicon). This is the primary distributable.
+- `dist/Neight.app` — a macOS app bundle wrapping the same executable (if the `.spec` file's `BUNDLE` step runs).
 
-**Icon (optional):** macOS requires `.icns` format instead of `.ico`. If you have a `.ico` file, convert it first:
+Both are functionally identical. The standalone `dist/Neight` (~38 MB) is the simplest to share and run.
+
+**Icon:** macOS requires `.icns` format instead of `.ico`. Generate it with:
 
 ```bash
 sips -s format icns neight.ico --out neight.icns
 ```
 
-Then build with the icon:
-
-```bash
-pyinstaller --name Neight --onefile --windowed --icon neight.icns neight.py
-```
+Or use `python3 gen_neight_icon.py` if it produces `.icns` output.
 
 **Prerequisites on macOS:**
 
@@ -316,13 +342,15 @@ pyinstaller --name Neight --onefile --windowed --icon neight.icns neight.py
 pip3 install PySide6 markdown pyinstaller
 ```
 
+> **Note:** The build has only been tested on an **Apple Silicon (arm64) Mac mini**. An Intel (x86_64) build would need to be compiled on an Intel Mac or via cross-compilation.
+
 ---
 
 ## Running Neight
 
 * Tested on **Windows 11 (25H2)**
-* Runs on **macOS** (tested via source; no pre-built app bundle yet)
-* Works with any keyboard layouts — no specific layouts are required
+* Tested on **macOS** (Apple Silicon arm64) — pre-built binary available in `dist/Neight`
+* Works with any keyboard layouts — Tamil and English keyboards are auto-detected from whatever is installed
 
 Run the app once and it will create a **settings.json** file next to the executable.
 It stores your preferences (font, window size, last opened file, autosave interval, etc.).
@@ -422,7 +450,7 @@ The green tones were chosen to match the colour scheme from my blog [venkatarang
 * ~~Basic **Markdown** support~~ ✓ **Implemented in v2025.001!**
 * ~~Export to **PDF**~~ ✓ **Implemented in v2025.001!**
 * ~~**macOS support** (keyboard switching via TIS/Carbon)~~ ✓ **Implemented in v2026.002!**
-* **macOS build** — package as a `.app` bundle using PyInstaller on Mac mini *(pending)*
+* ~~**macOS build**~~ ✓ **Available in v2026.002!** — standalone arm64 executable in `dist/Neight`
 * Markdown **live preview** pane
 * Export to **DOCX**
 * A proper **Windows Installer**
