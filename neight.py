@@ -9,7 +9,6 @@ import time
 import webbrowser
 import ctypes
 import urllib.request
-import tempfile
 import platform
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +42,26 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
     from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument
     from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal
     QT_LIB = "PyQt5"
+
+# PDF print-support imports (optional — export features require QtPrintSupport)
+try:
+    if QT_LIB == "PySide6":
+        from PySide6.QtPrintSupport import QPrinter
+        from PySide6.QtGui import QPageSize, QPageLayout
+        from PySide6.QtCore import QMarginsF
+    else:
+        from PyQt5.QtPrintSupport import QPrinter
+        from PyQt5.QtGui import QPageSize, QPageLayout
+        from PyQt5.QtCore import QMarginsF
+    HAS_PRINT_SUPPORT = True
+except ImportError:
+    HAS_PRINT_SUPPORT = False
+
+# Cross-version enum compatibility for page-margin units
+# PySide6 uses scoped enum QPageLayout.Unit.Millimeter; PyQt5 uses QPageLayout.Millimeter
+if HAS_PRINT_SUPPORT:
+    _MARGIN_UNIT_MM = getattr(getattr(QPageLayout, "Unit", None), "Millimeter", None) \
+                      or getattr(QPageLayout, "Millimeter", None)
 
 # ------------------------------------
 # Keyboard layout switching (Windows)
@@ -159,6 +178,162 @@ if sys.platform == "win32":
             pass
         return results
 
+elif sys.platform == "darwin":
+    # ------------------------------------
+    # Keyboard layout switching (macOS)
+    # Uses Text Input Services (TIS) via Carbon framework through ctypes.
+    # No extra packages required.
+    # ------------------------------------
+
+    # macOS input source bundle IDs
+    TAMIL_ANJAL_MAC = "com.apple.inputmethod.Tamil.TamilAnjalIM"
+    EN_IN_MAC = "com.apple.keylayout.EnglishIndia"
+
+    _kCFStringEncodingUTF8 = 0x08000100
+    _macos_cf = None
+    _macos_carbon = None
+
+    def _macos_libs():
+        """Lazily load and cache CoreFoundation and Carbon frameworks."""
+        global _macos_cf, _macos_carbon
+        if _macos_cf is not None:
+            return _macos_cf, _macos_carbon
+        try:
+            import ctypes.util
+            _cf_path = ctypes.util.find_library('CoreFoundation')
+            _carbon_path = ctypes.util.find_library('Carbon')
+        except Exception:
+            _cf_path = None
+            _carbon_path = None
+        cf = ctypes.CDLL(
+            _cf_path or '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation'
+        )
+        carbon = ctypes.CDLL(
+            _carbon_path or '/System/Library/Frameworks/Carbon.framework/Carbon'
+        )
+        cf.CFArrayGetCount.restype = ctypes.c_long
+        cf.CFArrayGetCount.argtypes = [ctypes.c_void_p]
+        cf.CFArrayGetValueAtIndex.restype = ctypes.c_void_p
+        cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
+        cf.CFStringGetCString.restype = ctypes.c_bool
+        cf.CFStringGetCString.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32
+        ]
+        cf.CFRelease.restype = None
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        carbon.TISCreateInputSourceList.restype = ctypes.c_void_p
+        carbon.TISCreateInputSourceList.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        carbon.TISSelectInputSource.restype = ctypes.c_int32
+        carbon.TISSelectInputSource.argtypes = [ctypes.c_void_p]
+        carbon.TISGetInputSourceProperty.restype = ctypes.c_void_p
+        carbon.TISGetInputSourceProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        carbon.TISCopyCurrentKeyboardInputSource.restype = ctypes.c_void_p
+        carbon.TISCopyCurrentKeyboardInputSource.argtypes = []
+        _macos_cf = cf
+        _macos_carbon = carbon
+        return cf, carbon
+
+    def _macos_cfstr_to_str(cf, cfstr) -> str:
+        """Convert a CFStringRef (integer/pointer) to a Python str."""
+        if not cfstr:
+            return ""
+        buf = ctypes.create_string_buffer(512)
+        if cf.CFStringGetCString(cfstr, buf, 512, _kCFStringEncodingUTF8):
+            return buf.value.decode('utf-8', errors='replace')
+        return ""
+
+    def _macos_get_source_prop(cf, carbon, source, prop_name: str) -> str:
+        """Read a TIS input source string property by its exported symbol name."""
+        try:
+            key = ctypes.c_void_p.in_dll(carbon, prop_name).value
+            if not key:
+                return ""
+            val = carbon.TISGetInputSourceProperty(source, key)
+            return _macos_cfstr_to_str(cf, val)
+        except Exception:
+            return ""
+
+    def _macos_select_source(source_id: str) -> bool:
+        """Find and activate a macOS input source by its bundle ID."""
+        try:
+            cf, carbon = _macos_libs()
+            sources = carbon.TISCreateInputSourceList(None, True)
+            if not sources:
+                return False
+            count = cf.CFArrayGetCount(sources)
+            ok = False
+            for i in range(count):
+                src = cf.CFArrayGetValueAtIndex(sources, i)
+                if not src:
+                    continue
+                sid = _macos_get_source_prop(cf, carbon, src, 'kTISPropertyInputSourceID')
+                if sid == source_id:
+                    carbon.TISSelectInputSource(src)
+                    ok = True
+                    break
+            cf.CFRelease(sources)
+            return ok
+        except Exception:
+            return False
+
+    def _macos_current_source_id() -> str:
+        """Return the bundle ID of the currently active macOS input source."""
+        try:
+            cf, carbon = _macos_libs()
+            src = carbon.TISCopyCurrentKeyboardInputSource()
+            if not src:
+                return ""
+            sid = _macos_get_source_prop(cf, carbon, src, 'kTISPropertyInputSourceID')
+            cf.CFRelease(src)
+            return sid
+        except Exception:
+            return ""
+
+    def switch_to_tamil_anjal():
+        """Switch to Tamil Anjal keyboard layout."""
+        _macos_select_source(TAMIL_ANJAL_MAC)
+
+    def switch_to_english_india():
+        """Switch to English India keyboard layout."""
+        _macos_select_source(EN_IN_MAC)
+
+    def get_current_layout() -> int:
+        sid = _macos_current_source_id()
+        return 1 if "Tamil" in sid else 0
+
+    def get_current_layout_label() -> str:
+        sid = _macos_current_source_id()
+        if "Tamil" in sid:
+            return "Keyboard: Tamil Anjal"
+        if EN_IN_MAC in sid:
+            return "Keyboard: English India"
+        return "Keyboard: System Default"
+
+    def get_installed_ime_list() -> list:
+        """Return list of (source_id, name) for all enabled macOS input sources."""
+        try:
+            cf, carbon = _macos_libs()
+            # includeAllInstalled=False → only user-enabled (menu-visible) sources
+            sources = carbon.TISCreateInputSourceList(None, False)
+            if not sources:
+                return []
+            count = cf.CFArrayGetCount(sources)
+            results = []
+            for i in range(count):
+                src = cf.CFArrayGetValueAtIndex(sources, i)
+                if not src:
+                    continue
+                sid = _macos_get_source_prop(cf, carbon, src, 'kTISPropertyInputSourceID')
+                name = _macos_get_source_prop(
+                    cf, carbon, src, 'kTISPropertyLocalizedName'
+                )
+                if sid:
+                    results.append((sid, name or sid))
+            cf.CFRelease(sources)
+            return results
+        except Exception:
+            return []
+
 else:
     def switch_to_tamil_anjal():
         pass
@@ -174,6 +349,47 @@ else:
 
     def get_installed_ime_list() -> list:
         return []
+
+
+# ------------------------------------
+# Cross-platform keyboard helpers
+# ------------------------------------
+def _get_current_klid() -> str:
+    """Return the active keyboard layout identifier in a platform-native format.
+
+    Windows: 8-character uppercase hex KLID (e.g. "00030449")
+    macOS:   bundle-ID string  (e.g. "com.apple.inputmethod.Tamil.TamilAnjalIM")
+    Other:   empty string
+    """
+    if sys.platform == "win32":
+        try:
+            buf = ctypes.create_unicode_buffer(9)
+            return buf.value.upper().zfill(8) if user32.GetKeyboardLayoutNameW(buf) else ""
+        except Exception:
+            return ""
+    if sys.platform == "darwin":
+        return _macos_current_source_id()
+    return ""
+
+
+def _normalize_klid(klid: str) -> str:
+    """Normalise a KLID for comparison.
+
+    On Windows KLIDs are zero-padded to 8 uppercase hex digits.
+    On macOS (and other platforms) the identifier is already canonical.
+    """
+    if sys.platform == "win32":
+        return klid.upper().zfill(8)
+    return klid
+
+
+def _activate_klid(klid: str) -> None:
+    """Activate a keyboard input source by its platform-native identifier."""
+    if sys.platform == "win32":
+        hkl = load_hkl(klid)
+        activate_hkl(hkl)
+    elif sys.platform == "darwin":
+        _macos_select_source(klid)
 
 
 # ---------------------
@@ -1150,7 +1366,6 @@ class Notepad(QMainWindow):
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self._update_word_highlights)
         self.editor.cursorPositionChanged.connect(self._update_status_bar)
-        self.editor.cursorPositionChanged.connect(self._update_word_highlights)
 
         # Update window title on modification
         self.editor.modificationChanged.connect(self._update_title)
@@ -1163,7 +1378,7 @@ class Notepad(QMainWindow):
 
     def keyReleaseEvent(self, event):
         """Detect double Ctrl press to toggle keyboard layout."""
-        if sys.platform != "win32":
+        if sys.platform not in ("win32", "darwin"):
             super().keyReleaseEvent(event)
             return
 
@@ -1218,7 +1433,7 @@ class Notepad(QMainWindow):
 
     def _install_layout_shortcuts(self):
         """Install Ctrl+, and Ctrl+. for keyboard layout switching."""
-        if sys.platform != "win32":
+        if sys.platform not in ("win32", "darwin"):
             return
         
         # Ctrl+, (comma) -> switch to English India
@@ -1232,18 +1447,37 @@ class Notepad(QMainWindow):
         shortcut_period.activated.connect(lambda: self._toggle_keyboard_layout(1))
 
     def _toggle_keyboard_layout(self, target_layout):
-        """Toggle keyboard layout: 0 = English India, 1 = Tamil Anjal."""
-        if sys.platform != "win32":
+        """Switch to the first (0) or second (1) keyboard layout.
+
+        In force mode (_force_anjal_english=True): always uses the hardcoded
+        English India / Tamil Anjal pair.
+        In dynamic mode (_force_anjal_english=False): uses the first two entries
+        in the user's installed keyboard layout list, matching the behaviour of
+        the double-Ctrl quick switch.
+        """
+        if sys.platform not in ("win32", "darwin"):
             return
-        
+
         self._current_layout = target_layout
         try:
-            if target_layout == 0:
-                switch_to_english_india()
-                self.layout_label.setText("Keyboard: English India")
+            if getattr(self, '_force_anjal_english', True):
+                # Force mode: always use the Tamil Anjal / English India pair
+                if target_layout == 0:
+                    switch_to_english_india()
+                    self.layout_label.setText("Keyboard: English India")
+                else:
+                    switch_to_tamil_anjal()
+                    self.layout_label.setText("Keyboard: Tamil Anjal")
             else:
-                switch_to_tamil_anjal()
-                self.layout_label.setText("Keyboard: Tamil Anjal")
+                # Dynamic mode: use whatever the first two installed layouts are
+                imes = getattr(self, '_installed_imes', [])
+                if len(imes) > target_layout:
+                    klid, name = imes[target_layout]
+                    _activate_klid(klid)
+                    self.layout_label.setText(f"Keyboard: {name}")
+                else:
+                    # Fallback: not enough layouts available — do nothing
+                    pass
         except Exception:
             self.layout_label.setText("Keyboard: Error")
 
@@ -1256,7 +1490,7 @@ class Notepad(QMainWindow):
         first two layouts in the user's installed keyboard layout list.
         All errors are caught; the app never crashes from a failed switch.
         """
-        if sys.platform != "win32":
+        if sys.platform not in ("win32", "darwin"):
             return
         if not getattr(self, '_quick_switch_enabled', False):
             return
@@ -1278,15 +1512,11 @@ class Notepad(QMainWindow):
                 klid0, name0 = imes[0]
                 klid1, name1 = imes[1]
 
-                # Read the currently active KLID without switching anything
-                try:
-                    buf = ctypes.create_unicode_buffer(9)
-                    current_klid = buf.value.upper().zfill(8) if user32.GetKeyboardLayoutNameW(buf) else ""
-                except Exception:
-                    current_klid = ""
+                # Read the currently active layout identifier (platform-aware)
+                current_klid = _get_current_klid()
 
                 # Switch to the other layout in the pair
-                if current_klid == klid0.upper().zfill(8):
+                if current_klid == _normalize_klid(klid0):
                     target_klid, target_name = klid1, name1
                     self._current_layout = 1
                 else:
@@ -1294,10 +1524,9 @@ class Notepad(QMainWindow):
                     self._current_layout = 0
 
                 try:
-                    hkl = load_hkl(target_klid)
-                    activate_hkl(hkl)
+                    _activate_klid(target_klid)
                     self.layout_label.setText(f"Keyboard: {target_name}")
-                except Exception as e:
+                except Exception:
                     self.layout_label.setText("Keyboard: Error")
         except Exception:
             # Safety net: never let a quick-switch failure crash the app
@@ -1790,7 +2019,6 @@ class Notepad(QMainWindow):
         line_text = cursor.selectedText()
         
         # Patterns to remove: headings (#), lists (-, 1.), checkboxes (- [ ])
-        import re
         # Remove heading markers (1-6 # symbols followed by space)
         cleaned = re.sub(r'^#{1,6}\s+', '', line_text)
         # Remove unordered list marker (- followed by space)
@@ -1849,7 +2077,6 @@ class Notepad(QMainWindow):
 
     def _remove_text_formatting(self, text: str) -> str:
         """Remove existing markdown formatting from text."""
-        import re
         # Remove in order from most specific to least specific
         # Remove triple asterisks (strong emphasis)
         cleaned = re.sub(r'\*\*\*(.*?)\*\*\*', r'\1', text)
@@ -1955,6 +2182,29 @@ class Notepad(QMainWindow):
             cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor, 4)
             self.editor.setTextCursor(cursor)
 
+    def _create_url_validate_fn(self, url_input, status_label, validated_url, insert_btn):
+        """Return a validate() closure shared by the image and hyperlink dialogs."""
+        def validate():
+            url = url_input.text().strip()
+            if not url:
+                status_label.setText("Please enter a URL")
+                status_label.setStyleSheet("color: red;")
+                return
+            status_label.setText("Validating...")
+            status_label.setStyleSheet("color: blue;")
+            QApplication.processEvents()
+            is_valid, result = self._validate_url(url)
+            if is_valid:
+                validated_url[0] = result
+                status_label.setText("✓ URL is valid")
+                status_label.setStyleSheet("color: green;")
+                insert_btn.setEnabled(True)
+            else:
+                validated_url[0] = None
+                status_label.setText(f"✗ {result}")
+                status_label.setStyleSheet("color: red;")
+        return validate
+
     def _validate_url(self, url: str) -> tuple[bool, str]:
         """Validate URL by attempting to connect to it.
         
@@ -2001,8 +2251,6 @@ class Notepad(QMainWindow):
 
     def _insert_image(self):
         """Insert image with URL validation."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QPushButton, QHBoxLayout
-        
         dialog = QDialog(self)
         dialog.setWindowTitle("Insert Image")
         dialog.setMinimumWidth(500)
@@ -2044,28 +2292,7 @@ class Notepad(QMainWindow):
         dialog.setLayout(layout)
         
         validated_url = [None]  # Use list to store in closure
-        
-        def validate():
-            url = url_input.text().strip()
-            if not url:
-                status_label.setText("Please enter a URL")
-                status_label.setStyleSheet("color: red;")
-                return
-            
-            status_label.setText("Validating...")
-            status_label.setStyleSheet("color: blue;")
-            QApplication.processEvents()
-            
-            is_valid, result = self._validate_url(url)
-            if is_valid:
-                validated_url[0] = result
-                status_label.setText("✓ URL is valid")
-                status_label.setStyleSheet("color: green;")
-                insert_btn.setEnabled(True)
-            else:
-                validated_url[0] = None
-                status_label.setText(f"✗ {result}")
-                status_label.setStyleSheet("color: red;")
+        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn)
         
         def insert():
             url = url_input.text().strip()
@@ -2091,9 +2318,7 @@ class Notepad(QMainWindow):
                     )
                     if reply == QMessageBox.No:
                         return
-                    validated_url[0] = url if not url.startswith(("http://", "https://")) else url
-                    if not validated_url[0].startswith(("http://", "https://")):
-                        validated_url[0] = "https://" + validated_url[0]
+                    validated_url[0] = url if url.startswith(("http://", "https://")) else ("https://" + url)
             
             # Insert markdown
             markdown = f"![{alt}]({validated_url[0]})"
@@ -2108,8 +2333,6 @@ class Notepad(QMainWindow):
 
     def _insert_hyperlink(self):
         """Insert hyperlink with URL validation."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QPushButton, QHBoxLayout
-        
         dialog = QDialog(self)
         dialog.setWindowTitle("Insert Hyperlink")
         dialog.setMinimumWidth(500)
@@ -2156,28 +2379,7 @@ class Notepad(QMainWindow):
         dialog.setLayout(layout)
         
         validated_url = [None]  # Use list to store in closure
-        
-        def validate():
-            url = url_input.text().strip()
-            if not url:
-                status_label.setText("Please enter a URL")
-                status_label.setStyleSheet("color: red;")
-                return
-            
-            status_label.setText("Validating...")
-            status_label.setStyleSheet("color: blue;")
-            QApplication.processEvents()
-            
-            is_valid, result = self._validate_url(url)
-            if is_valid:
-                validated_url[0] = result
-                status_label.setText("✓ URL is valid")
-                status_label.setStyleSheet("color: green;")
-                insert_btn.setEnabled(True)
-            else:
-                validated_url[0] = None
-                status_label.setText(f"✗ {result}")
-                status_label.setStyleSheet("color: red;")
+        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn)
         
         def insert():
             text = text_input.text().strip()
@@ -2264,11 +2466,12 @@ class Notepad(QMainWindow):
         if not save_path:
             return
         
+        if not HAS_PRINT_SUPPORT:
+            QMessageBox.critical(self, "Export Failed",
+                                 "PDF export requires QtPrintSupport, which is not available.")
+            return
+        
         try:
-            from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QPageSize, QPageLayout, QTextDocument, QTextCursor as QTC
-            from PySide6.QtCore import QSizeF, QMarginsF
-            
             # Create printer
             printer = QPrinter(QPrinter.HighResolution)
             printer.setOutputFormat(QPrinter.PdfFormat)
@@ -2276,7 +2479,7 @@ class Notepad(QMainWindow):
             printer.setPageSize(QPageSize(QPageSize.A4))
             # Set margins: left, top, right, bottom in millimeters
             margins = QMarginsF(15, 20, 15, 20)
-            printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
+            printer.setPageMargins(margins, _MARGIN_UNIT_MM)
             
             # Create document
             doc = QTextDocument()
@@ -2344,9 +2547,10 @@ class Notepad(QMainWindow):
             except ImportError:
                 has_markdown = False
             
-            from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QPageSize, QPageLayout, QTextDocument
-            from PySide6.QtCore import QMarginsF
+            if not HAS_PRINT_SUPPORT:
+                QMessageBox.critical(self, "Export Failed",
+                                     "PDF export requires QtPrintSupport, which is not available.")
+                return
             
             # Create printer
             printer = QPrinter(QPrinter.HighResolution)
@@ -2355,7 +2559,7 @@ class Notepad(QMainWindow):
             printer.setPageSize(QPageSize(QPageSize.A4))
             # Set margins: left, top, right, bottom in millimeters
             margins = QMarginsF(15, 20, 15, 20)
-            printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
+            printer.setPageMargins(margins, _MARGIN_UNIT_MM)
             
             # Create document
             doc = QTextDocument()
@@ -2493,10 +2697,16 @@ class Notepad(QMainWindow):
         except Exception:
             lines.append("Neight Version      : N/A")
 
-        # Windows OS version
+        # OS version (Windows, macOS, or generic)
         try:
-            release, ver, csd, ptype = platform.win32_ver()
-            lines.append(f"Windows Version     : {release}  (Build {ver})")
+            if sys.platform == "win32":
+                release, ver, csd, ptype = platform.win32_ver()
+                lines.append(f"Windows Version     : {release}  (Build {ver})")
+            elif sys.platform == "darwin":
+                release, versioninfo, machine = platform.mac_ver()
+                lines.append(f"macOS Version       : {release}  ({machine})")
+            else:
+                lines.append(f"OS Version          : {platform.platform()}")
         except Exception:
             try:
                 lines.append(f"OS Version          : {platform.platform()}")
@@ -2631,7 +2841,7 @@ class Notepad(QMainWindow):
             info_label.setText(
                 f"\u26a0\u202f More than two keyboard layouts are installed on this system. "
                 f"When quick switch is active it will toggle only between the first two "
-                f"layouts listed in your Windows keyboard settings \u2014 currently "
+                f"layouts listed in your system keyboard settings \u2014 currently "
                 f"\u201c{first_name}\u201d and \u201c{second_name}\u201d. "
                 f"To always switch between Tamil Anjal and English (India) instead, "
                 f"enable the option below."
