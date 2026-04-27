@@ -108,8 +108,47 @@ img = Image.alpha_composite(img, grad_overlay)
 
 # Export ICO
 ico_sizes = [(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256),(512,512)]
-ico_path = "neight_green.ico"
+ico_path = "neight.ico"
 img.save(ico_path, format="ICO", sizes=ico_sizes)
+
+# Export ICNS (macOS)
+# ICNS format: 'icns' header + total size, then entries of (type + entry_size + PNG_data).
+# All sizes are big-endian uint32. PNG data is stored natively inside ICNS since OS X 10.7.
+import io
+import struct
+
+ICNS_TYPE_MAP = [
+    (16,   b'icp4'),
+    (32,   b'icp5'),
+    (64,   b'icp6'),
+    (128,  b'ic07'),
+    (256,  b'ic08'),
+    (512,  b'ic09'),
+    (1024, b'ic10'),
+]
+
+def make_icns(source_image: "Image.Image", out_path: str) -> None:
+    """Write a cross-platform ICNS file from a Pillow RGBA image."""
+    entries = []
+    for size, type_code in ICNS_TYPE_MAP:
+        resized = source_image.resize((size, size), Image.LANCZOS)
+        buf = io.BytesIO()
+        resized.save(buf, format="PNG")
+        png_data = buf.getvalue()
+        # Each entry = 4-byte type + 4-byte length (including type+length header) + PNG data
+        entry_len = 8 + len(png_data)
+        entries.append(type_code + struct.pack('>I', entry_len) + png_data)
+
+    total = 8 + sum(len(e) for e in entries)  # 8 bytes for the file header
+    with open(out_path, 'wb') as f:
+        f.write(b'icns')
+        f.write(struct.pack('>I', total))
+        for entry in entries:
+            f.write(entry)
+
+icns_path = "neight.icns"
+make_icns(img, icns_path)
+print(f"ICNS written: {icns_path}")
 
 ico_path
 

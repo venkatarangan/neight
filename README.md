@@ -1,8 +1,8 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.001** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
+**Current Version: 2026.002** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
 
-**Neight** is a lightweight text editor for Windows inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable Windows app entirely through Generative AI.
+**Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
 > **Note:** Version numbers are incremented with each new build/feature release. Check **Help → About** in the application to see your current version.
 
@@ -119,6 +119,16 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Smart menu display**: Export options appear contextually based on current file type
 
 See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documentation.
+
+---
+
+## What's New in v2026.002
+
+### macOS Support
+
+Neight now runs on **macOS** in addition to Windows. The keyboard layout switching feature — including the double-Ctrl quick switch and the **Settings → Keyboards…** dialog — works on macOS using the native Text Input Services (TIS) framework via the Carbon framework. No extra packages are required. The macOS implementation mirrors the Windows behavior: it reads and switches input sources using their bundle IDs (e.g., `com.apple.inputmethod.Tamil.TamilAnjalIM`) without any third-party dependencies.
+
+> **Note:** A pre-built macOS application bundle (`.app`) is not yet available. Running from source using Python and PySide6 works. A macOS build is planned — see the [Future Ideas](#future-ideas) section.
 
 ---
 
@@ -249,20 +259,69 @@ pip install PySide6
 pip install markdown
 ```
 
-**To build the executable:**
+---
 
+### Building on Windows
+
+The `buildme.bat` script auto-increments the version and runs PyInstaller in one step:
+
+```bat
+buildme.bat
 ```
+
+Or manually:
+
+```bat
 python -m pip install pyinstaller
-pyinstaller --onefile neight.py
+pyinstaller --name Neight --onefile --windowed --icon neight.ico neight.py
 ```
 
-After the build completes, your compiled file will be in the **dist** folder.
+The compiled `Neight.exe` will be in the **dist** folder.
+
+---
+
+### Building on macOS
+
+Use the `buildme_mac.sh` script:
+
+```bash
+chmod +x buildme_mac.sh
+./buildme_mac.sh
+```
+
+Or manually:
+
+```bash
+pip3 install pyinstaller
+pyinstaller --name Neight --onefile --windowed neight.py
+```
+
+The output will be `dist/Neight.app` — a standard macOS app bundle you can copy to `/Applications`.
+
+**Icon (optional):** macOS requires `.icns` format instead of `.ico`. If you have a `.ico` file, convert it first:
+
+```bash
+sips -s format icns neight.ico --out neight.icns
+```
+
+Then build with the icon:
+
+```bash
+pyinstaller --name Neight --onefile --windowed --icon neight.icns neight.py
+```
+
+**Prerequisites on macOS:**
+
+```bash
+pip3 install PySide6 markdown pyinstaller
+```
 
 ---
 
 ## Running Neight
 
 * Tested on **Windows 11 (25H2)**
+* Runs on **macOS** (tested via source; no pre-built app bundle yet)
 * Works with any keyboard layouts — no specific layouts are required
 
 Run the app once and it will create a **settings.json** file next to the executable.
@@ -362,6 +421,8 @@ The green tones were chosen to match the colour scheme from my blog [venkatarang
 
 * ~~Basic **Markdown** support~~ ✓ **Implemented in v2025.001!**
 * ~~Export to **PDF**~~ ✓ **Implemented in v2025.001!**
+* ~~**macOS support** (keyboard switching via TIS/Carbon)~~ ✓ **Implemented in v2026.002!**
+* **macOS build** — package as a `.app` bundle using PyInstaller on Mac mini *(pending)*
 * Markdown **live preview** pane
 * Export to **DOCX**
 * A proper **Windows Installer**
