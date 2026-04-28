@@ -18,7 +18,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.014"
+VERSION = "2026.016"
 
 
 try:
@@ -1139,7 +1139,10 @@ class Notepad(QMainWindow):
         self.export_md_pdf_act = QAction("Export Markdown to PDF…", self)
 
         self.exit_act = QAction("E&xit", self)
-        self.exit_act.setShortcut(QKeySequence.Quit)
+        if sys.platform == "win32":
+            self.exit_act.setShortcut(QKeySequence("Alt+F4"))
+        else:
+            self.exit_act.setShortcut(QKeySequence.Quit)
 
         # Edit
         self.undo_act = QAction("Undo", self)
