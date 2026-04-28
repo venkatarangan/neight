@@ -7,11 +7,11 @@
 > **Note:** Version numbers are incremented with each new build/feature release. Check **Help → About** in the application to see your current version.
 
 ---
-### Option 1: Download Pre-built Executable (Recommended)
+### Option 1: Download Pre-built App (Recommended)
 
 **Direct Download:**
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/raw/main/dist/Neight.exe) (~43 MB)
-- **macOS (Apple Silicon / arm64):** [Download Neight](https://github.com/venkatarangan/neight/raw/main/dist/Neight) (~38 MB) — standalone single-file executable, no installer needed
+- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~43 MB)
+- **macOS (Apple Silicon / arm64 only):** [Download Neight.app zip](https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-unsigned.app.zip) — unsigned `.app` package for Apple Silicon Macs
 
 **Windows installation:**
 1. Download `Neight.exe` from the link above
@@ -24,18 +24,16 @@
 **Note:** Since there's no Windows installer yet, Windows Defender SmartScreen might show a warning on first run. Click "More info" → "Run anyway" to proceed.
 
 **macOS installation:**
-1. Download the `Neight` file from the link above
-2. Open Terminal and make it executable:
-   ```bash
-   chmod +x ~/Downloads/Neight
-   ```
-3. Run it directly:
-   ```bash
-   ~/Downloads/Neight
-   ```
-   Or move it to `/Applications` first, then double-click via Finder (right-click → Open on first run to bypass Gatekeeper).
+1. Download `Neight-mac-arm64-unsigned.app.zip` from the link above
+2. Unzip it (double-click in Finder)
+3. Drag `Neight.app` to `/Applications`
+4. First launch (unsigned app): right-click `Neight.app` → **Open** → **Open**
+5. If macOS still blocks it, run this in Terminal:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Neight.app
+  ```
 
-> **Note:** The current macOS build is a single-file arm64 executable built on an Apple Silicon Mac mini. It has not been notarised by Apple, so macOS Gatekeeper will ask you to confirm the first time you open it.
+> **Note:** The current macOS release is an unsigned `.app` built for **Apple Silicon (arm64) only**. Intel Macs (x86_64) are not supported by this build.
 
 ---
 ## Why I built Neight
@@ -139,9 +137,9 @@ See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documenta
 
 ## What's New in v2026.002
 
-### macOS Support — Including Pre-built Binary
+### macOS Support — Including Pre-built App Bundle
 
-Neight now runs on **macOS** in addition to Windows. A pre-built standalone executable for **Apple Silicon (arm64)** is available in `dist/Neight` (~38 MB) — see the [Download](#option-1-download-pre-built-executable-recommended) section above.
+Neight now runs on **macOS** in addition to Windows. A pre-built `.app` zip for **Apple Silicon (arm64) only** is available — see the [Download](#option-1-download-pre-built-app-recommended) section above.
 
 The keyboard layout switching feature — including the double-Ctrl quick switch and the **Settings → Keyboards…** dialog — works on macOS using the native Text Input Services (TIS) framework via the Carbon framework. No extra packages are required. The macOS implementation mirrors the Windows behaviour: it reads and switches input sources using their bundle IDs without any third-party dependencies.
 
@@ -308,25 +306,31 @@ The compiled `Neight.exe` will be in the **dist** folder.
 
 ### Building on macOS
 
-Use the `buildme_mac.sh` script:
+Use the onefile script for a standalone executable:
 
 ```bash
-chmod +x buildme_mac.sh
-./buildme_mac.sh
+chmod +x buildme_mac_onefile.sh
+./buildme_mac_onefile.sh
+```
+
+Use the app-bundle script for a normal macOS `.app` package:
+
+```bash
+chmod +x buildme_mac_app.sh
+./buildme_mac_app.sh
 ```
 
 Or manually:
 
 ```bash
 pip3 install pyinstaller
-pyinstaller --name Neight --onefile --windowed --icon neight.icns neight.py
+pyinstaller --name Neight --windowed --icon neight.icns neight.py
 ```
 
-The build produces **two outputs** in the `dist/` folder:
-- `dist/Neight` — a standalone single-file Mach-O executable (arm64 on Apple Silicon). This is the primary distributable.
-- `dist/Neight.app` — a macOS app bundle wrapping the same executable (if the `.spec` file's `BUNDLE` step runs).
+The app-bundle build produces `dist/Neight.app` and a zip archive in `dist/` ready for sharing.
+The onefile build produces `dist/Neight` as a standalone executable.
 
-Both are functionally identical. The standalone `dist/Neight` (~38 MB) is the simplest to share and run.
+For friendlier installation on other Macs, prefer sharing the zipped `.app` build.
 
 **Icon:** macOS requires `.icns` format instead of `.ico`. Generate it with:
 
@@ -349,7 +353,7 @@ pip3 install PySide6 markdown pyinstaller
 ## Running Neight
 
 * Tested on **Windows 11 (25H2)**
-* Tested on **macOS** (Apple Silicon arm64) — pre-built binary available in `dist/Neight`
+* Tested on **macOS** (Apple Silicon arm64 only) — pre-built unsigned `.app` zip available
 * Works with any keyboard layouts — Tamil and English keyboards are auto-detected from whatever is installed
 
 Run the app once and it will create a **settings.json** file next to the executable.
@@ -450,7 +454,7 @@ The green tones were chosen to match the colour scheme from my blog [venkatarang
 * ~~Basic **Markdown** support~~ ✓ **Implemented in v2025.001!**
 * ~~Export to **PDF**~~ ✓ **Implemented in v2025.001!**
 * ~~**macOS support** (keyboard switching via TIS/Carbon)~~ ✓ **Implemented in v2026.002!**
-* ~~**macOS build**~~ ✓ **Available in v2026.002!** — standalone arm64 executable in `dist/Neight`
+* ~~**macOS build**~~ ✓ **Available in v2026.002!** — unsigned `.app` package for Apple Silicon (arm64)
 * Markdown **live preview** pane
 * Export to **DOCX**
 * A proper **Windows Installer**

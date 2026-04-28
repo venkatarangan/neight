@@ -1,9 +1,9 @@
 #!/bin/bash
 # Build script for Neight on macOS
-# Produces a .app bundle in the dist/ folder
+# Produces a standalone single-file executable in the dist/ folder
 # pip3 install PySide6 markdown pyinstaller
-# chmod +x buildme_mac.sh
-# ./buildme_mac.sh
+# chmod +x buildme_mac_onefile.sh
+# ./buildme_mac_onefile.sh
 
 echo "========================================"
 echo "Neight macOS Build Script"
@@ -23,7 +23,7 @@ echo ""
 
 # Run PyInstaller
 # --windowed   : no terminal window
-# --onefile    : single executable inside the .app bundle
+# --onefile    : single standalone executable (not a .app bundle)
 # --icon       : macOS requires .icns format; falls back gracefully if not present
 if [ -f "neight.icns" ]; then
     ICON_ARG="--icon neight.icns"
@@ -45,5 +45,5 @@ fi
 echo ""
 echo "========================================"
 echo "Build completed successfully!"
-echo "Output: dist/Neight.app"
+echo "Output: dist/Neight"
 echo "========================================"
