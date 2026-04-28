@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.002** | [See CHANGELOG.md](changes/CHANGELOG.md) for version history
+**Current Version: 2026.002** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history
 
 **Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
@@ -10,8 +10,8 @@
 ### Option 1: Download Pre-built App (Recommended)
 
 **Direct Download:**
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~43 MB)
-- **macOS (Apple Silicon / arm64 only):** [Download Neight.app zip](https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-unsigned.app.zip) — unsigned `.app` package for Apple Silicon Macs
+- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe) (~43 MB)
+- **macOS (Apple Silicon / arm64 only):** [Download Neight.app zip](https://github.com/venkatarangan/neight/blob/main/dist/Neight-mac-arm64-unsigned.app.zip) — unsigned `.app` package for Apple Silicon Macs
 
 **Windows installation:**
 1. Download `Neight.exe` from the link above
@@ -131,7 +131,7 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Font preservation**: Maintains your chosen font in PDF output
 * **Smart menu display**: Export options appear contextually based on current file type
 
-See [MARKDOWN_FEATURES.md](MARKDOWN_FEATURES.md) for complete markdown documentation.
+See [Markdown Support](#markdown-support-new-in-v2025001) for complete markdown documentation.
 
 ---
 
