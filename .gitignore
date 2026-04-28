@@ -191,3 +191,8 @@ deploylocal.bat
 # macOS metadata
 .DS_Store
 **/.DS_Store
+
+# macOS app bundle artifacts
+*.app/
+dist/*.app/
+dist/Neight/
