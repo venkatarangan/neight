@@ -177,6 +177,8 @@ A new top-level **Settings** menu has been added to the menu bar, positioned bet
 
 A new **Debug Info** option has been added under the Help menu. It opens a small read-only panel showing:
 
+![Neight Debug Info screen on macOS](screenshots/macos/2026-april-28-mac-debuginfo-screenshot.png)
+
 | Item | What it tells you |
 | --- | --- |
 | Qt library | Whether PySide6 or PyQt5 is running, and the version number |
@@ -192,6 +194,10 @@ This is most useful when something isn't working as expected and you want to sha
 ### New: Settings → Keyboards… — A Plain-English Guide
 
 ![Neight Keyboards screen screenshot](screenshots/neight-3.png)
+
+macOS screenshot:
+
+![Neight Keyboards screen on macOS](screenshots/macos/2026-april-28-mac-keyboard-screenshot.png)
 
 #### What is the double-Ctrl quick switch?
 
