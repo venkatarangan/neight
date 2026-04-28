@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.006** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.007** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
@@ -11,7 +11,7 @@
 
 **Direct Download:**
 - **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe) (~43 MB)
-- **macOS (Apple Silicon / arm64 only):** [Download Neight.app zip](https://github.com/venkatarangan/neight/blob/main/dist/Neight-mac-arm64-unsigned.app.zip) — unsigned `.app` package for Apple Silicon Macs
+- **macOS (Apple Silicon / arm64 only):** [Download Neight.app zip (Signed)](https://github.com/venkatarangan/neight/blob/main/stable/Neight-mac-arm64-signed.zip) — **Recommended** ✓ Signed & codesigned by an Apple Developer for better macOS compatibility
 
 **Windows installation:**
 1. Download `Neight.exe` from the link above
@@ -23,17 +23,22 @@
 
 **Note:** Since there's no Windows installer yet, Windows Defender SmartScreen might show a warning on first run. Click "More info" → "Run anyway" to proceed.
 
-**macOS installation:**
-1. Download `Neight-mac-arm64-unsigned.app.zip` from the link above
+**macOS installation (Signed Version — Recommended):**
+1. Download `Neight-mac-arm64-signed.zip` from the link above (recommended for all users)
 2. Unzip it (double-click in Finder)
 3. Drag `Neight.app` to `/Applications`
-4. First launch (unsigned app): right-click `Neight.app` → **Open** → **Open**
-5. If macOS still blocks it, run this in Terminal:
+4. Double-click to launch — no additional steps needed for a signed app
+5. If you encounter any issues, run this in Terminal:
   ```bash
   xattr -dr com.apple.quarantine /Applications/Neight.app
   ```
 
-> **Note:** The current macOS release is an unsigned `.app` built for **Apple Silicon (arm64) only**. Intel Macs (x86_64) are not supported by this build.
+> **Signed Build Disclaimer:** The signed macOS build is provided **as-is** with **no warranty or claims**. It is provided purely as a convenience, thanks to a generous well-wisher of the project who contributed their Apple Developer signing capability. The application itself is the same open-source codebase; the signature simply improves macOS compatibility and security checks.
+
+**macOS for Developers (Latest Build):**
+For developers who want the latest development build with the most recent features and fixes (unsigned), download from the [dist folder](https://github.com/venkatarangan/neight/blob/main/dist/Neight-mac-arm64-unsigned.app.zip). Note that unsigned builds will require the quarantine attribute removal command above.
+
+> **Note:** The current macOS release is built for **Apple Silicon (arm64) only**. Intel Macs (x86_64) are not supported by this build.
 
 ---
 ## Why I built Neight
@@ -132,6 +137,15 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Smart menu display**: Export options appear contextually based on current file type
 
 See [Markdown Support](#markdown-support-new-in-v2025001) for complete markdown documentation.
+
+---
+
+## What's New in v2026.007
+
+### Build Script Improvements
+
+* **Fixed macOS build script shell compatibility**: The `buildme_mac_app.sh` script now properly quotes variable expansion (`$ICON_ARG`), ensuring it works correctly when sourced with `source ./buildme_mac_app.sh` in addition to direct execution with `./buildme_mac_app.sh`.
+* **Safer cleanup in macOS builds**: The build script now performs more targeted cleanup, removing only PyInstaller artifacts (`build/` directory and `dist/Neight.app`) while preserving other files in the dist folder (such as `neight.exe` from Windows builds).
 
 ---
 
@@ -492,7 +506,7 @@ The first version of this project was built entirely using **AI tools**:
 **GPT-5 (ChatGPT)**, **GitHub Copilot**, and **Claude Sonnet 4.6 (Preview)**, with **GPT-5 Codex (Preview)** for improvements.
 No code was written manually — only text and configuration tweaks.
 
-Later versions have continued the same AI-assisted approach, always using the latest available models. For example, **v2026.002** was enhanced using **Claude Sonnet 4.6 High** inside GitHub Copilot.
+Later versions have continued the same AI-assisted approach, always using the latest available models. The current build (v2026.007 and onwards) is developed with **Claude Sonnet 4.6** and **GPT-5.4 Codex**, automatically selected by **GitHub Copilot** based on task context.
 
 Neight is a living demonstration of what's now possible with AI-driven software development — and it keeps getting better as the models do.
 
