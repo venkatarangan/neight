@@ -31,27 +31,46 @@ python3 increment_version.py
 
 echo ""
 echo "Cleaning old build artifacts..."
-rm -rf build dist/Neight.app
+rm -rf build
+rm -rf dist/Neight.app
+[ -f "Neight.spec" ] && rm -f Neight.spec
+rm -rf __pycache__ .pytest_cache
 
 echo ""
 echo "Starting PyInstaller .app build..."
 
-# --windowed : GUI app without terminal window
-# (No --onefile) so PyInstaller creates a proper .app bundle
+# Build PyInstaller command
+PYINSTALLER_CMD="pyinstaller"
+PYINSTALLER_CMD="$PYINSTALLER_CMD --name Neight"
+PYINSTALLER_CMD="$PYINSTALLER_CMD --windowed"
+PYINSTALLER_CMD="$PYINSTALLER_CMD --hidden-import=PySide6.QtPrintSupport"
+
+# Add icon if it exists
 if [ -f "neight.icns" ]; then
-    ICON_ARG="--icon neight.icns"
+    PYINSTALLER_CMD="$PYINSTALLER_CMD --icon=neight.icns"
 else
-    ICON_ARG=""
     echo "Note: neight.icns not found; building without a custom icon."
     echo "      Convert neight.ico to neight.icns with:"
     echo "      sips -s format icns neight.ico --out neight.icns"
     echo ""
 fi
 
-pyinstaller --name Neight --windowed ${ICON_ARG} --hidden-import PySide6.QtPrintSupport neight.py
+PYINSTALLER_CMD="$PYINSTALLER_CMD neight.py"
+
+echo "Running: $PYINSTALLER_CMD"
+echo ""
+
+# Run PyInstaller with error capture
+if ! eval "$PYINSTALLER_CMD"; then
+    echo ""
+    echo "Error: PyInstaller command failed."
+    echo "Command was: $PYINSTALLER_CMD"
+    exit 1
+fi
 
 if [ ! -d "dist/Neight.app" ]; then
     echo "Error: dist/Neight.app was not created."
+    echo "PyInstaller may have encountered issues. Check output above."
     exit 1
 fi
 
