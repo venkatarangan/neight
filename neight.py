@@ -18,7 +18,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.005"
+VERSION = "2026.006"
 
 
 try:
@@ -27,11 +27,11 @@ try:
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
         QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
         QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
-        QMenu, QCheckBox
+        QMenu, QCheckBox, QStyle
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
-    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication, QTextDocument
-    from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal
+    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
+    from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl
     QT_LIB = "PySide6"
 except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
     from PyQt5.QtWidgets import (
@@ -39,10 +39,10 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
         QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
         QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
-        QMenu, QCheckBox
+        QMenu, QCheckBox, QStyle
     )
-    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument
-    from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal
+    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
+    from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal, QUrl
     QT_LIB = "PyQt5"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -2562,11 +2562,7 @@ class Notepad(QMainWindow):
             doc.print_(printer)
             
             self.status.showMessage(f"Exported to: {save_path}", 3000)
-            QMessageBox.information(
-                self,
-                "Export Successful",
-                f"Text file exported to:\n{save_path}"
-            )
+            self._show_export_success_dialog("Text file", save_path)
             
         except Exception as e:
             QMessageBox.critical(
@@ -2574,6 +2570,66 @@ class Notepad(QMainWindow):
                 "Export Failed",
                 f"Could not export to PDF:\n{str(e)}"
             )
+
+    def _show_export_success_dialog(self, export_label: str, save_path: str, note: str = ""):
+        """Show export success dialog with quick path actions."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Export Successful")
+        dialog.setMinimumWidth(560)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"{export_label} exported to:"))
+
+        path_row = QHBoxLayout()
+        path_edit = QLineEdit(save_path)
+        path_edit.setReadOnly(True)
+        path_edit.setCursorPosition(0)
+        path_row.addWidget(path_edit)
+
+        copy_btn = QPushButton()
+        copy_icon = QIcon.fromTheme("edit-copy")
+        if copy_icon.isNull():
+            copy_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        else:
+            copy_btn.setIcon(copy_icon)
+        copy_btn.setToolTip("Copy path")
+        copy_btn.setFixedWidth(34)
+
+        open_btn = QPushButton()
+        open_icon = QIcon.fromTheme("document-open")
+        if open_icon.isNull():
+            open_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        else:
+            open_btn.setIcon(open_icon)
+        open_btn.setToolTip("Open exported PDF")
+        open_btn.setFixedWidth(34)
+
+        path_row.addWidget(copy_btn)
+        path_row.addWidget(open_btn)
+        layout.addLayout(path_row)
+
+        if note:
+            note_label = QLabel(note)
+            note_label.setWordWrap(True)
+            layout.addWidget(note_label)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
+        layout.addWidget(button_box)
+
+        def copy_path_to_clipboard():
+            QApplication.clipboard().setText(save_path)
+            self.status.showMessage("Export path copied to clipboard", 2500)
+
+        def open_exported_pdf():
+            file_url = QUrl.fromLocalFile(str(Path(save_path).resolve()))
+            if not QDesktopServices.openUrl(file_url):
+                QMessageBox.warning(dialog, "Open Failed", f"Could not open:\n{save_path}")
+
+        copy_btn.clicked.connect(copy_path_to_clipboard)
+        open_btn.clicked.connect(open_exported_pdf)
+        button_box.rejected.connect(dialog.reject)
+
+        dialog.exec()
 
     def _export_markdown_to_pdf(self):
         """Export markdown file to PDF with proper rendering."""
@@ -2727,15 +2783,11 @@ class Notepad(QMainWindow):
             
             self.status.showMessage(f"Exported to: {save_path}", 3000)
             
-            msg = f"Markdown file exported to:\n{save_path}"
+            msg = ""
             if not has_markdown:
-                msg += "\n\nNote: For better markdown rendering, install the 'markdown' package:\npip install markdown"
-            
-            QMessageBox.information(
-                self,
-                "Export Successful",
-                msg
-            )
+                msg = "Note: For better markdown rendering, install the 'markdown' package:\npip install markdown"
+
+            self._show_export_success_dialog("Markdown file", save_path, msg)
             
         except Exception as e:
             QMessageBox.critical(
@@ -2748,7 +2800,13 @@ class Notepad(QMainWindow):
         QMessageBox.information(
             self,
             "About",
-            f"Neight v{VERSION} (Using {QT_LIB})\nA lightweight UTF-8 text editor with advanced features, word count, line numbers and more.\nGenerated by Github Copilot for venkatarangan.com."
+            f"""
+            <b>Neight v{VERSION}</b> (Using {QT_LIB})<br>
+            A lightweight UTF-8 text editor with advanced features, word count, line numbers and more.<br>
+            Generated by Github Copilot for venkatarangan.com.<br><br>
+            <span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br>
+            <span style='color:#666;'>Full details: <a href='https://github.com/venkatarangan/neight/blob/main/README.md'>README</a> | <a href='https://github.com/venkatarangan/neight/blob/main/PRIVACY.md'>Privacy</a></span>
+            """
         )
 
     def _show_debug_info(self):

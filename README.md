@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.002** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history
+**Current Version: 2026.006** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
@@ -500,8 +500,18 @@ Neight is a living demonstration of what's now possible with AI-driven software 
 
 ## Disclaimer
 
+Neight is provided AS IS, without warranties of any kind, express or implied,
+including fitness for a particular purpose, reliability, availability,
+performance, and accuracy.
+
+No claim is made that the software will meet any specific need or be error-free.
+You are responsible for validating outputs and suitability for your use case.
+
+Source code is published for inspection and independent validation:
+- README: https://github.com/venkatarangan/neight/blob/main/README.md
+- Privacy Policy: https://github.com/venkatarangan/neight/blob/main/PRIVACY.md
+
 This is a personal, experimental project built for learning and daily use.
-It’s not intended for commercial purposes.
+It is not intended for commercial purposes.
 All third-party trademarks and copyrights belong to their respective owners.
-Use at your own discretion — no guarantees or warranties are provided.
 
