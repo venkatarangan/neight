@@ -9,5 +9,8 @@ PySide6>=6.0.0
 # Markdown rendering for PDF export
 markdown>=3.0.0
 
+# Image processing for design generation
+pillow>=9.0.0
+
 # Optional: for building standalone executables
 pyinstaller>=5.0.0
