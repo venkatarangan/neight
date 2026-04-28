@@ -1,6 +1,7 @@
 # python -m pip install --upgrade pip
 # python -m pip install PySide6
 # python -m pip install pyinstaller
+# ./venv/bin/activate    
 
 import sys
 import os
@@ -17,7 +18,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.003"
+VERSION = "2026.005"
 
 
 try:
