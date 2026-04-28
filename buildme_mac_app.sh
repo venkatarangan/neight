@@ -48,7 +48,7 @@ else
     echo ""
 fi
 
-pyinstaller --name Neight --windowed ${ICON_ARG} neight.py
+pyinstaller --name Neight --windowed ${ICON_ARG} --hidden-import PySide6.QtPrintSupport neight.py
 
 if [ ! -d "dist/Neight.app" ]; then
     echo "Error: dist/Neight.app was not created."
