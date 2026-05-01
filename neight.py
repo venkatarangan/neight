@@ -5,6 +5,7 @@
 
 import sys
 import os
+import subprocess
 import json
 import re
 import time
@@ -585,6 +586,8 @@ class CodeEditor(QPlainTextEdit):
         # Flags first so slots can use them safely
         self._highlight_current_line = True
         self._wrap_enabled = True
+        self._line_numbers_visible = True
+        self._text_margin_percent = 0
         self._click_count = 0
         self._last_click_ts = 0.0
 
@@ -611,15 +614,42 @@ class CodeEditor(QPlainTextEdit):
 
     # ----- Line numbers plumbing -----
     def lineNumberAreaWidth(self) -> int:
+        if not self._line_numbers_visible:
+            return 0
         digits = max(2, len(str(max(1, self.blockCount()))))
         space = 6 + self.fontMetrics().horizontalAdvance('9') * digits
         return space
+
+    def _effective_text_margin_px(self) -> int:
+        percent = max(0, int(getattr(self, "_text_margin_percent", 0)))
+        if percent <= 0:
+            return 0
+
+        host = self.window()
+        base_width = host.width() if host is not None else self.width()
+        if base_width <= 0:
+            base_width = self.width()
+
+        requested_each = int(round(base_width * (percent / 100.0)))
+
+        line_area = self.lineNumberAreaWidth()
+        available = max(0, self.contentsRect().width() - line_area)
+        min_text_width = 320
+        max_each = max(0, (available - min_text_width) // 2)
+
+        return min(requested_each, max_each)
+
+    def _apply_viewport_margins(self):
+        line_area = self.lineNumberAreaWidth()
+        text_margin = self._effective_text_margin_px()
+        self.setViewportMargins(line_area + text_margin, 0, text_margin, 0)
+        self.lineNumberArea.setVisible(self._line_numbers_visible)
 
     def lineNumberAreaSizeHint(self):
         return self.sizeHint().expandedTo(self.viewport().size())
 
     def updateLineNumberAreaWidth(self, _):
-        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+        self._apply_viewport_margins()
 
     def updateLineNumberArea(self, rect, dy):
         if dy:
@@ -632,10 +662,14 @@ class CodeEditor(QPlainTextEdit):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_viewport_margins()
         cr = self.contentsRect()
-        self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+        if self._line_numbers_visible:
+            self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
 
     def lineNumberAreaPaintEvent(self, event):
+        if not self._line_numbers_visible:
+            return
         painter = QPainter(self.lineNumberArea)
         painter.fillRect(event.rect(), self.palette().alternateBase())
 
@@ -661,6 +695,25 @@ class CodeEditor(QPlainTextEdit):
             top = bottom
             bottom = top + self.blockBoundingRect(block).height()
             block_number += 1
+
+    def setLineNumbersVisible(self, visible: bool):
+        self._line_numbers_visible = bool(visible)
+        self.updateLineNumberAreaWidth(0)
+        self.viewport().update()
+
+    def isLineNumbersVisible(self) -> bool:
+        return self._line_numbers_visible
+
+    def setTextMarginPercent(self, percent: int):
+        value = int(percent)
+        if value < 0:
+            value = 0
+        self._text_margin_percent = value
+        self._apply_viewport_margins()
+        self.viewport().update()
+
+    def textMarginPercent(self) -> int:
+        return int(getattr(self, "_text_margin_percent", 0))
 
     def updateCurrentLineHighlight(self):
         if not getattr(self, "_highlight_current_line", True):
@@ -1049,7 +1102,7 @@ class FindReplaceDialog(QDialog):
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
-    def __init__(self, initial_file: Optional[str] = None):
+    def __init__(self, initial_file: Optional[str] = None, restore_last_session: bool = True):
         super().__init__()
         self.setWindowTitle("Untitled - Neight")
         self.resize(1000, 650)
@@ -1059,6 +1112,7 @@ class Notepad(QMainWindow):
         self.default_directory = Path.home()
         self._restore_maximized = False
         self._initial_file = initial_file
+        self._restore_last_session = bool(restore_last_session)
         self._last_session_file = None
 
         self.editor = CodeEditor(self)
@@ -1125,6 +1179,12 @@ class Notepad(QMainWindow):
         # File
         self.new_act = QAction("New", self)
         self.new_act.setShortcut(QKeySequence.New)  # Ctrl+N / Cmd+N
+
+        self.new_window_act = QAction("New Window", self)
+        if sys.platform == "darwin":
+            self.new_window_act.setShortcut(QKeySequence("Meta+Shift+N"))
+        else:
+            self.new_window_act.setShortcut(QKeySequence("Ctrl+Shift+N"))
 
         self.open_act = QAction("Open…", self)
         self.open_act.setShortcut(QKeySequence.Open)  # Ctrl+O / Cmd+O
@@ -1238,6 +1298,21 @@ class Notepad(QMainWindow):
         self.wrap_act = QAction("Word Wrap", self, checkable=True)
         self.wrap_act.setChecked(True)
 
+        self.line_numbers_act = QAction("Show Line Numbers", self, checkable=True)
+        self.line_numbers_act.setChecked(True)
+
+        self.margin_5_act = QAction("5%", self)
+        self.margin_5_act.setCheckable(True)
+        self.margin_10_act = QAction("10%", self)
+        self.margin_10_act.setCheckable(True)
+        self.margin_15_act = QAction("15%", self)
+        self.margin_15_act.setCheckable(True)
+        self.margin_20_act = QAction("20%", self)
+        self.margin_20_act.setCheckable(True)
+        self.margin_25_act = QAction("25%", self)
+        self.margin_25_act.setCheckable(True)
+        self.margin_reset_act = QAction("Reset Margin", self)
+
         self.font_act = QAction("Font…", self)
 
         # Auto-save
@@ -1259,6 +1334,7 @@ class Notepad(QMainWindow):
 
         file_menu = menubar.addMenu("&File")
         file_menu.addAction(self.new_act)
+        file_menu.addAction(self.new_window_act)
         file_menu.addAction(self.open_act)
         file_menu.addSeparator()
         file_menu.addAction(self.save_act)
@@ -1331,6 +1407,15 @@ class Notepad(QMainWindow):
 
         format_menu = menubar.addMenu("F&ormat")
         format_menu.addAction(self.wrap_act)
+        format_menu.addAction(self.line_numbers_act)
+        margins_menu = format_menu.addMenu("Margins")
+        margins_menu.addAction(self.margin_5_act)
+        margins_menu.addAction(self.margin_10_act)
+        margins_menu.addAction(self.margin_15_act)
+        margins_menu.addAction(self.margin_20_act)
+        margins_menu.addAction(self.margin_25_act)
+        margins_menu.addSeparator()
+        margins_menu.addAction(self.margin_reset_act)
         format_menu.addAction(self.font_act)
 
         settings_menu = menubar.addMenu("&Settings")
@@ -1351,6 +1436,7 @@ class Notepad(QMainWindow):
     def _connect_signals(self):
         # File
         self.new_act.triggered.connect(self.new_file)
+        self.new_window_act.triggered.connect(self.new_window)
         self.open_act.triggered.connect(self.open_file)
         self.save_act.triggered.connect(self.save_file)
         self.save_as_act.triggered.connect(self.save_file_as)
@@ -1375,6 +1461,13 @@ class Notepad(QMainWindow):
 
         # Format
         self.wrap_act.toggled.connect(self._toggle_wrap)
+        self.line_numbers_act.toggled.connect(self._toggle_line_numbers)
+        self.margin_5_act.triggered.connect(lambda: self._set_text_margin_percent(5))
+        self.margin_10_act.triggered.connect(lambda: self._set_text_margin_percent(10))
+        self.margin_15_act.triggered.connect(lambda: self._set_text_margin_percent(15))
+        self.margin_20_act.triggered.connect(lambda: self._set_text_margin_percent(20))
+        self.margin_25_act.triggered.connect(lambda: self._set_text_margin_percent(25))
+        self.margin_reset_act.triggered.connect(lambda: self._set_text_margin_percent(0))
         self.font_act.triggered.connect(self.change_font)
 
         # Auto-save
@@ -1622,6 +1715,35 @@ class Notepad(QMainWindow):
         self._update_status_bar()
         self._update_export_menu_visibility()
         self.status.showMessage("New document", 2000)
+
+    def new_window(self):
+        try:
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--new-window-empty"]
+            else:
+                cmd = [sys.executable, str(Path(__file__).resolve()), "--new-window-empty"]
+
+            popen_kwargs = {
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "close_fds": True,
+            }
+
+            if sys.platform == "win32":
+                creationflags = 0
+                creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+                creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                if creationflags:
+                    popen_kwargs["creationflags"] = creationflags
+                popen_kwargs["close_fds"] = False
+            else:
+                popen_kwargs["start_new_session"] = True
+
+            subprocess.Popen(cmd, **popen_kwargs)
+            self.status.showMessage("Opened a new Neight window", 2000)
+        except Exception as e:
+            QMessageBox.critical(self, "New Window Failed", f"Could not open a new window:\n{e}")
 
     def _open_file_path(self, path: Path | str, *, notify_errors: bool = True, show_status: bool = True) -> bool:
         try:
@@ -3089,6 +3211,15 @@ class Notepad(QMainWindow):
         self.wrap_act.setChecked(bool(wrap))
         self.editor.setWordWrap(bool(wrap))
 
+        # Line numbers
+        line_numbers_visible = data.get("line_numbers_visible", True)
+        self.line_numbers_act.setChecked(bool(line_numbers_visible))
+        self.editor.setLineNumbersVisible(bool(line_numbers_visible))
+
+        # Text margins
+        margin_percent = data.get("text_margin_percent", 0)
+        self._set_text_margin_percent(margin_percent, save=False, show_status=False)
+
         # Font
         family = data.get("font_family")
         size = data.get("font_size")
@@ -3116,7 +3247,7 @@ class Notepad(QMainWindow):
 
         # Last opened file
         last_file = data.get("last_opened_file")
-        if isinstance(last_file, str) and last_file:
+        if self._restore_last_session and isinstance(last_file, str) and last_file:
             if getattr(self, "_initial_file", None):
                 self._last_session_file = last_file
             else:
@@ -3136,15 +3267,25 @@ class Notepad(QMainWindow):
             width = max(width, 300)
             height = max(height, 200)
             autosave_interval = data.get("autosave_interval", 5)
+            if self.current_path:
+                last_opened_file = self.current_path
+            elif not self._restore_last_session:
+                # Keep the previously remembered file when this window was created
+                # as an explicit empty window via the New Window menu action.
+                last_opened_file = data.get("last_opened_file", "")
+            else:
+                last_opened_file = ""
             data.update({
                 "word_wrap": self.editor.isWordWrap(),
+                "line_numbers_visible": self.editor.isLineNumbersVisible(),
+                "text_margin_percent": self.editor.textMarginPercent(),
                 "font_family": font.family(),
                 "font_size": int(font.pointSize()) if font.pointSize() > 0 else 12,
                 "default_directory": str(self.default_directory),
                 "window_size": {"width": width, "height": height},
                 "window_maximized": bool(self.isMaximized()),
                 "autosave_interval": autosave_interval,
-                "last_opened_file": self.current_path if self.current_path else "",
+                "last_opened_file": last_opened_file,
                 "quick_switch_enabled": getattr(self, '_quick_switch_enabled', True),
                 "force_anjal_english": getattr(self, '_force_anjal_english', True),
             })
@@ -3164,6 +3305,36 @@ class Notepad(QMainWindow):
     def _toggle_wrap(self, enabled: bool):
         self.editor.setWordWrap(bool(enabled))
         self._save_preferences()
+
+    def _toggle_line_numbers(self, enabled: bool):
+        self.editor.setLineNumbersVisible(bool(enabled))
+        self._save_preferences()
+
+    def _set_text_margin_percent(self, percent: int, *, save: bool = True, show_status: bool = True):
+        allowed = {0, 5, 10, 15, 20, 25}
+        try:
+            value = int(percent)
+        except Exception:
+            value = 0
+        if value not in allowed:
+            value = 0
+
+        self.editor.setTextMarginPercent(value)
+
+        self.margin_5_act.setChecked(value == 5)
+        self.margin_10_act.setChecked(value == 10)
+        self.margin_15_act.setChecked(value == 15)
+        self.margin_20_act.setChecked(value == 20)
+        self.margin_25_act.setChecked(value == 25)
+
+        if show_status:
+            if value == 0:
+                self.status.showMessage("Margins reset", 2000)
+            else:
+                self.status.showMessage(f"Margins set to {value}%", 2000)
+
+        if save:
+            self._save_preferences()
 
     def _update_default_directory(self, directory: Path | str):
         if directory is None:
@@ -3381,8 +3552,9 @@ def main():
     os.environ.setdefault("QT_LOGGING_RULES", "qt.text.font.db=false")
 
     app = QApplication(sys.argv)
+    force_empty_window = "--new-window-empty" in sys.argv[1:]
     initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
-    window = Notepad(initial_file=initial_file)
+    window = Notepad(initial_file=initial_file, restore_last_session=not force_empty_window)
     window.show()
     sys.exit(app.exec())
 
