@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.007** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.017** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
@@ -82,7 +82,8 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 
 ### Enhancements
 
-* **Line numbers** and **column tracking**
+* **Line numbers** with on/off toggle and **column tracking**
+* **Adjustable reading margins** from **Format → Margins** (5%, 10%, 15%, 20%, 25%, or reset)
 * **Word and character count** (handy for magazine and blog writing)
 * **Auto-save** every 5 minutes (default, configurable) — interval is set under **Settings → Auto-save**
 * **Remembers**:
@@ -93,6 +94,7 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Quick Google Search**: Select text and press **Ctrl+E** or right-click → "Search with Google"
 * **Plain-text paste shortcut**: Hold **Shift** with paste (Shift+Ctrl+V or Shift+Insert) to strip formatting
 * **Blank line cleanup**: Edit → Collapse Blank Lines trims consecutive empty rows across the document
+* **New Window** support: Open multiple independent editor windows for side-by-side writing tasks
 * **Settings menu** (Alt+S): A dedicated menu between Format and Help in the menu bar. Houses Auto-save controls and the new Keyboards settings.
 * **Language toggle / keyboard switching**:
 
@@ -137,6 +139,24 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Smart menu display**: Export options appear contextually based on current file type
 
 See [Markdown Support](#markdown-support-new-in-v2025001) for complete markdown documentation.
+
+---
+
+## What's New in v2026.017
+
+### Editor Layout Improvements
+
+* **Line numbers are now a first-class preference**: You can toggle them from **Format → Show Line Numbers**, and Neight remembers your choice across sessions.
+* **New text margin controls**: Use **Format → Margins** to apply side margins at **5% / 10% / 15% / 20% / 25%**, or use **Reset Margin** to return to full width.
+* **Smarter margin behavior**: Margin width is applied symmetrically and constrained to keep editing comfortable on smaller windows.
+* **Preference persistence**: Both line number visibility and selected text margin percentage are saved and restored automatically.
+
+### Multi-window Editing
+
+* Added **File → New Window** for opening an additional Neight window from the current one.
+* Keyboard shortcut:
+  * **Windows/Linux:** `Ctrl+Shift+N`
+  * **macOS:** `Meta+Shift+N`
 
 ---
 
@@ -403,6 +423,7 @@ It’s a single Python file — self-contained and clean — yet offers everythi
 | Action                        | Shortcut                       |
 | ----------------------------- | ------------------------------ |
 | New File                      | Ctrl+N                         |
+| New Window                    | Ctrl+Shift+N (Meta+Shift+N on macOS) |
 | Open                          | Ctrl+O                         |
 | Save                          | Ctrl+S                         |
 | Save As                       | Ctrl+Shift+S                   |
@@ -451,6 +472,8 @@ This file remembers:
 * Last opened file
 * Font family and size
 * Word wrap setting
+* Line number visibility (`line_numbers_visible`)
+* Editor text margin (`text_margin_percent`)
 * Window size
 * Auto-save interval
 * Last used directory
