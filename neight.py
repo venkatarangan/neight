@@ -8,8 +8,10 @@ import os
 import subprocess
 import json
 import re
+import math
 import time
 import webbrowser
+import unicodedata
 import ctypes
 import urllib.request
 import platform
@@ -19,7 +21,10 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.018"
+VERSION = "2026.019"
+
+DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
+DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
 
 
 try:
@@ -27,7 +32,7 @@ try:
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
         QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
         QMenu, QCheckBox, QStyle
     )
     # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
@@ -39,7 +44,7 @@ except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
         QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
         QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
         QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit,
+        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
         QMenu, QCheckBox, QStyle
     )
     from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
@@ -482,6 +487,8 @@ class SettingsManager:
         
         # Determine which path to use
         self.path = self._determine_active_path()
+        self.corrupted_settings_path: Optional[Path] = None
+        self.corrupted_settings_reason: str = ""
 
     def _determine_active_path(self) -> Path:
         """Determine which path to use for settings (primary or fallback)."""
@@ -518,7 +525,15 @@ class SettingsManager:
             if path.exists():
                 data = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
+                    if self.corrupted_settings_path == path:
+                        self.corrupted_settings_path = None
+                        self.corrupted_settings_reason = ""
                     return data
+                self.corrupted_settings_path = path
+                self.corrupted_settings_reason = "Top-level JSON value must be an object."
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            self.corrupted_settings_path = path
+            self.corrupted_settings_reason = str(exc)
         except Exception:
             pass
         return None
@@ -736,6 +751,14 @@ class CodeEditor(QPlainTextEdit):
         if callable(handler):
             handler(cleaned)
 
+    def _trigger_sorkuvai_search(self, query: str):
+        cleaned = self._normalize_search_text(query)
+        if not cleaned:
+            return
+        handler = getattr(self.window(), "launch_sorkuvai_search", None)
+        if callable(handler):
+            handler(cleaned)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             app = QApplication.instance()
@@ -775,6 +798,11 @@ class CodeEditor(QPlainTextEdit):
     def contextMenuEvent(self, event):
         menu = self.createStandardContextMenu(event.pos())
         selected_text = self._normalize_search_text(self.textCursor().selectedText())
+        if not selected_text:
+            probe = self.cursorForPosition(event.pos())
+            if not probe.isNull():
+                probe.select(QTextCursor.WordUnderCursor)
+                selected_text = self._normalize_search_text(probe.selectedText())
         if selected_text:
             display_text = selected_text if len(selected_text) <= 48 else f"{selected_text[:45]}..."
             search_action = QAction(f'Search Google for "{display_text}"', menu)
@@ -782,7 +810,16 @@ class CodeEditor(QPlainTextEdit):
                 lambda checked=False, text=selected_text: self._trigger_search(text)
             )
             before_action = menu.actions()[0] if menu.actions() else None
-            menu.insertAction(before_action, search_action)
+            is_single_word = not re.search(r"\s", selected_text)
+            if is_single_word:
+                sorkuvai_action = QAction(f'Search Sorkuvai for "{display_text}"', menu)
+                sorkuvai_action.triggered.connect(
+                    lambda checked=False, text=selected_text: self._trigger_sorkuvai_search(text)
+                )
+                menu.insertAction(before_action, search_action)
+                menu.insertAction(search_action, sorkuvai_action)
+            else:
+                menu.insertAction(before_action, search_action)
             if before_action is not None:
                 menu.insertSeparator(before_action)
         menu.exec(event.globalPos())
@@ -1124,9 +1161,12 @@ class Notepad(QMainWindow):
         # Status widgets
         self.word_match_label = QLabel("", self)
         self.word_match_label.setMinimumWidth(self.word_match_label.fontMetrics().horizontalAdvance("Matches: 0000"))
-        self.count_label = QLabel("Words: 0 | Chars: 0", self)
+        self.count_label = QLabel("Words: 0 | Sentences: 0 | Chars: 0", self)
+        self.reading_time_label = QLabel("", self)
+        self.reading_time_label.setMinimumWidth(self.reading_time_label.fontMetrics().horizontalAdvance("Read: 000 min | Ta 100% En 100%"))
         self.pos_label = QLabel("Ln 1, Col 1", self)
         self.layout_label = QLabel(get_current_layout_label(), self)
+        self.status.addPermanentWidget(self.reading_time_label)
         self.status.addPermanentWidget(self.word_match_label)
         self.status.addPermanentWidget(self.count_label)
         self.status.addPermanentWidget(self.pos_label)
@@ -1161,13 +1201,24 @@ class Notepad(QMainWindow):
         self._force_anjal_english = True
         self._installed_imes = []  # Populated in _load_preferences
 
+        # Experimental features (defaults; overridden in _load_preferences)
+        self._unicode_substring_highlight = False
+        self._reading_time_enabled = False
+        self._tamil_reading_wpm = 150
+        self._english_reading_wpm = 250
+        self._google_search_url_prefix = DEFAULT_GOOGLE_SEARCH_URL_PREFIX
+        self._sorkuvai_search_url_prefix = DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
+
         self._create_actions()
         self._create_menus()
         self._connect_signals()
         self._install_shortcuts()
         self._install_layout_shortcuts()
 
-        self._load_preferences()
+        self._startup_cancelled = False
+        if not self._load_preferences():
+            self._startup_cancelled = True
+            return
         self._update_status_bar()
         self._update_export_menu_visibility()
 
@@ -1326,6 +1377,12 @@ class Notepad(QMainWindow):
         # Settings
         self.keyboards_act = QAction("Keyboards…", self)
 
+        # Experimental
+        self.unicode_substring_highlight_act = QAction("Highlight partial word selections", self, checkable=True)
+        self.unicode_substring_highlight_act.setChecked(False)
+        self.reading_time_act = QAction("Reading Time...", self)
+        self.normalize_unicode_act = QAction("Normalize Unicode (NFC)", self)
+
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
@@ -1419,6 +1476,12 @@ class Notepad(QMainWindow):
         margins_menu.addSeparator()
         margins_menu.addAction(self.margin_reset_act)
         format_menu.addAction(self.font_act)
+        format_menu.addSeparator()
+        experimental_menu = format_menu.addMenu("E&xperimental")
+        experimental_menu.addAction(self.reading_time_act)
+        experimental_menu.addAction(self.normalize_unicode_act)
+        experimental_menu.addSeparator()
+        experimental_menu.addAction(self.unicode_substring_highlight_act)
 
         settings_menu = menubar.addMenu("&Settings")
         autosave_menu = settings_menu.addMenu("Auto-save")
@@ -1515,6 +1578,11 @@ class Notepad(QMainWindow):
 
         # Settings
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
+
+        # Experimental
+        self.reading_time_act.triggered.connect(self._show_reading_time_dialog)
+        self.normalize_unicode_act.triggered.connect(self._normalize_unicode_text)
+        self.unicode_substring_highlight_act.toggled.connect(self._toggle_unicode_substring_highlight)
 
         # Help
         self.about_act.triggered.connect(self.show_about)
@@ -3205,9 +3273,128 @@ class Notepad(QMainWindow):
             except Exception:
                 pass
 
+    def _show_reading_time_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Reading Time")
+        dialog.setMinimumWidth(560)
+
+        outer = QVBoxLayout(dialog)
+        outer.setSpacing(10)
+
+        enabled_cb = QCheckBox("Enable reading time estimate in the status bar", dialog)
+        enabled_cb.setChecked(bool(getattr(self, "_reading_time_enabled", False)))
+        outer.addWidget(enabled_cb)
+
+        tamil_row = QHBoxLayout()
+        tamil_label = QLabel("Tamil Reading Speed:", dialog)
+        tamil_combo = QComboBox(dialog)
+        for value in range(50, 401, 50):
+            tamil_combo.addItem(f"{value} words per minute", value)
+        tamil_value = self._normalize_reading_speed(getattr(self, "_tamil_reading_wpm", 150), 150)
+        tamil_combo.setCurrentText(f"{tamil_value} words per minute")
+        tamil_row.addWidget(tamil_label)
+        tamil_row.addWidget(tamil_combo)
+        outer.addLayout(tamil_row)
+
+        english_row = QHBoxLayout()
+        english_label = QLabel("English Reading Speed:", dialog)
+        english_combo = QComboBox(dialog)
+        for value in range(50, 401, 50):
+            english_combo.addItem(f"{value} words per minute", value)
+        english_value = self._normalize_reading_speed(getattr(self, "_english_reading_wpm", 250), 250)
+        english_combo.setCurrentText(f"{english_value} words per minute")
+        english_row.addWidget(english_label)
+        english_row.addWidget(english_combo)
+        outer.addLayout(english_row)
+
+        explanation = QLabel(
+            "How this is calculated: Each word is classified as Tamil, English, or Other. "
+            "We then compute weighted reading time using T = (W_t / R_t) + (W_e / R_e) + (W_o / R_o), "
+            "where W = word counts and R = reading speeds in words per minute. "
+            "For Other words, R_o is fixed at 180 wpm. This handles mixed Tamil-English text naturally.",
+            dialog,
+        )
+        explanation.setWordWrap(True)
+        explanation.setStyleSheet("color: gray;")
+        outer.addWidget(explanation)
+
+        def _refresh_enabled_state():
+            enabled = enabled_cb.isChecked()
+            tamil_label.setVisible(enabled)
+            tamil_combo.setVisible(enabled)
+            english_label.setVisible(enabled)
+            english_combo.setVisible(enabled)
+            tamil_label.setEnabled(enabled)
+            tamil_combo.setEnabled(enabled)
+            english_label.setEnabled(enabled)
+            english_combo.setEnabled(enabled)
+
+        enabled_cb.toggled.connect(lambda _checked: _refresh_enabled_state())
+        _refresh_enabled_state()
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        outer.addWidget(btn_box)
+
+        if dialog.exec():
+            self._reading_time_enabled = bool(enabled_cb.isChecked())
+            self._tamil_reading_wpm = self._normalize_reading_speed(tamil_combo.currentData(), 150)
+            self._english_reading_wpm = self._normalize_reading_speed(english_combo.currentData(), 250)
+            self._save_preferences()
+            self._update_status_bar()
+
     # --- Preferences ---
     def _load_preferences(self):
         data = self.settings.load()
+
+        if self.settings.corrupted_settings_path is not None:
+            bad_path = str(self.settings.corrupted_settings_path)
+            prompt = QMessageBox(self)
+            prompt.setIcon(QMessageBox.Warning)
+            prompt.setWindowTitle("Corrupted Settings")
+            prompt.setText(
+                "The settings file below is corrupted.\n\n"
+                f"{bad_path}\n\n"
+                "Do you want to reset settings to defaults, or exit and fix the file manually?"
+            )
+            reset_btn = prompt.addButton("Reset to Defaults", QMessageBox.AcceptRole)
+            exit_btn = prompt.addButton("Exit", QMessageBox.RejectRole)
+            copy_btn = prompt.addButton("Copy Path", QMessageBox.ActionRole)
+            copy_icon = QIcon.fromTheme("edit-copy")
+            if copy_icon.isNull():
+                copy_icon = self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
+            copy_btn.setIcon(copy_icon)
+            prompt.setDefaultButton(reset_btn)
+            while True:
+                prompt.exec()
+                clicked = prompt.clickedButton()
+                if clicked == copy_btn:
+                    clipboard = QApplication.clipboard()
+                    if clipboard is not None:
+                        clipboard.setText(bad_path)
+                    self.status.showMessage("Settings path copied to clipboard", 2500)
+                    continue
+                if clicked == exit_btn:
+                    return False
+                break
+
+            try:
+                self.settings.save({})
+                self.settings.corrupted_settings_path = None
+                self.settings.corrupted_settings_reason = ""
+                data = self.settings.load()
+                self.status.showMessage("Settings reset to defaults", 2500)
+            except Exception as exc:
+                QMessageBox.critical(
+                    self,
+                    "Reset Failed",
+                    "Could not reset settings. Please fix or remove the settings file manually.\n\n"
+                    f"{bad_path}\n\n"
+                    f"Error: {exc}",
+                )
+                return False
+
         default_dir = data.get("default_directory")
         if isinstance(default_dir, str) and default_dir:
             try:
@@ -3277,6 +3464,34 @@ class Notepad(QMainWindow):
             self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
         self._force_anjal_english = bool(data.get("force_anjal_english", True))
 
+        # Experimental features
+        self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
+        self.unicode_substring_highlight_act.setChecked(self._unicode_substring_highlight)
+        self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
+        self._tamil_reading_wpm = self._normalize_reading_speed(data.get("tamil_reading_wpm", 150), 150)
+        self._english_reading_wpm = self._normalize_reading_speed(data.get("english_reading_wpm", 250), 250)
+        raw_google_prefix = data.get("google_search_url_prefix")
+        raw_sorkuvai_prefix = data.get("sorkuvai_search_url_prefix")
+        self._google_search_url_prefix = self._normalize_search_url_prefix(
+            raw_google_prefix, DEFAULT_GOOGLE_SEARCH_URL_PREFIX
+        )
+        self._sorkuvai_search_url_prefix = self._normalize_search_url_prefix(
+            raw_sorkuvai_prefix, DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
+        )
+
+        # Seed defaults into settings on first run (or repair invalid/empty values)
+        # so URL patterns can be changed later without rebuilding the app.
+        if (
+            raw_google_prefix != self._google_search_url_prefix
+            or raw_sorkuvai_prefix != self._sorkuvai_search_url_prefix
+        ):
+            try:
+                data["google_search_url_prefix"] = self._google_search_url_prefix
+                data["sorkuvai_search_url_prefix"] = self._sorkuvai_search_url_prefix
+                self.settings.save(data)
+            except Exception:
+                pass
+
         # Last opened file
         last_file = data.get("last_opened_file")
         if self._restore_last_session and isinstance(last_file, str) and last_file:
@@ -3284,6 +3499,8 @@ class Notepad(QMainWindow):
                 self._last_session_file = last_file
             else:
                 self._open_file_path(last_file, notify_errors=False, show_status=False)
+
+        return True
 
     def _save_preferences(self):
         try:
@@ -3320,10 +3537,43 @@ class Notepad(QMainWindow):
                 "last_opened_file": last_opened_file,
                 "quick_switch_enabled": getattr(self, '_quick_switch_enabled', True),
                 "force_anjal_english": getattr(self, '_force_anjal_english', True),
+                "unicode_substring_highlight": getattr(self, '_unicode_substring_highlight', False),
+                "reading_time_enabled": getattr(self, '_reading_time_enabled', False),
+                "tamil_reading_wpm": self._normalize_reading_speed(getattr(self, '_tamil_reading_wpm', 150), 150),
+                "english_reading_wpm": self._normalize_reading_speed(getattr(self, '_english_reading_wpm', 250), 250),
+                "google_search_url_prefix": self._normalize_search_url_prefix(
+                    getattr(self, '_google_search_url_prefix', DEFAULT_GOOGLE_SEARCH_URL_PREFIX),
+                    DEFAULT_GOOGLE_SEARCH_URL_PREFIX,
+                ),
+                "sorkuvai_search_url_prefix": self._normalize_search_url_prefix(
+                    getattr(self, '_sorkuvai_search_url_prefix', DEFAULT_SORKUVAI_SEARCH_URL_PREFIX),
+                    DEFAULT_SORKUVAI_SEARCH_URL_PREFIX,
+                ),
             })
             self.settings.save(data)
         except Exception:
             pass
+
+    @staticmethod
+    def _normalize_reading_speed(value, default: int) -> int:
+        allowed = set(range(50, 401, 50))
+        try:
+            speed = int(value)
+        except Exception:
+            speed = int(default)
+        if speed in allowed:
+            return speed
+        if default in allowed:
+            return int(default)
+        return 150
+
+    @staticmethod
+    def _normalize_search_url_prefix(value, default: str) -> str:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+        return default
 
     def change_font(self):
         current_font = self.editor.font()
@@ -3333,6 +3583,10 @@ class Notepad(QMainWindow):
             self._save_preferences()
 
  
+
+    def _toggle_unicode_substring_highlight(self, enabled: bool):
+        self._unicode_substring_highlight = bool(enabled)
+        self._save_preferences()
 
     def _toggle_wrap(self, enabled: bool):
         self.editor.setWordWrap(bool(enabled))
@@ -3429,12 +3683,60 @@ class Notepad(QMainWindow):
             self.status.showMessage("No text selected for search", 1500)
             return
 
-        url = f"https://www.google.com/search?q={quote_plus(cleaned)}"
+        url = f"{self._google_search_url_prefix}{quote_plus(cleaned)}"
         try:
             webbrowser.open(url)
             self.status.showMessage(f'Google search: "{cleaned}"', 2000)
         except Exception as exc:
             QMessageBox.warning(self, "Search Failed", f"Could not launch browser:\n{exc}")
+
+    def launch_sorkuvai_search(self, query: str):
+        cleaned = CodeEditor._normalize_search_text(query)
+        if not cleaned:
+            self.status.showMessage("No word selected for Sorkuvai search", 1500)
+            return
+
+        # Sorkuvai works with URL-encoded UTF-8 query text.
+        url = f"{self._sorkuvai_search_url_prefix}{quote_plus(cleaned)}"
+        try:
+            webbrowser.open(url)
+            self.status.showMessage(f'Sorkuvai search: "{cleaned}"', 2000)
+        except Exception as exc:
+            QMessageBox.warning(self, "Search Failed", f"Could not launch browser:\n{exc}")
+
+    def _normalize_unicode_text(self):
+        cursor = self.editor.textCursor()
+        has_selection = cursor.hasSelection()
+
+        if has_selection:
+            original = cursor.selectedText().replace("\u2029", "\n")
+        else:
+            original = self.editor.toPlainText()
+
+        normalized = unicodedata.normalize("NFC", original)
+        if normalized == original:
+            self.status.showMessage("Unicode text is already normalized (NFC)", 2000)
+            return
+
+        if has_selection:
+            cursor.beginEditBlock()
+            cursor.insertText(normalized)
+            cursor.endEditBlock()
+            self.status.showMessage("Normalized selected text to Unicode NFC", 2000)
+            return
+
+        restore_cursor = self.editor.textCursor().position()
+        update_cursor = self.editor.textCursor()
+        update_cursor.beginEditBlock()
+        update_cursor.select(QTextCursor.Document)
+        update_cursor.insertText(normalized)
+        update_cursor.endEditBlock()
+
+        restore_cursor = min(restore_cursor, len(normalized))
+        final_cursor = self.editor.textCursor()
+        final_cursor.setPosition(restore_cursor)
+        self.editor.setTextCursor(final_cursor)
+        self.status.showMessage("Normalized document text to Unicode NFC", 2000)
 
     def _change_font_size(self, step: int):
         font = self.editor.font()
@@ -3517,7 +3819,7 @@ class Notepad(QMainWindow):
         doc = self.editor.document()
         search_cursor = QTextCursor(doc)
         matches = []
-        flags = QTextDocument.FindWholeWords
+        flags = QTextDocument.FindFlags() if getattr(self, '_unicode_substring_highlight', False) else QTextDocument.FindWholeWords
 
         while True:
             match_cursor = doc.find(word, search_cursor, flags)
@@ -3557,11 +3859,82 @@ class Notepad(QMainWindow):
             return
         self.word_match_label.setText(f"Matches: {count}")
 
+    @staticmethod
+    def _classify_word_script(word: str) -> str:
+        tamil_count = 0
+        english_count = 0
+        for ch in word:
+            code = ord(ch)
+            if 0x0B80 <= code <= 0x0BFF:
+                tamil_count += 1
+            elif ('A' <= ch <= 'Z') or ('a' <= ch <= 'z'):
+                english_count += 1
+        if tamil_count == 0 and english_count == 0:
+            return "other"
+        if tamil_count > english_count:
+            return "tamil"
+        if english_count > tamil_count:
+            return "english"
+        return "other"
+
+    @staticmethod
+    def _count_sentences(text: str) -> int:
+        if not text or not text.strip():
+            return 0
+
+        chunks = re.split(r"[.!?\u0964\u0965\u3002\uff01\uff1f\u061f]+", text)
+        count = sum(1 for chunk in chunks if re.search(r"\S", chunk))
+        return max(1, count)
+
+    def _update_reading_time_status(self, text: str):
+        if not getattr(self, "_reading_time_enabled", False):
+            self.reading_time_label.setText("")
+            return
+
+        tokens = re.findall(r"\S+", text)
+        if not tokens:
+            self.reading_time_label.setText("Read: <1 min")
+            return
+
+        tamil_words = 0
+        english_words = 0
+        other_words = 0
+        for token in tokens:
+            script = self._classify_word_script(token)
+            if script == "tamil":
+                tamil_words += 1
+            elif script == "english":
+                english_words += 1
+            else:
+                other_words += 1
+
+        tamil_wpm = max(1, self._normalize_reading_speed(getattr(self, "_tamil_reading_wpm", 150), 150))
+        english_wpm = max(1, self._normalize_reading_speed(getattr(self, "_english_reading_wpm", 250), 250))
+        other_wpm = 180
+
+        weighted_minutes = (
+            (tamil_words / tamil_wpm) +
+            (english_words / english_wpm) +
+            (other_words / other_wpm)
+        )
+        total_words = max(1, len(tokens))
+        tamil_pct = int(round((tamil_words * 100.0) / total_words))
+        english_pct = int(round((english_words * 100.0) / total_words))
+
+        if weighted_minutes < 1.0:
+            estimate = "<1"
+        else:
+            estimate = str(int(math.ceil(weighted_minutes)))
+
+        self.reading_time_label.setText(f"Read: {estimate} min | Ta {tamil_pct}% En {english_pct}%")
+
     def _update_status_bar(self):
         text = self.editor.toPlainText()
         words = len(re.findall(r"\S+", text))
+        sentences = self._count_sentences(text)
         chars = len(text)
-        self.count_label.setText(f"Words: {words} | Chars: {chars}")
+        self.count_label.setText(f"Words: {words} | Sentences: {sentences} | Chars: {chars}")
+        self._update_reading_time_status(text)
 
         cursor = self.editor.textCursor()
         line = cursor.blockNumber() + 1
@@ -3587,6 +3960,9 @@ def main():
     force_empty_window = "--new-window-empty" in sys.argv[1:]
     initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
     window = Notepad(initial_file=initial_file, restore_last_session=not force_empty_window)
+    if getattr(window, "_startup_cancelled", False):
+        window.deleteLater()
+        sys.exit(0)
     window.show()
     sys.exit(app.exec())
 
