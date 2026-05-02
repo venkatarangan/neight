@@ -1,6 +1,6 @@
 # Neight – Notepad Enhanced, AI-Built and Tamil-Friendly
 
-**Current Version: 2026.017** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.019** | [See Version Summary](changes/VERSION_SUMMARY.md) for version history | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS inspired by Notepad but enhanced with a few thoughtful additions. It's designed mainly for my personal writing workflow in Tamil and English — and as an experiment in building a complete, usable cross-platform app entirely through Generative AI.
 
@@ -92,6 +92,7 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
   * Window size
   * Font name and size
 * **Quick Google Search**: Select text and press **Ctrl+E** or right-click → "Search with Google"
+* **Sorkuvai context lookup**: Select a single word and right-click to search it in Tamil Nadu Government's Sorkuvai
 * **Plain-text paste shortcut**: Hold **Shift** with paste (Shift+Ctrl+V or Shift+Insert) to strip formatting
 * **Blank line cleanup**: Edit → Collapse Blank Lines trims consecutive empty rows across the document
 * **New Window** support: Open multiple independent editor windows for side-by-side writing tasks
@@ -105,6 +106,17 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
   * Current keyboard layout is always shown in the bottom-right corner of the status bar
 * **Debug Info** (Help → Debug Info): Opens a panel showing Qt version, Python version, operating system details, active keyboard layout, and the path to your settings file — handy for troubleshooting or bug reports
 * **Word match highlighting (New in v2025.007)**: Selecting a single word highlights all occurrences in yellow and shows the match count on the left of the status bar; highlights clear automatically when you move the caret away or lose focus
+* **Experimental text tools under Format → Experimental**:
+
+  * **Highlight partial word selections**: When enabled, selected text is matched as a substring (useful for Tamil stems like selecting `நடிகர்` and matching `நடிகர்கள்`, `நடிகர்களே`)
+  * **Reading Time...** dialog with configurable per-language speeds and a live estimate in the status bar
+  * **Normalize Unicode (NFC)**: Normalizes the current document into NFC form for cleaner Unicode consistency across copy/paste and publishing tools
+
+* **Mixed-language reading time (New in v2026.018)**:
+
+  * Works with Tamil, English, and other scripts in the same document
+  * Other scripts (non-Tamil/non-English) are classified as **Other** and handled safely
+  * Basic runtime validation has been done with mixed-script text to ensure no crashes or exceptions in this flow
 
 ### Markdown Support (New in v2025.001!)
 
@@ -139,6 +151,85 @@ Neight keeps all the essentials of Notepad and adds a few thoughtful touches.
 * **Smart menu display**: Export options appear contextually based on current file type
 
 See [Markdown Support](#markdown-support-new-in-v2025001) for complete markdown documentation.
+
+---
+
+## What's New in v2026.018
+
+### New: Format → Experimental
+
+Neight now has an **Experimental** submenu under **Format** for writing-focused features that are still evolving.
+
+#### 1) Highlight partial word selections
+
+When enabled, Neight highlights substring matches for the current selection instead of only strict whole-word matches.
+
+Example for Tamil writing:
+
+- Selecting `நடிகர்` can also highlight `நடிகர்கள்` and `நடிகர்களே`.
+
+Default is **OFF** (whole-word behavior remains unchanged unless you enable it).
+
+#### 2) Reading Time...
+
+Opens a dialog where you can:
+
+- Turn reading-time estimation **ON/OFF** (default **OFF**)
+- Configure **Tamil Reading Speed** from **50 to 400 wpm** in steps of 50
+- Configure **English Reading Speed** from **50 to 400 wpm** in steps of 50
+
+These settings are saved and restored automatically.
+
+### Weighted Reading-Time Formula
+
+GitHub now supports math rendering in Markdown, so no image is needed. Neight uses the weighted formula below:
+
+$$
+T = \frac{W_t}{R_t} + \frac{W_e}{R_e} + \frac{W_o}{R_o}
+$$
+
+Where:
+
+- $W_t, W_e, W_o$ are word counts for Tamil, English, and Other scripts
+- $R_t, R_e$ are your configured Tamil/English reading speeds (wpm)
+- $R_o$ is fixed at 180 wpm for Other scripts
+
+The final estimate is shown in the status bar as rounded minutes.
+
+### Mixed-Script Safety
+
+Reading Time and Highlight behavior were run through basic mixed-language checks (Tamil, English, and non-Tamil/non-English scripts including symbols/emoji). In these basic tests, the feature path handled input safely without crashes.
+
+---
+
+## What's New in v2026.019
+
+### Settings Reliability and Recovery
+
+Neight now handles first-run and settings failure paths more safely and transparently:
+
+- On a **fresh install + first launch**, `settings.json` is created automatically with defaults.
+- If the app folder is not writable (for example, under Program Files), settings are written to `%LOCALAPPDATA%\Neight\settings.json`.
+- If `settings.json` is invalid/corrupted, Neight shows a startup warning with the exact path and offers:
+  - **Copy Path** (quickly copy the broken file location)
+  - **Reset to Defaults** (recreate valid settings)
+  - **Exit** (leave files untouched so you can inspect/fix manually)
+
+### Configurable Web Lookup Prefixes (Google + Sorkuvai)
+
+Web search URLs are now settings-driven instead of hardcoded.
+
+- `google_search_url_prefix`
+- `sorkuvai_search_url_prefix`
+
+At search time, Neight URL-encodes your selected text and appends it to the configured prefix.
+
+Example behavior:
+
+- If `google_search_url_prefix` is `https://www.google.com/search?q=` and selection is `தமிழ் test`, Neight opens:
+  - `https://www.google.com/search?q=%E0%AE%A4%E0%AE%AE%E0%AE%BF%E0%AE%B4%E0%AF%8D+test`
+
+You can change prefixes directly in `settings.json` to use alternate endpoints or custom query templates.
 
 ---
 
@@ -399,6 +490,13 @@ pip3 install PySide6 markdown pyinstaller
 Run the app once and it will create a **settings.json** file next to the executable.
 It stores your preferences (font, window size, last opened file, autosave interval, etc.).
 
+Recent additions also persist:
+
+- `unicode_substring_highlight`
+- `reading_time_enabled`
+- `tamil_reading_wpm`
+- `english_reading_wpm`
+
 When launched through Windows "Open with…", the referenced file now opens with the correct window title and save path.
 
 ---
@@ -479,6 +577,19 @@ This file remembers:
 * Last used directory
 * Quick-switch enabled/disabled (`quick_switch_enabled`)
 * Whether to force Tamil Anjal ↔ English (India) pair (`force_anjal_english`)
+* Experimental partial-selection highlighting (`unicode_substring_highlight`)
+* Reading time estimate enabled/disabled (`reading_time_enabled`)
+* Tamil reading speed in words-per-minute (`tamil_reading_wpm`)
+* English reading speed in words-per-minute (`english_reading_wpm`)
+* Google search URL prefix (`google_search_url_prefix`)
+* Sorkuvai search URL prefix (`sorkuvai_search_url_prefix`)
+
+### Settings lifecycle (first run, fallback, corruption)
+
+- Fresh install: the app seeds a new `settings.json` with defaults on first launch.
+- Write-protected install locations: settings are automatically stored in the AppData fallback location.
+- Corrupted settings file: Neight detects JSON parse failures at startup and asks whether to reset defaults or exit.
+- Corruption dialog includes a **Copy Path** action so you can quickly open the exact file location.
 
 ---
 
