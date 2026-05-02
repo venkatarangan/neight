@@ -19,7 +19,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.017"
+VERSION = "2026.018"
 
 
 try:
@@ -1245,6 +1245,7 @@ class Notepad(QMainWindow):
         self.search_web_act.setShortcut(QKeySequence("Ctrl+E"))
 
         self.collapse_blank_lines_act = QAction("Collapse Blank Lines", self)
+        self.insert_blank_lines_act = QAction("Insert Blank Lines", self)
 
         # Insert - Markdown heading actions
         self.insert_h1_act = QAction("Heading 1", self)
@@ -1368,6 +1369,7 @@ class Notepad(QMainWindow):
         edit_menu.addAction(self.time_date_act)
         edit_menu.addSeparator()
         edit_menu.addAction(self.collapse_blank_lines_act)
+        edit_menu.addAction(self.insert_blank_lines_act)
 
         # Insert menu (Alt+N is handled by the & in "I&nsert")
         insert_menu = menubar.addMenu("I&nsert")
@@ -1458,6 +1460,7 @@ class Notepad(QMainWindow):
         self.goto_act.triggered.connect(self.goto_line)
         self.search_web_act.triggered.connect(self._search_web_shortcut)
         self.collapse_blank_lines_act.triggered.connect(self.collapse_blank_lines)
+        self.insert_blank_lines_act.triggered.connect(self.insert_blank_lines)
 
         # Format
         self.wrap_act.toggled.connect(self._toggle_wrap)
@@ -2183,6 +2186,35 @@ class Notepad(QMainWindow):
 
         blocks_collapsed = len(matches)
         self.status.showMessage(f"Collapsed {blocks_collapsed} blank block(s)", 3000)
+
+    def insert_blank_lines(self):
+        text = self.editor.toPlainText()
+        if not text:
+            self.status.showMessage("Document is empty", 1500)
+            return
+
+        newline = "\r\n" if "\r\n" in text else "\n"
+        lines = text.splitlines()
+        new_lines = []
+        lines_added = 0
+        for line in lines:
+            new_lines.append(line)
+            if line.strip():  # non-blank line — insert a blank line after it
+                new_lines.append("")
+                lines_added += 1
+
+        if lines_added == 0:
+            self.status.showMessage("No full lines found to add blank lines after", 2000)
+            return
+
+        result = newline.join(new_lines)
+        cursor = self.editor.textCursor()
+        cursor.beginEditBlock()
+        cursor.movePosition(QTextCursor.Start)
+        cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+        cursor.insertText(result)
+        cursor.endEditBlock()
+        self.status.showMessage(f"Inserted {lines_added} blank line(s)", 3000)
 
     def goto_line(self):
         line_str, ok = QInputDialog.getText(self, "Go To", "Line number:")
