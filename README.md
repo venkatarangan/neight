@@ -93,7 +93,7 @@ Neight is especially useful if you want:
 ### Writing-focused improvements
 
 - **Line numbers and column tracking**
-- **Adjustable margins** from **Format -> Margins** for more comfortable reading
+- **Adjustable margins** from **Format -> Margins** for more comfortable reading (word-wrap clipping with margins enabled is now fixed)
 - **Live status bar counts** for **words, sentences, and characters**
 - **Word-match highlighting** for single-word selections, with live match count in the status bar
 - **Auto-save** with configurable intervals under **Settings -> Auto-save**
@@ -326,6 +326,7 @@ By default, they point to Google Search and Tamil Nadu Government's Sorkuvai. If
 
 ## Recent Highlights
 
+- **Bug fix:** word-wrap clipping with margins enabled on Windows (and macOS) — words on the right edge are no longer cut off when margins are active
 - Safer first-run and corrupted-settings recovery
 - Configurable Google and Sorkuvai URL prefixes
 - Mixed-language reading time
