@@ -601,6 +601,9 @@ class CodeEditor(QPlainTextEdit):
         # Flags first so slots can use them safely
         self._highlight_current_line = True
         self._wrap_enabled = True
+        self._last_wrap_enabled = True
+        self._last_wrap_viewport_width = -1
+        self._refreshing_wrap_layout = False
         self._line_numbers_visible = True
         self._text_margin_percent = 0
         self._click_count = 0
@@ -620,12 +623,42 @@ class CodeEditor(QPlainTextEdit):
     # ----- Word wrap -----
     def setWordWrap(self, enabled: bool):
         self._wrap_enabled = bool(enabled)
-        mode = QPlainTextEdit.WidgetWidth if self._wrap_enabled else QPlainTextEdit.NoWrap
-        self.setLineWrapMode(mode)
+        self._refresh_wrap_layout(force=True)
         self.updateLineNumberAreaWidth(0)
 
     def isWordWrap(self) -> bool:
         return self._wrap_enabled
+
+    def _refresh_wrap_layout(self, force: bool = False):
+        if self._refreshing_wrap_layout:
+            return
+
+        viewport_width = int(self.viewport().width())
+        wrap_enabled = bool(self._wrap_enabled)
+
+        if (
+            not force
+            and viewport_width == self._last_wrap_viewport_width
+            and wrap_enabled == self._last_wrap_enabled
+        ):
+            return
+
+        self._last_wrap_viewport_width = viewport_width
+        self._last_wrap_enabled = wrap_enabled
+
+        self._refreshing_wrap_layout = True
+        try:
+            if wrap_enabled:
+                # Re-apply wrap mode so QTextDocument recomputes line breaks against
+                # the latest viewport width after margin/geometry changes.
+                self.setLineWrapMode(QPlainTextEdit.NoWrap)
+                self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+                self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            else:
+                self.setLineWrapMode(QPlainTextEdit.NoWrap)
+                self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        finally:
+            self._refreshing_wrap_layout = False
 
     # ----- Line numbers plumbing -----
     def lineNumberAreaWidth(self) -> int:
@@ -681,6 +714,7 @@ class CodeEditor(QPlainTextEdit):
         cr = self.contentsRect()
         if self._line_numbers_visible:
             self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+        self._refresh_wrap_layout()
 
     def lineNumberAreaPaintEvent(self, event):
         if not self._line_numbers_visible:
@@ -725,6 +759,7 @@ class CodeEditor(QPlainTextEdit):
             value = 0
         self._text_margin_percent = value
         self._apply_viewport_margins()
+        self._refresh_wrap_layout()
         self.viewport().update()
 
     def textMarginPercent(self) -> int:
