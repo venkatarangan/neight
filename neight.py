@@ -21,7 +21,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.023"
+VERSION = "2026.025"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -896,29 +896,65 @@ class WordIndexOverlay(QWidget):
 
 
 class SpacedPlainTextDocumentLayout(QPlainTextDocumentLayout):
-    """Drop-in QPlainTextDocumentLayout replacement that adds configurable extra
-    pixels after every block.  QPlainTextDocumentLayout hard-codes block height to
-    font metrics and ignores QTextBlockFormat line-height/margin properties entirely,
-    so the only way to change line spacing is to override blockBoundingRect()."""
+    """QPlainTextDocumentLayout replacement that achieves true per-visual-line
+    spacing by repositioning QTextLine objects inside each block's QTextLayout.
+
+    QPlainTextDocumentLayout hard-codes line positions via font metrics and
+    ignores QTextBlockFormat line-height settings.  By overriding
+    blockBoundingRect() we intercept after ensureBlockLayout() has produced the
+    natural single-spaced positions, then move every QTextLine to its spaced
+    position.  The bounding rect is widened accordingly so that subsequent
+    blocks are pushed down correctly.  The result is visual line spacing
+    identical in effect to Word's line-spacing feature: all wrapped lines within
+    a paragraph are spaced, not just paragraph breaks.
+
+    A multiplier of 1.0 preserves natural single spacing; 1.5 gives 1.5×, etc."""
 
     def __init__(self, doc):
         super().__init__(doc)
-        self._extra_px = 0.0
+        self._line_spacing_mult = 1.0
 
-    def setExtraPixels(self, px: float):
-        self._extra_px = max(0.0, float(px))
+    def setLineSpacingMultiplier(self, mult: float):
+        value = max(0.5, min(5.0, float(mult)))
+        if abs(value - self._line_spacing_mult) < 1e-9:
+            return
+        self._line_spacing_mult = value
         doc = self.document()
         if doc:
             self.documentChanged(0, 0, doc.characterCount())
 
-    def extraPixels(self) -> float:
-        return self._extra_px
+    def lineSpacingMultiplier(self) -> float:
+        return self._line_spacing_mult
 
     def blockBoundingRect(self, block):
+        # super() call triggers ensureBlockLayout(), positioning lines at natural
+        # (single-spaced) coordinates.  We then reposition them.
         r = super().blockBoundingRect(block)
-        if self._extra_px > 0.0 and block.isValid():
-            return QRectF(r.x(), r.y(), r.width(), r.height() + self._extra_px)
-        return r
+        mult = self._line_spacing_mult
+        if abs(mult - 1.0) < 1e-9 or not block.isValid():
+            return r
+
+        layout = block.layout()
+        n = layout.lineCount()
+        if n == 0:
+            return r
+
+        # Natural line height is the height of the first line as set by Qt's
+        # text engine (ascent + descent + leading for the block's font).
+        natural_h = layout.lineAt(0).height()
+        if natural_h <= 0.0:
+            return r
+
+        spaced_h = natural_h * mult
+
+        # Reposition every visual line.  Preserve the x coordinate (handles
+        # paragraph indentation), only override y.
+        for i in range(n):
+            line = layout.lineAt(i)
+            pos = line.position()
+            line.setPosition(QPointF(pos.x(), i * spaced_h))
+
+        return QRectF(r.x(), r.y(), r.width(), n * spaced_h)
 
 
 class CodeEditor(QPlainTextEdit):
@@ -1191,11 +1227,9 @@ class CodeEditor(QPlainTextEdit):
         self._apply_layout_spacing()
 
     def _apply_layout_spacing(self):
-        """Convert stored percent to pixels and push to the spacing layout."""
+        """Convert stored percent to a multiplier and push to the spacing layout."""
         percent = getattr(self, '_line_spacing_percent', 100.0)
-        extra_fraction = max(0.0, percent / 100.0 - 1.0)
-        base_px = float(max(1, self.fontMetrics().height()))
-        self._spacing_layout.setExtraPixels(extra_fraction * base_px)
+        self._spacing_layout.setLineSpacingMultiplier(percent / 100.0)
 
     def _on_document_contents_change(self, pos: int, removed: int, added: int):
         # Always mark dirty + set burst flags, even when overlay is hidden, so the
@@ -1715,7 +1749,7 @@ class Notepad(QMainWindow):
         self._appearance_theme_mode = "follow_os"
         self._appearance_custom_bg = "#202124"
         self._appearance_custom_fg = "#f1f3f4"
-        self._line_spacing_preset = "normal"
+        self._line_spacing_preset = "single_line"
 
         # Status bar item visibility (defaults; overridden in _load_preferences)
         self._status_show_words = True
@@ -1888,7 +1922,7 @@ class Notepad(QMainWindow):
         self.wrap_act = QAction("Word Wrap", self, checkable=True)
         self.wrap_act.setChecked(True)
 
-        self.line_numbers_act = QAction("Line Numbers in Margin", self, checkable=True)
+        self.line_numbers_act = QAction("Gutter Line Numbers", self, checkable=True)
         self.line_numbers_act.setChecked(True)
 
         # Status bar item visibility
@@ -1903,11 +1937,11 @@ class Notepad(QMainWindow):
         self.status_col_act = QAction("Cursor Column", self, checkable=True)
         self.status_col_act.setChecked(True)
 
-        self.line_spacing_extra_tight_act = QAction("Very Tight", self, checkable=True)
-        self.line_spacing_tight_act = QAction("Tight", self, checkable=True)
-        self.line_spacing_normal_act = QAction("Default", self, checkable=True)
-        self.line_spacing_casual_act = QAction("Relaxed", self, checkable=True)
-        self.line_spacing_extra_casual_act = QAction("Loose", self, checkable=True)
+        self.line_spacing_condensed_act = QAction("Condensed", self, checkable=True)
+        self.line_spacing_single_act = QAction("Single Line", self, checkable=True)
+        self.line_spacing_one_half_act = QAction("1.5 Lines", self, checkable=True)
+        self.line_spacing_double_act = QAction("Double", self, checkable=True)
+        self.line_spacing_triple_act = QAction("Triple", self, checkable=True)
 
         self.margin_5_act = QAction("5%", self)
         self.margin_5_act.setCheckable(True)
@@ -1935,7 +1969,7 @@ class Notepad(QMainWindow):
         self.keyboards_act = QAction("Language Switch…", self)
 
         # Advanced (experimental features)
-        self.unicode_substring_highlight_act = QAction("Highlight partial word selections", self, checkable=True)
+        self.unicode_substring_highlight_act = QAction("Partial Word Highlighting", self, checkable=True)
         self.unicode_substring_highlight_act.setChecked(False)
         self.reading_time_act = QAction("Reading Time...", self)
         self.word_index_act = QAction("Word Index", self, checkable=True)
@@ -2028,11 +2062,11 @@ class Notepad(QMainWindow):
         format_menu = menubar.addMenu("F&ormat")
         format_menu.addAction(self.font_act)
         line_spacing_menu = format_menu.addMenu("Line Spacing")
-        line_spacing_menu.addAction(self.line_spacing_extra_tight_act)
-        line_spacing_menu.addAction(self.line_spacing_tight_act)
-        line_spacing_menu.addAction(self.line_spacing_normal_act)
-        line_spacing_menu.addAction(self.line_spacing_casual_act)
-        line_spacing_menu.addAction(self.line_spacing_extra_casual_act)
+        line_spacing_menu.addAction(self.line_spacing_condensed_act)
+        line_spacing_menu.addAction(self.line_spacing_single_act)
+        line_spacing_menu.addAction(self.line_spacing_one_half_act)
+        line_spacing_menu.addAction(self.line_spacing_double_act)
+        line_spacing_menu.addAction(self.line_spacing_triple_act)
         margins_menu = format_menu.addMenu("Margins")
         margins_menu.addAction(self.margin_5_act)
         margins_menu.addAction(self.margin_10_act)
@@ -2114,11 +2148,11 @@ class Notepad(QMainWindow):
         self.margin_20_act.triggered.connect(lambda: self._set_text_margin_percent(20))
         self.margin_25_act.triggered.connect(lambda: self._set_text_margin_percent(25))
         self.margin_reset_act.triggered.connect(lambda: self._set_text_margin_percent(0))
-        self.line_spacing_extra_tight_act.triggered.connect(lambda: self._set_line_spacing_preset("extra_tight"))
-        self.line_spacing_tight_act.triggered.connect(lambda: self._set_line_spacing_preset("tight"))
-        self.line_spacing_normal_act.triggered.connect(lambda: self._set_line_spacing_preset("normal"))
-        self.line_spacing_casual_act.triggered.connect(lambda: self._set_line_spacing_preset("casual"))
-        self.line_spacing_extra_casual_act.triggered.connect(lambda: self._set_line_spacing_preset("extra_casual"))
+        self.line_spacing_condensed_act.triggered.connect(lambda: self._set_line_spacing_preset("condensed"))
+        self.line_spacing_single_act.triggered.connect(lambda: self._set_line_spacing_preset("single_line"))
+        self.line_spacing_one_half_act.triggered.connect(lambda: self._set_line_spacing_preset("one_half_lines"))
+        self.line_spacing_double_act.triggered.connect(lambda: self._set_line_spacing_preset("double"))
+        self.line_spacing_triple_act.triggered.connect(lambda: self._set_line_spacing_preset("triple"))
         self.font_act.triggered.connect(self.change_font)
 
         # Auto-save
@@ -2368,7 +2402,7 @@ class Notepad(QMainWindow):
         if not self._maybe_save_changes():
             return
         self.editor.clear()
-        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'normal'), save=False, show_status=False)
+        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = None
         self.editor.document().setModified(False)
         self._update_title()
@@ -2430,7 +2464,7 @@ class Notepad(QMainWindow):
             return False
 
         self.editor.setPlainText(text)
-        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'normal'), save=False, show_status=False)
+        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = str(path_obj)
         self.editor.document().setModified(False)
         self._update_default_directory(path_obj.parent)
@@ -3616,10 +3650,13 @@ class Notepad(QMainWindow):
             self,
             "About",
             f"""
-            <b>Neight v{VERSION}</b> (Using {QT_LIB})<br>
-            A lightweight UTF-8 text editor with advanced features, word count, line numbers and more.<br>
-            Generated by Github Copilot for venkatarangan.com.<br><br>
-            <span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br>
+            <b>Neight v{VERSION}</b> (Using {QT_LIB})<br><br>
+
+            A lightweight Unicode text editor with advanced features, word count, line numbers and more.<br><br>
+            
+            Brewed at <a href='https://venkatarangan.com'>venkatarangan.com</a> with GitHub Copilot and Madras filter coffee.<br><br>
+            
+            <span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br><br>
             <span style='color:#666;'>Full details: <a href='https://github.com/venkatarangan/neight/blob/main/README.md'>README</a> | <a href='https://github.com/venkatarangan/neight/blob/main/PRIVACY.md'>Privacy</a></span>
             """
         )
@@ -4417,7 +4454,7 @@ class Notepad(QMainWindow):
         margin_percent = data.get("text_margin_percent", 0)
         self._set_text_margin_percent(margin_percent, save=False, show_status=False)
 
-        line_spacing_preset = data.get("line_spacing_preset", "normal")
+        line_spacing_preset = data.get("line_spacing_preset", "single_line")
         self._set_line_spacing_preset(line_spacing_preset, save=False, show_status=False)
 
         # Font
@@ -4574,7 +4611,7 @@ class Notepad(QMainWindow):
                 "status_show_line": getattr(self, "_status_show_line", True),
                 "status_show_col": getattr(self, "_status_show_col", True),
                 "line_spacing_preset": self._normalize_line_spacing_preset(
-                    getattr(self, '_line_spacing_preset', 'normal')
+                    getattr(self, '_line_spacing_preset', 'single_line')
                 ),
                 "text_margin_percent": self.editor.textMarginPercent(),
                 "font_family": font.family(),
@@ -4721,21 +4758,21 @@ class Notepad(QMainWindow):
 
     @staticmethod
     def _normalize_line_spacing_preset(value) -> str:
-        allowed = {"extra_tight", "tight", "normal", "casual", "extra_casual"}
+        allowed = {"condensed", "single_line", "one_half_lines", "double", "triple"}
         if isinstance(value, str):
             normalized = value.strip().lower().replace(" ", "_")
             if normalized in allowed:
                 return normalized
-        return "normal"
+        return "single_line"
 
     @staticmethod
     def _line_spacing_percent_for_preset(preset: str) -> int:
         mapping = {
-            "extra_tight": 75,
-            "tight": 90,
-            "normal": 100,
-            "casual": 150,
-            "extra_casual": 200,
+            "condensed": 75,
+            "single_line": 100,
+            "one_half_lines": 150,
+            "double": 200,
+            "triple": 300,
         }
         key = Notepad._normalize_line_spacing_preset(preset)
         return mapping.get(key, 100)
@@ -4779,12 +4816,12 @@ class Notepad(QMainWindow):
             self._save_preferences()
         if show_status:
             pretty = {
-                "extra_tight": "Very Tight",
-                "tight": "Tight",
-                "normal": "Default",
-                "casual": "Relaxed",
-                "extra_casual": "Loose",
-            }.get(key, "Default")
+                "condensed": "Condensed",
+                "single_line": "Single Line",
+                "one_half_lines": "1.5 Lines",
+                "double": "Double",
+                "triple": "Triple",
+            }.get(key, "Single Line")
             self.status.showMessage(f"Line spacing: {pretty}", 1800)
 
     def _apply_line_spacing_to_document(self, line_height_percent: int):
@@ -4796,11 +4833,11 @@ class Notepad(QMainWindow):
 
     def _update_line_spacing_menu(self, preset: str):
         key = self._normalize_line_spacing_preset(preset)
-        self.line_spacing_extra_tight_act.setChecked(key == "extra_tight")
-        self.line_spacing_tight_act.setChecked(key == "tight")
-        self.line_spacing_normal_act.setChecked(key == "normal")
-        self.line_spacing_casual_act.setChecked(key == "casual")
-        self.line_spacing_extra_casual_act.setChecked(key == "extra_casual")
+        self.line_spacing_condensed_act.setChecked(key == "condensed")
+        self.line_spacing_single_act.setChecked(key == "single_line")
+        self.line_spacing_one_half_act.setChecked(key == "one_half_lines")
+        self.line_spacing_double_act.setChecked(key == "double")
+        self.line_spacing_triple_act.setChecked(key == "triple")
 
     def _set_text_margin_percent(self, percent: int, *, save: bool = True, show_status: bool = True):
         allowed = {0, 5, 10, 15, 20, 25}
