@@ -1,10 +1,12 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.021** | [Version History](changes/VERSION_SUMMARY.md) | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.023** | [Version History](changes/VERSION_SUMMARY.md) | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS, built for real writing: Tamil, English, mixed-language drafting, quick notes, Markdown, and distraction-free composition.
 
-It started as a tool for my own daily workflow and continues to evolve as a practical AI-assisted software project.
+It started as a tool for my own daily workflow — and continues to grow as a practical project, vibe-coded with AI assistance, brewed at [venkatarangan.com](https://venkatarangan.com).
+
+**Neight does not use any AI models, call any external services, or send telemetry.** Everything runs locally on your machine.
 
 ---
 
@@ -52,11 +54,11 @@ Main editor:
 
 Language Switch settings on macOS:
 
-![Neight language switch settings on macOS](screenshots/macos/2026-april-28-mac-keyboard-screenshot.png)
+![Neight language switch settings on macOS](screenshots/macos/2026-May-06-mac-language-screenshot.jpg)
 
 Debug information panel on macOS:
 
-![Neight debug info on macOS](screenshots/macos/2026-april-28-mac-debuginfo-screenshot.png)
+![Neight debug info on macOS](screenshots/macos/2026-May-06-mac-debuginfo-screenshot.jpg)
 
 Additional screenshots are available in the [screenshots](screenshots) folder.
 
@@ -84,10 +86,10 @@ Neight's menus are organized by what you are doing, not by how things are implem
 | Menu | What you find there |
 |---|---|
 | **File** | New, Open, Save, Save As, PDF Export, Exit |
-| **Edit** | Undo/Redo, clipboard, Find/Replace, Go To, Time/Date, Google Search, blank-line tools, Normalize Unicode |
+| **Edit** | Undo/Redo, clipboard, Find/Replace, Go To, Time/Date, Search with Google, blank-line tools, Normalize Unicode |
 | **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Line Spacing, Margins, Word Wrap |
-| **View** | Line Numbers in Margin, Word Index, Highlight partial word selections, Status Bar controls |
+| **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Status Bar controls |
 | **Settings** | Auto-save, Appearance, Language Switch |
 | **Help** | About, Debug Info |
 
@@ -117,9 +119,9 @@ Positions are fixed — hiding one item does not cause the others to shift.
 
 ### Writing-focused improvements
 
-- **Line Numbers in Margin** — gutter line numbers alongside each paragraph, similar to code editors. Toggled from **View → Line Numbers in Margin**. Labelled clearly so it is not confused with the status bar cursor-position display.
+- **Gutter Line Numbers** — line numbers alongside each paragraph, similar to code editors. Toggled from **View → Gutter Line Numbers**. Distinct from the status bar cursor-position display.
 - **Adjustable margins** from **Format → Margins** for comfortable reading width
-- **Adjustable line spacing** from **Format → Line Spacing** with five presets from Very Tight to Loose
+- **Adjustable line spacing** from **Format → Line Spacing** with five presets: Condensed, Single Line, 1.5 Lines, Double, and Triple
 - **Live status bar counts** for words, sentences, and characters — each independently shown or hidden
 - **Word-match highlighting** for single-word selections, with live match count in the status bar
 - **Auto-save** with configurable intervals under **Settings → Auto-save**
@@ -156,7 +158,7 @@ Key optimizations:
 - **Burst suppression flags** — during rapid typing, expensive full-document passes are skipped entirely. The overlay defers cache rebuilds and partial repaints until the burst ends.
 - **Smart token reuse** — when both word count and reading time are enabled, the word tokenization pass runs only once per update cycle.
 - **`contentsChange` signal** — Neight uses Qt's lower-level `contentsChange` signal (which fires with change coordinates) rather than `contentsChanged` (which fires blindly for every event), so updates can be targeted rather than global.
-- **Custom line spacing engine** — Qt's `QPlainTextEdit` does not support line-height adjustments through its standard formatting API. Neight uses a custom `SpacedPlainTextDocumentLayout` subclass that overrides `blockBoundingRect()` to add configurable extra pixels per block, without rebuilding the document on every keystroke.
+- **Custom line spacing engine** — Qt's `QPlainTextEdit` does not support true line-height adjustments through its standard formatting API. Neight uses a custom `SpacedPlainTextDocumentLayout` subclass that overrides `blockBoundingRect()` to reposition every visual `QTextLine` within each paragraph's layout. This produces genuine per-visual-line spacing — identical in effect to Word's line spacing — so wrapped lines within a paragraph are spaced, not just paragraph breaks.
 
 ### Sentence count
 
@@ -297,7 +299,7 @@ Where $W_t$, $W_e$, $W_o$ are word counts and $R_t$, $R_e$, $R_o$ are the readin
 
 ## Markdown Support
 
-All Markdown shortcuts live in the **Markdown** menu (previously called **Insert**). The rename reflects what the menu actually does — every item inserts or wraps Markdown syntax.
+All Markdown shortcuts live in the **Markdown** menu. Every item inserts or wraps Markdown syntax.
 
 - headings with `Ctrl+1` through `Ctrl+6`
 - bold, italic, bold italic
@@ -320,7 +322,7 @@ When you change formatting, Neight replaces existing markers cleanly. Changing a
 
 Rewrites the entire document into Unicode NFC normalized form. Useful before publishing, especially for Tamil text that may have accumulated inconsistent codepoint sequences from copy-paste or mixed input methods.
 
-### Highlight partial word selections — View menu
+### Partial Word Highlighting — View menu
 
 When enabled, Neight highlights substring matches when you select a word. Useful for Tamil and other inflected languages where you may want to track a stem inside multiple longer forms.
 
@@ -477,6 +479,7 @@ pyinstaller --name Neight --windowed --icon neight.icns neight.py
 | Insert Date/Time | F5 |
 | Search with Google | Ctrl+E |
 | Plain-text Paste | Shift+Ctrl+V or Shift+Insert |
+| Word Index | Ctrl+Shift+W |
 | Language Switch | Double Ctrl (Win/Linux) or Double ⌃ Control (macOS) |
 | Switch to layout 1 / 2 | Ctrl+, / Ctrl+. |
 | Markdown menu | Alt+M |
@@ -497,9 +500,17 @@ This is a Qt-level behavior, not specific to Neight. Detailed notes and reproduc
 
 ## About the Project
 
-Neight is a personal, practical writing tool and an ongoing experiment in AI-assisted software development. The codebase has been created and evolved through iterative prompting and review inside VS Code, while the app itself is kept intentionally small and direct.
+Neight is a personal, practical writing tool whose codebase has been built and evolved through vibe-coding — iterative prompting and review with GitHub Copilot inside VS Code.
+
+The app itself does not use AI in any way at runtime. It calls no external services, connects to no APIs, and sends no telemetry or usage data. Everything runs entirely on your machine.
 
 The name comes from **NotepadEnhanced → NotepadE → N8 → Neight**.
+
+### Acknowledgements
+
+The idea for Neight was sparked by Pa. Raghavan, editor of [MadrasPaper.com](https://madraspaperinfo.com) — an online Tamil magazine. His years-long search for the perfect distraction-free writing app on macOS was the seed that became this project. That level of care for the craft of writing was reason enough to build something.
+
+Warm thanks also to Muthu Nedumaran of [Murasu.com](https://murasu.com) for his encouragement and support throughout.
 
 ---
 
