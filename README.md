@@ -508,7 +508,7 @@ The name comes from **NotepadEnhanced → NotepadE → N8 → Neight**.
 
 ### Acknowledgements
 
-The idea for Neight was sparked by Pa. Raghavan, editor of [MadrasPaper.com](https://madraspaperinfo.com) — an online Tamil magazine. His years-long search for the perfect distraction-free writing app on macOS was the seed that became this project. That level of care for the craft of writing was reason enough to build something.
+The idea for Neight was sparked by Pa. Raghavan, editor of [MadrasPaper.com](https://madraspaper.com) — an online Tamil magazine. His years-long search for the perfect distraction-free writing app on macOS was the seed that became this project. That level of care for the craft of writing was reason enough to build something.
 
 Warm thanks also to Muthu Nedumaran of [Murasu.com](https://murasu.com) for his encouragement and support throughout.
 
