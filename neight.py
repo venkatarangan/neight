@@ -21,55 +21,36 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.021"
+VERSION = "2026.022"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
 
 
-try:
-    from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
-        QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
-        QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
-        QMenu, QCheckBox, QStyle
-    )
-    # In Qt6 / PySide6 QAction and QShortcut live in QtGui (not QtWidgets)
-    from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
-    from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl
-    QT_LIB = "PySide6"
-except Exception:  # Fallback to PyQt5 if PySide6 is unavailable
-    from PyQt5.QtWidgets import (
-        QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
-        QAction, QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QShortcut,
-        QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
-        QMenu, QCheckBox, QStyle
-    )
-    from PyQt5.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
-    from PyQt5.QtCore import Qt, QRect, QFileInfo, QTimer, pyqtSignal as Signal, QUrl
-    QT_LIB = "PyQt5"
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox,
+    QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
+    QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
+    QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip
+)
+# In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
+from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint
+QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
 try:
-    if QT_LIB == "PySide6":
-        from PySide6.QtPrintSupport import QPrinter
-        from PySide6.QtGui import QPageSize, QPageLayout
-        from PySide6.QtCore import QMarginsF
-    else:
-        from PyQt5.QtPrintSupport import QPrinter
-        from PyQt5.QtGui import QPageSize, QPageLayout
-        from PyQt5.QtCore import QMarginsF
+    from PySide6.QtPrintSupport import QPrinter
+    from PySide6.QtGui import QPageSize, QPageLayout
+    from PySide6.QtCore import QMarginsF
     HAS_PRINT_SUPPORT = True
 except ImportError:
     HAS_PRINT_SUPPORT = False
 
-# Cross-version enum compatibility for page-margin units
-# PySide6 uses scoped enum QPageLayout.Unit.Millimeter; PyQt5 uses QPageLayout.Millimeter
+# Qt6/PySide6 uses scoped enum QPageLayout.Unit.Millimeter
 if HAS_PRINT_SUPPORT:
-    _MARGIN_UNIT_MM = getattr(getattr(QPageLayout, "Unit", None), "Millimeter", None) \
-                      or getattr(QPageLayout, "Millimeter", None)
+    _MARGIN_UNIT_MM = QPageLayout.Unit.Millimeter
 
 # ------------------------------------
 # Keyboard layout switching (Windows)
@@ -595,6 +576,351 @@ class LineNumberArea(QWidget):
         self.editor.lineNumberAreaPaintEvent(event)
 
 
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
+class WordIndexOverlay(QWidget):
+    def __init__(self, editor: 'CodeEditor'):
+        super().__init__(editor)
+        self.editor = editor
+        self._adaptive_density = True
+        self._backdrop_opacity_dark = 78
+        self._backdrop_opacity_light = 70
+        self._text_opacity = 255
+        self._halo_opacity_dark = 230
+        self._halo_opacity_light = 245
+        self._text_color_name = "white"
+        self._label_alignment_name = "right"
+        self._cache_dirty = True
+        self._block_word_cache = {}
+        self._total_words = 0
+        # Burst-mode flags set during typing; cleared by the flush timer.
+        # _suppress_repaint: blocks per-keystroke partial repaints from updateRequest.
+        # _skip_rebuild:     skips the expensive full-document block iteration in
+        #                    _ensure_cache while the cache is known-dirty but the
+        #                    burst hasn't ended yet (stale cache still used for paints
+        #                    triggered by scroll/resize during the burst).
+        self._suppress_repaint = False
+        self._skip_rebuild = False
+
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.hide()
+
+    def setAdaptiveDensity(self, enabled: bool):
+        value = bool(enabled)
+        if self._adaptive_density == value:
+            return
+        self._adaptive_density = value
+        if self.isVisible():
+            self.update()
+
+    def adaptiveDensity(self) -> bool:
+        return self._adaptive_density
+
+    def setVisualOpacities(
+        self,
+        backdrop_dark: int,
+        backdrop_light: int,
+        text_opacity: int,
+        halo_dark: int,
+        halo_light: int,
+    ):
+        values = (
+            int(backdrop_dark),
+            int(backdrop_light),
+            int(text_opacity),
+            int(halo_dark),
+            int(halo_light),
+        )
+        if (
+            self._backdrop_opacity_dark,
+            self._backdrop_opacity_light,
+            self._text_opacity,
+            self._halo_opacity_dark,
+            self._halo_opacity_light,
+        ) == values:
+            return
+        (
+            self._backdrop_opacity_dark,
+            self._backdrop_opacity_light,
+            self._text_opacity,
+            self._halo_opacity_dark,
+            self._halo_opacity_light,
+        ) = values
+        if self.isVisible():
+            self.update()
+
+    def setTextColorName(self, color_name: str):
+        value = str(color_name).strip().lower()
+        if not value:
+            value = "yellow"
+        if self._text_color_name == value:
+            return
+        self._text_color_name = value
+        if self.isVisible():
+            self.update()
+
+    def setLabelAlignmentName(self, alignment_name: str):
+        value = str(alignment_name).strip().lower()
+        if value not in ("left", "center", "right"):
+            value = "center"
+        if self._label_alignment_name == value:
+            return
+        self._label_alignment_name = value
+        if self.isVisible():
+            self.update()
+
+    @staticmethod
+    def _color_for_name(name: str) -> QColor:
+        palette = {
+            "white": (255, 255, 255),
+            "grey": (170, 170, 170),
+            "black": (0, 0, 0),
+            "yellow": (255, 226, 0),
+            "green": (0, 204, 102),
+            "blue": (61, 136, 255),
+        }
+        rgb = palette.get(name, palette["white"])
+        return QColor(*rgb)
+
+    def invalidate_cache(self):
+        self._cache_dirty = True
+        self._skip_rebuild = False   # deliberate invalidation always rebuilds on next paint
+        self._suppress_repaint = False
+        if self.isVisible():
+            self.update()
+
+    def total_words(self) -> int:
+        self._ensure_cache()
+        return self._total_words
+
+    def sync_with_viewport(self, rect=None, dy: int = 0):
+        viewport = self.editor.viewport()
+        viewport_pos = viewport.pos()
+        viewport_rect = viewport.rect()
+        top_extra = max(0, int(getattr(self.editor, "_word_index_top_margin", 0)))
+        self.setGeometry(
+            viewport_pos.x(),
+            viewport_pos.y() - top_extra,
+            viewport_rect.width(),
+            viewport_rect.height() + top_extra,
+        )
+        if not self.isVisible():
+            return
+        self.raise_()
+        if dy:
+            self.scroll(0, dy)
+        # During a typing burst (_suppress_repaint=True), skip the per-keystroke
+        # content-change partial repaints that Qt fires via updateRequest (rect!=None,
+        # dy==0).  Scroll repaints (dy!=0) and full repaints (rect==None, from resize /
+        # scrollbar / explicit flush) always proceed so the overlay never appears frozen
+        # when the user scrolls or when the burst ends.
+        if self._suppress_repaint and rect is not None and not dy:
+            return
+        if rect is None:
+            self.update()
+        else:
+            self.update(QRect(rect.x(), rect.y() + top_extra, rect.width(), rect.height()))
+
+    def _ensure_cache(self):
+        if not self._cache_dirty:
+            return
+        if self._skip_rebuild:
+            return  # typing burst active: reuse stale cache; flush timer will rebuild
+
+        host = self.editor.window()
+        extractor = getattr(host, "_extract_word_spans", None)
+        if not callable(extractor):
+            self._block_word_cache = {}
+            self._total_words = 0
+            self._cache_dirty = False
+            return
+
+        cache = {}
+        next_word_index = 1
+        block = self.editor.document().firstBlock()
+        while block.isValid():
+            spans = extractor(block.text())
+            if spans:
+                cache[block.blockNumber()] = (next_word_index, spans)
+                next_word_index += len(spans)
+            block = block.next()
+
+        self._block_word_cache = cache
+        self._total_words = next_word_index - 1
+        self._cache_dirty = False
+
+    def _build_draw_items(self, paint_rect) -> list[tuple[QRectF, str]]:
+        self._ensure_cache()
+        top_extra = float(max(0, int(getattr(self.editor, "_word_index_top_margin", 0))))
+        viewport_rect = self.editor.viewport().rect()
+        viewport_paint_top = float(paint_rect.top()) - top_extra
+        viewport_paint_bottom = float(paint_rect.bottom()) - top_extra
+        document = self.editor.document()
+        block = self.editor.firstVisibleBlock()
+        top = self.editor.blockBoundingGeometry(block).translated(self.editor.contentOffset()).top()
+        bottom = top + self.editor.blockBoundingRect(block).height()
+        items = []
+        cursor = QTextCursor(document)  # reused across all words — avoids 2 allocations per word
+        fm = self.editor.fontMetrics()  # cached once per paint — avoids repeated object creation
+
+        while block.isValid() and top <= viewport_paint_bottom:
+            if block.isVisible() and bottom >= viewport_paint_top:
+                cache_entry = self._block_word_cache.get(block.blockNumber())
+                if cache_entry is not None:
+                    block_start_index, spans = cache_entry
+                    block_position = block.position()
+                    block_text = block.text()
+                    for offset, (start, end) in enumerate(spans):
+                        cursor.setPosition(block_position + start)
+                        start_rect = self.editor.cursorRect(cursor)
+                        cursor.setPosition(block_position + end)
+                        end_rect = self.editor.cursorRect(cursor)
+
+                        if end_rect.y() != start_rect.y():
+                            width = fm.horizontalAdvance(block_text[start:end])
+                            end_rect = QRect(start_rect.x() + width, start_rect.y(), max(1, width), start_rect.height())
+
+                        left = start_rect.x()
+                        right = end_rect.x()
+                        if right <= left:
+                            width = fm.horizontalAdvance(block_text[start:end])
+                            right = left + max(1, width)
+
+                        if right < viewport_rect.left() or left > viewport_rect.right():
+                            continue
+                        if start_rect.bottom() < viewport_paint_top or start_rect.top() > viewport_paint_bottom:
+                            continue
+
+                        word_width = max(1.0, float(right - left))
+                        draw_rect = QRectF(
+                            float(left),
+                            float(start_rect.y()) + top_extra - 8.0,
+                            word_width,
+                            float(start_rect.height()) * 0.52,
+                        )
+                        items.append((draw_rect, str(block_start_index + offset)))
+
+            block = block.next()
+            top = bottom
+            bottom = top + self.editor.blockBoundingRect(block).height()
+
+        return items
+
+    def _overlay_font(self, visible_items: int) -> QFont:
+        font = QFont(self.editor.font())
+        point_size = font.pointSizeF()
+        if point_size <= 0:
+            point_size = 12.0
+
+        scale = 0.84
+        if self._adaptive_density:
+            if visible_items > 110:
+                scale = 0.78
+            if visible_items > 180:
+                scale = 0.72
+            if visible_items > 260:
+                scale = 0.66
+
+        font.setPointSizeF(max(7.0, point_size * scale))
+        return font
+
+    def paintEvent(self, event):
+        if not self.isVisible():
+            return
+
+        items = self._build_draw_items(event.rect())
+        if not items:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        font = self._overlay_font(len(items))
+        painter.setFont(font)
+
+        base_color = self.editor.palette().base().color()
+        text_base = self._color_for_name(self._text_color_name)
+        text_color = QColor(text_base.red(), text_base.green(), text_base.blue(), self._text_opacity)
+        if text_base.lightness() >= 128:
+            halo_rgb = (0, 0, 0)
+        else:
+            halo_rgb = (255, 255, 255)
+        if base_color.lightness() < 128:
+            backdrop_color = QColor(255, 255, 255, self._backdrop_opacity_dark)
+            halo_color = QColor(halo_rgb[0], halo_rgb[1], halo_rgb[2], self._halo_opacity_dark)
+        else:
+            backdrop_color = QColor(0, 0, 0, self._backdrop_opacity_light)
+            halo_color = QColor(halo_rgb[0], halo_rgb[1], halo_rgb[2], self._halo_opacity_light)
+
+        top_extra = max(0, int(getattr(self.editor, "_word_index_top_margin", 0)))
+        painter.fillRect(
+            QRectF(
+                0.0,
+                float(top_extra),
+                float(self.editor.viewport().width()),
+                float(self.editor.viewport().height()),
+            ),
+            backdrop_color,
+        )
+
+        if self._label_alignment_name == "left":
+            text_alignment = Qt.AlignLeft | Qt.AlignVCenter
+        elif self._label_alignment_name == "right":
+            text_alignment = Qt.AlignRight | Qt.AlignVCenter
+        else:
+            text_alignment = Qt.AlignCenter
+
+        halo_offsets = ((-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0))
+        for draw_rect, label in items:
+            for dx, dy in halo_offsets:
+                painter.setPen(halo_color)
+                painter.drawText(draw_rect.translated(dx, dy), text_alignment, label)
+            painter.setPen(text_color)
+            painter.drawText(draw_rect, text_alignment, label)
+
+
+class SpacedPlainTextDocumentLayout(QPlainTextDocumentLayout):
+    """Drop-in QPlainTextDocumentLayout replacement that adds configurable extra
+    pixels after every block.  QPlainTextDocumentLayout hard-codes block height to
+    font metrics and ignores QTextBlockFormat line-height/margin properties entirely,
+    so the only way to change line spacing is to override blockBoundingRect()."""
+
+    def __init__(self, doc):
+        super().__init__(doc)
+        self._extra_px = 0.0
+
+    def setExtraPixels(self, px: float):
+        self._extra_px = max(0.0, float(px))
+        doc = self.document()
+        if doc:
+            self.documentChanged(0, 0, doc.characterCount())
+
+    def extraPixels(self) -> float:
+        return self._extra_px
+
+    def blockBoundingRect(self, block):
+        r = super().blockBoundingRect(block)
+        if self._extra_px > 0.0 and block.isValid():
+            return QRectF(r.x(), r.y(), r.width(), r.height() + self._extra_px)
+        return r
+
+
 class CodeEditor(QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -608,23 +934,45 @@ class CodeEditor(QPlainTextEdit):
         self._text_margin_percent = 0
         self._click_count = 0
         self._last_click_ts = 0.0
+        self._word_index_visible = False
+        self._word_index_top_margin = 20
+        self._line_spacing_percent = 100.0
 
         self.lineNumberArea = LineNumberArea(self)
+        self.wordIndexOverlay = WordIndexOverlay(self)
+
+        # Install spacing-aware layout.  Must be done before any signal connections
+        # that reference the document layout, and before setting any text.
+        self._spacing_layout = SpacedPlainTextDocumentLayout(self.document())
+        self.document().setDocumentLayout(self._spacing_layout)
+
+        # Debounce timer: coalesces typing bursts into a single overlay repaint.
+        # Fires 150 ms after the last content change — per-keystroke rebuilds avoided.
+        self._overlay_dirty_timer = QTimer(self)
+        self._overlay_dirty_timer.setSingleShot(True)
+        self._overlay_dirty_timer.setInterval(150)
+        self._overlay_dirty_timer.timeout.connect(self._flush_overlay_update)
 
         # Signals to keep the number area in sync
         self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
         self.updateRequest.connect(self.updateLineNumberArea)
+        self.updateRequest.connect(self._sync_word_index_overlay)
         self.cursorPositionChanged.connect(self.updateCurrentLineHighlight)
+        self.document().contentsChange.connect(self._on_document_contents_change)
+        self.verticalScrollBar().valueChanged.connect(self._update_word_index_overlay)
+        self.horizontalScrollBar().valueChanged.connect(self._update_word_index_overlay)
 
         self.updateLineNumberAreaWidth(0)
         self.setWordWrap(True)
         self.updateCurrentLineHighlight()
+        self.wordIndexOverlay.sync_with_viewport()
 
     # ----- Word wrap -----
     def setWordWrap(self, enabled: bool):
         self._wrap_enabled = bool(enabled)
         self._refresh_wrap_layout(force=True)
         self.updateLineNumberAreaWidth(0)
+        self._update_word_index_overlay()
 
     def isWordWrap(self) -> bool:
         return self._wrap_enabled
@@ -690,7 +1038,8 @@ class CodeEditor(QPlainTextEdit):
     def _apply_viewport_margins(self):
         line_area = self.lineNumberAreaWidth()
         text_margin = self._effective_text_margin_px()
-        self.setViewportMargins(line_area + text_margin, 0, text_margin, 0)
+        top_margin = self._word_index_top_margin if self._word_index_visible else 0
+        self.setViewportMargins(line_area + text_margin, top_margin, text_margin, 0)
         self.lineNumberArea.setVisible(self._line_numbers_visible)
 
     def lineNumberAreaSizeHint(self):
@@ -698,6 +1047,7 @@ class CodeEditor(QPlainTextEdit):
 
     def updateLineNumberAreaWidth(self, _):
         self._apply_viewport_margins()
+        self._update_word_index_overlay()
 
     def updateLineNumberArea(self, rect, dy):
         if dy:
@@ -715,6 +1065,7 @@ class CodeEditor(QPlainTextEdit):
         if self._line_numbers_visible:
             self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
         self._refresh_wrap_layout()
+        self._update_word_index_overlay()
 
     def lineNumberAreaPaintEvent(self, event):
         if not self._line_numbers_visible:
@@ -749,6 +1100,7 @@ class CodeEditor(QPlainTextEdit):
         self._line_numbers_visible = bool(visible)
         self.updateLineNumberAreaWidth(0)
         self.viewport().update()
+        self._update_word_index_overlay()
 
     def isLineNumbersVisible(self) -> bool:
         return self._line_numbers_visible
@@ -761,6 +1113,7 @@ class CodeEditor(QPlainTextEdit):
         self._apply_viewport_margins()
         self._refresh_wrap_layout()
         self.viewport().update()
+        self._update_word_index_overlay()
 
     def textMarginPercent(self) -> int:
         return int(getattr(self, "_text_margin_percent", 0))
@@ -770,6 +1123,105 @@ class CodeEditor(QPlainTextEdit):
             return
         # Keep simple; rely on palette for current line appearance.
         pass
+
+    def setFont(self, font):
+        super().setFont(font)
+        self._apply_layout_spacing()  # base px changes with font, recalculate
+        self.wordIndexOverlay.invalidate_cache()
+        self._update_word_index_overlay()
+
+    def setWordIndexVisible(self, visible: bool):
+        self._word_index_visible = bool(visible)
+        self._apply_viewport_margins()
+        if self._word_index_visible:
+            self.wordIndexOverlay.invalidate_cache()
+            self.wordIndexOverlay.show()
+            self.wordIndexOverlay.sync_with_viewport()
+        else:
+            self.wordIndexOverlay.hide()
+            self.viewport().update()
+
+    def isWordIndexVisible(self) -> bool:
+        return self._word_index_visible
+
+    def setWordIndexAdaptiveDensity(self, enabled: bool):
+        self.wordIndexOverlay.setAdaptiveDensity(enabled)
+
+    def wordIndexAdaptiveDensity(self) -> bool:
+        return self.wordIndexOverlay.adaptiveDensity()
+
+    def setWordIndexVisualOpacities(
+        self,
+        backdrop_dark: int,
+        backdrop_light: int,
+        text_opacity: int,
+        halo_dark: int,
+        halo_light: int,
+    ):
+        self.wordIndexOverlay.setVisualOpacities(
+            backdrop_dark,
+            backdrop_light,
+            text_opacity,
+            halo_dark,
+            halo_light,
+        )
+
+    def setWordIndexColorName(self, color_name: str):
+        self.wordIndexOverlay.setTextColorName(color_name)
+
+    def setWordIndexAlignmentName(self, alignment_name: str):
+        self.wordIndexOverlay.setLabelAlignmentName(alignment_name)
+
+    def setWordIndexTopMargin(self, px: int):
+        value = max(0, min(60, int(px)))
+        if self._word_index_top_margin == value:
+            return
+        self._word_index_top_margin = value
+        self._apply_viewport_margins()
+        self._update_word_index_overlay()
+
+    # --- Line spacing ---
+    def setLineSpacingPercent(self, percent: float):
+        """Set line spacing as a percentage of the natural line height (100 = default)."""
+        try:
+            value = float(max(50.0, min(300.0, float(percent))))
+        except Exception:
+            value = 100.0
+        self._line_spacing_percent = value
+        self._apply_layout_spacing()
+
+    def _apply_layout_spacing(self):
+        """Convert stored percent to pixels and push to the spacing layout."""
+        percent = getattr(self, '_line_spacing_percent', 100.0)
+        extra_fraction = max(0.0, percent / 100.0 - 1.0)
+        base_px = float(max(1, self.fontMetrics().height()))
+        self._spacing_layout.setExtraPixels(extra_fraction * base_px)
+
+    def _on_document_contents_change(self, pos: int, removed: int, added: int):
+        # Always mark dirty + set burst flags, even when overlay is hidden, so the
+        # overlay is immediately correct when it next becomes visible.
+        self.wordIndexOverlay._cache_dirty = True
+        self.wordIndexOverlay._suppress_repaint = True   # freeze visual during burst
+        self.wordIndexOverlay._skip_rebuild = True       # skip block iteration during burst
+        if not self.wordIndexOverlay.isVisible():
+            return
+        # Restart the debounce window; one clean repaint fires 150 ms after typing pauses.
+        self._overlay_dirty_timer.start()
+
+    def _flush_overlay_update(self):
+        """Fires once, 150 ms after the last content change.  Clears burst flags and
+        triggers one clean repaint.  _cache_dirty is still True from the last change,
+        so _ensure_cache will do a full rebuild for this repaint."""
+        self.wordIndexOverlay._suppress_repaint = False
+        self.wordIndexOverlay._skip_rebuild = False
+        if self.wordIndexOverlay.isVisible():
+            self.wordIndexOverlay.update()
+
+    def _sync_word_index_overlay(self, rect, dy):
+        self.wordIndexOverlay.sync_with_viewport(rect, dy)
+
+    def _update_word_index_overlay(self):
+        self.wordIndexOverlay.sync_with_viewport()
 
     @staticmethod
     def _normalize_search_text(text: str) -> str:
@@ -1193,19 +1645,42 @@ class Notepad(QMainWindow):
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
 
-        # Status widgets
+        # Status widgets — each has a fixed minimumWidth so toggling one never
+        # shifts the others sideways.  Visibility is controlled by the Format ▸
+        # Status Bar menu; widths are sized to their widest possible content.
+        _fm = self.fontMetrics()
         self.word_match_label = QLabel("", self)
-        self.word_match_label.setMinimumWidth(self.word_match_label.fontMetrics().horizontalAdvance("Matches: 0000"))
-        self.count_label = QLabel("Words: 0 | Sentences: 0 | Chars: 0", self)
+        self.word_match_label.setMinimumWidth(_fm.horizontalAdvance("Matches: 0000"))
+
+        # Three separate labels so each can be hidden independently
+        self.words_label = ClickableLabel("", self)
+        self.words_label.setToolTip("Toggle Word Index overlay")
+        self.words_label.setMinimumWidth(_fm.horizontalAdvance("Words: 000000"))
+        self.sentences_label = QLabel("", self)
+        self.sentences_label.setMinimumWidth(_fm.horizontalAdvance("Sentences: 00000"))
+        self.chars_label = QLabel("", self)
+        self.chars_label.setMinimumWidth(_fm.horizontalAdvance("Chars: 0000000"))
+
+        self.line_label = QLabel("", self)
+        self.line_label.setMinimumWidth(_fm.horizontalAdvance("Ln 000000"))
+        self.col_label = QLabel("", self)
+        self.col_label.setMinimumWidth(_fm.horizontalAdvance("Col 0000"))
+
         self.reading_time_label = QLabel("", self)
-        self.reading_time_label.setMinimumWidth(self.reading_time_label.fontMetrics().horizontalAdvance("Read: 000 min | Ta 100% En 100%"))
-        self.pos_label = QLabel("Ln 1, Col 1", self)
+        self.reading_time_label.setMinimumWidth(_fm.horizontalAdvance("Read: 000 min | Ta 100% En 100%"))
         self.layout_label = QLabel(get_current_layout_label(), self)
+
         self.status.addPermanentWidget(self.reading_time_label)
         self.status.addPermanentWidget(self.word_match_label)
-        self.status.addPermanentWidget(self.count_label)
-        self.status.addPermanentWidget(self.pos_label)
+        self.status.addPermanentWidget(self.words_label)
+        self.status.addPermanentWidget(self.sentences_label)
+        self.status.addPermanentWidget(self.chars_label)
+        self.status.addPermanentWidget(self.line_label)
+        self.status.addPermanentWidget(self.col_label)
         self.status.addPermanentWidget(self.layout_label)
+
+        # Legacy alias so existing code that references count_label still compiles
+        self.count_label = self.words_label
 
         self._find_dialog = None
         self._replace_dialog = None
@@ -1236,13 +1711,41 @@ class Notepad(QMainWindow):
         self._force_anjal_english = True
         self._installed_imes = []  # Populated in _load_preferences
 
+        # Appearance (defaults; overridden in _load_preferences)
+        self._appearance_theme_mode = "follow_os"
+        self._appearance_custom_bg = "#202124"
+        self._appearance_custom_fg = "#f1f3f4"
+        self._line_spacing_preset = "normal"
+
+        # Status bar item visibility (defaults; overridden in _load_preferences)
+        self._status_show_words = True
+        self._status_show_sentences = True
+        self._status_show_chars = True
+        self._status_show_line = True
+        self._status_show_col = True
+
         # Experimental features (defaults; overridden in _load_preferences)
         self._unicode_substring_highlight = False
         self._reading_time_enabled = False
+        self._word_index_enabled = False
+        self._word_index_adaptive_density = True
+        self._word_index_backdrop_opacity_dark = 78
+        self._word_index_backdrop_opacity_light = 70
+        self._word_index_text_opacity = 255
+        self._word_index_halo_opacity_dark = 230
+        self._word_index_halo_opacity_light = 245
+        self._word_index_color = "white"
+        self._word_index_alignment = "right"
+        self._word_index_top_margin = 20
         self._tamil_reading_wpm = 150
         self._english_reading_wpm = 250
         self._google_search_url_prefix = DEFAULT_GOOGLE_SEARCH_URL_PREFIX
         self._sorkuvai_search_url_prefix = DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
+
+        # Debounce expensive status computations during rapid typing/deletions.
+        self._status_update_timer = QTimer(self)
+        self._status_update_timer.setSingleShot(True)
+        self._status_update_timer.timeout.connect(self._update_status_bar)
 
         self._create_actions()
         self._create_menus()
@@ -1385,8 +1888,26 @@ class Notepad(QMainWindow):
         self.wrap_act = QAction("Word Wrap", self, checkable=True)
         self.wrap_act.setChecked(True)
 
-        self.line_numbers_act = QAction("Show Line Numbers", self, checkable=True)
+        self.line_numbers_act = QAction("Line Numbers in Margin", self, checkable=True)
         self.line_numbers_act.setChecked(True)
+
+        # Status bar item visibility
+        self.status_words_act = QAction("Word Count", self, checkable=True)
+        self.status_words_act.setChecked(True)
+        self.status_sentences_act = QAction("Sentence Count", self, checkable=True)
+        self.status_sentences_act.setChecked(True)
+        self.status_chars_act = QAction("Character Count", self, checkable=True)
+        self.status_chars_act.setChecked(True)
+        self.status_line_act = QAction("Cursor Line", self, checkable=True)
+        self.status_line_act.setChecked(True)
+        self.status_col_act = QAction("Cursor Column", self, checkable=True)
+        self.status_col_act.setChecked(True)
+
+        self.line_spacing_extra_tight_act = QAction("Very Tight", self, checkable=True)
+        self.line_spacing_tight_act = QAction("Tight", self, checkable=True)
+        self.line_spacing_normal_act = QAction("Default", self, checkable=True)
+        self.line_spacing_casual_act = QAction("Relaxed", self, checkable=True)
+        self.line_spacing_extra_casual_act = QAction("Loose", self, checkable=True)
 
         self.margin_5_act = QAction("5%", self)
         self.margin_5_act.setCheckable(True)
@@ -1410,12 +1931,15 @@ class Notepad(QMainWindow):
         self.autosave_30min_act = QAction("Every 30 minutes", self, checkable=True)
 
         # Settings
-        self.keyboards_act = QAction("Keyboards…", self)
+        self.appearance_act = QAction("Appearance...", self)
+        self.keyboards_act = QAction("Language Switch…", self)
 
-        # Experimental
+        # Advanced (experimental features)
         self.unicode_substring_highlight_act = QAction("Highlight partial word selections", self, checkable=True)
         self.unicode_substring_highlight_act.setChecked(False)
         self.reading_time_act = QAction("Reading Time...", self)
+        self.word_index_act = QAction("Word Index", self, checkable=True)
+        self.word_index_act.setShortcut(QKeySequence("Ctrl+Shift+W"))
         self.normalize_unicode_act = QAction("Normalize Unicode (NFC)", self)
 
         # Help
@@ -1462,9 +1986,11 @@ class Notepad(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.collapse_blank_lines_act)
         edit_menu.addAction(self.insert_blank_lines_act)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.normalize_unicode_act)
 
-        # Insert menu (Alt+N is handled by the & in "I&nsert")
-        insert_menu = menubar.addMenu("I&nsert")
+        # Markdown menu
+        insert_menu = menubar.addMenu("&Markdown")
         
         # Headings submenu
         headings_menu = insert_menu.addMenu("Heading")
@@ -1500,8 +2026,13 @@ class Notepad(QMainWindow):
         insert_menu.addAction(self.insert_table_act)
 
         format_menu = menubar.addMenu("F&ormat")
-        format_menu.addAction(self.wrap_act)
-        format_menu.addAction(self.line_numbers_act)
+        format_menu.addAction(self.font_act)
+        line_spacing_menu = format_menu.addMenu("Line Spacing")
+        line_spacing_menu.addAction(self.line_spacing_extra_tight_act)
+        line_spacing_menu.addAction(self.line_spacing_tight_act)
+        line_spacing_menu.addAction(self.line_spacing_normal_act)
+        line_spacing_menu.addAction(self.line_spacing_casual_act)
+        line_spacing_menu.addAction(self.line_spacing_extra_casual_act)
         margins_menu = format_menu.addMenu("Margins")
         margins_menu.addAction(self.margin_5_act)
         margins_menu.addAction(self.margin_10_act)
@@ -1510,13 +2041,21 @@ class Notepad(QMainWindow):
         margins_menu.addAction(self.margin_25_act)
         margins_menu.addSeparator()
         margins_menu.addAction(self.margin_reset_act)
-        format_menu.addAction(self.font_act)
-        format_menu.addSeparator()
-        experimental_menu = format_menu.addMenu("E&xperimental")
-        experimental_menu.addAction(self.reading_time_act)
-        experimental_menu.addAction(self.normalize_unicode_act)
-        experimental_menu.addSeparator()
-        experimental_menu.addAction(self.unicode_substring_highlight_act)
+        format_menu.addAction(self.wrap_act)
+
+        view_menu = menubar.addMenu("&View")
+        view_menu.addAction(self.line_numbers_act)
+        view_menu.addAction(self.word_index_act)
+        view_menu.addAction(self.unicode_substring_highlight_act)
+        view_menu.addSeparator()
+        status_bar_menu = view_menu.addMenu("Status Bar")
+        status_bar_menu.addAction(self.status_words_act)
+        status_bar_menu.addAction(self.status_sentences_act)
+        status_bar_menu.addAction(self.status_chars_act)
+        status_bar_menu.addAction(self.reading_time_act)
+        status_bar_menu.addSeparator()
+        status_bar_menu.addAction(self.status_line_act)
+        status_bar_menu.addAction(self.status_col_act)
 
         settings_menu = menubar.addMenu("&Settings")
         autosave_menu = settings_menu.addMenu("Auto-save")
@@ -1526,6 +2065,7 @@ class Notepad(QMainWindow):
         autosave_menu.addAction(self.autosave_15min_act)
         autosave_menu.addAction(self.autosave_30min_act)
         settings_menu.addSeparator()
+        settings_menu.addAction(self.appearance_act)
         settings_menu.addAction(self.keyboards_act)
 
         help_menu = menubar.addMenu("&Help")
@@ -1563,12 +2103,22 @@ class Notepad(QMainWindow):
         # Format
         self.wrap_act.toggled.connect(self._toggle_wrap)
         self.line_numbers_act.toggled.connect(self._toggle_line_numbers)
+        self.status_words_act.toggled.connect(lambda v: self._toggle_status_item("words", v))
+        self.status_sentences_act.toggled.connect(lambda v: self._toggle_status_item("sentences", v))
+        self.status_chars_act.toggled.connect(lambda v: self._toggle_status_item("chars", v))
+        self.status_line_act.toggled.connect(lambda v: self._toggle_status_item("line", v))
+        self.status_col_act.toggled.connect(lambda v: self._toggle_status_item("col", v))
         self.margin_5_act.triggered.connect(lambda: self._set_text_margin_percent(5))
         self.margin_10_act.triggered.connect(lambda: self._set_text_margin_percent(10))
         self.margin_15_act.triggered.connect(lambda: self._set_text_margin_percent(15))
         self.margin_20_act.triggered.connect(lambda: self._set_text_margin_percent(20))
         self.margin_25_act.triggered.connect(lambda: self._set_text_margin_percent(25))
         self.margin_reset_act.triggered.connect(lambda: self._set_text_margin_percent(0))
+        self.line_spacing_extra_tight_act.triggered.connect(lambda: self._set_line_spacing_preset("extra_tight"))
+        self.line_spacing_tight_act.triggered.connect(lambda: self._set_line_spacing_preset("tight"))
+        self.line_spacing_normal_act.triggered.connect(lambda: self._set_line_spacing_preset("normal"))
+        self.line_spacing_casual_act.triggered.connect(lambda: self._set_line_spacing_preset("casual"))
+        self.line_spacing_extra_casual_act.triggered.connect(lambda: self._set_line_spacing_preset("extra_casual"))
         self.font_act.triggered.connect(self.change_font)
 
         # Auto-save
@@ -1612,10 +2162,12 @@ class Notepad(QMainWindow):
         self.insert_table_act.triggered.connect(self._insert_table)
 
         # Settings
+        self.appearance_act.triggered.connect(self._show_appearance_dialog)
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
 
-        # Experimental
+        # Advanced (experimental features)
         self.reading_time_act.triggered.connect(self._show_reading_time_dialog)
+        self.word_index_act.toggled.connect(self._toggle_word_index)
         self.normalize_unicode_act.triggered.connect(self._normalize_unicode_text)
         self.unicode_substring_highlight_act.toggled.connect(self._toggle_unicode_substring_highlight)
 
@@ -1626,7 +2178,8 @@ class Notepad(QMainWindow):
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self._update_word_highlights)
-        self.editor.cursorPositionChanged.connect(self._update_status_bar)
+        self.editor.cursorPositionChanged.connect(self._update_cursor_position_status)
+        self.count_label.clicked.connect(self._toggle_word_index_from_status_label)
 
         # Update window title on modification
         self.editor.modificationChanged.connect(self._update_title)
@@ -1815,6 +2368,7 @@ class Notepad(QMainWindow):
         if not self._maybe_save_changes():
             return
         self.editor.clear()
+        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'normal'), save=False, show_status=False)
         self.current_path = None
         self.editor.document().setModified(False)
         self._update_title()
@@ -1876,6 +2430,7 @@ class Notepad(QMainWindow):
             return False
 
         self.editor.setPlainText(text)
+        self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'normal'), save=False, show_status=False)
         self.current_path = str(path_obj)
         self.editor.document().setModified(False)
         self._update_default_directory(path_obj.parent)
@@ -3112,16 +3667,11 @@ class Notepad(QMainWindow):
 
         # Qt / binding version
         try:
-            if QT_LIB == "PySide6":
-                import PySide6.QtCore as _qtcore
-                import PySide6 as _ps6
-                lines.append(f"Qt Runtime          : PySide6 {_ps6.__version__}  (Qt {_qtcore.__version__})")
-            else:
-                from PyQt5.QtCore import QT_VERSION_STR as _qt_ver
-                from PyQt5.QtCore import PYQT_VERSION_STR as _pyqt_ver
-                lines.append(f"Qt Runtime          : PyQt5 {_pyqt_ver}  (Qt {_qt_ver})")
+            import PySide6.QtCore as _qtcore
+            import PySide6 as _ps6
+            lines.append(f"Qt Runtime          : PySide6 {_ps6.__version__}  (Qt {_qtcore.qVersion()})")
         except Exception:
-            lines.append(f"Qt Runtime          : {QT_LIB} (version unavailable)")
+            lines.append("Qt Runtime          : PySide6 (version unavailable)")
 
         # Installed keyboard layouts / IMEs
         lines.append("")
@@ -3166,25 +3716,43 @@ class Notepad(QMainWindow):
         dialog.exec()
 
     def _show_keyboards_dialog(self):
-        """Show the Keyboards settings dialog.
-
-        Lets the user configure the double-Ctrl quick language switch:
-          - Enable / disable the feature (auto-disabled when <2 IMEs are installed).
-          - Choose whether to always use the auto-detected Tamil ↔ English pair,
-            or to use whatever the first two installed layouts happen to be.
-        """
         dialog = QDialog(self)
-        dialog.setWindowTitle("Keyboard Settings")
-        dialog.setMinimumWidth(500)
+        dialog.setWindowTitle("Language Switch")
+        dialog.setMinimumWidth(520)
 
         outer = QVBoxLayout(dialog)
         outer.setSpacing(10)
+        outer.setContentsMargins(16, 16, 16, 16)
+
+        def _hint(text: str) -> QLabel:
+            lbl = QLabel(text, dialog)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("color: gray; margin-left: 20px; margin-bottom: 2px;")
+            return lbl
+
+        def _separator() -> QWidget:
+            line = QWidget(dialog)
+            line.setFixedHeight(1)
+            line.setStyleSheet("background: #aaaaaa;")
+            return line
+
+        _ctrl_name = "\u2303 Control" if sys.platform == "darwin" else "Ctrl"
+        # ── Intro ──────────────────────────────────────────────────────────
+        intro = QLabel(
+            "<b>Switch between two keyboard languages instantly</b><br><br>"
+            "If you write in more than one language \u2014 for example, mixing Tamil and English \u2014 "
+            f"you can press the <b>{_ctrl_name} key twice in quick succession</b> to toggle your keyboard "
+            "layout without leaving the editor. No need to open System Settings or click the menu bar.",
+            dialog
+        )
+        intro.setWordWrap(True)
+        intro.setTextFormat(Qt.RichText)
+        outer.addWidget(intro)
+        outer.addWidget(_separator())
 
         installed_imes = getattr(self, '_installed_imes', [])
         ime_count = len(installed_imes)
 
-        # Read persisted settings directly from the file so the dialog always
-        # reflects the last-saved state rather than potentially stale in-memory values.
         try:
             saved = self.settings.load()
         except Exception:
@@ -3192,69 +3760,60 @@ class Notepad(QMainWindow):
         saved_qs = bool(saved.get("quick_switch_enabled", True))
         saved_force = bool(saved.get("force_anjal_english", True))
 
-        # ── Quick-switch master toggle ──────────────────────────────────────
-        quick_switch_cb = QCheckBox(
-            "Enable quick language switch by double-pressing the Ctrl key", dialog
-        )
+        # ── Master toggle ─────────────────────────────────────────────────
+        quick_switch_cb = QCheckBox("Enable double-Ctrl language switch", dialog)
         quick_switch_cb.setChecked(saved_qs)
+        outer.addWidget(quick_switch_cb)
+        qs_hint_lbl = _hint(f"Tap {_ctrl_name} twice quickly to cycle between two keyboard layouts.")
+        outer.addWidget(qs_hint_lbl)
 
         if ime_count < 2:
-            # Feature is unavailable — explain why and lock the checkbox
             quick_switch_cb.setChecked(False)
             quick_switch_cb.setEnabled(False)
             unavail_label = QLabel(
-                "Quick switch requires at least two keyboard layouts to be installed. "
-                "Only one layout was detected on this system; the feature has been "
-                "turned off automatically.",
+                "\u26a0  Only one keyboard layout is installed on this system. "
+                "Add a second layout in System Settings \u2192 Keyboard to enable this feature.",
                 dialog
             )
             unavail_label.setWordWrap(True)
-            unavail_label.setStyleSheet("color: gray; font-style: italic;")
+            unavail_label.setStyleSheet("color: #b05010; margin-left: 20px;")
             outer.addWidget(unavail_label)
 
-        outer.addWidget(quick_switch_cb)
-
-        # ── Info label — only shown when >2 IMEs are present ────────────────
+        # ── >2 IMEs warning ───────────────────────────────────────────────
         info_label = QLabel(dialog)
         info_label.setWordWrap(True)
         if ime_count > 2 and len(installed_imes) >= 2:
             first_name = installed_imes[0][1]
             second_name = installed_imes[1][1]
-            # Build a description of the detected Tamil/English pair for the hint
             if TAMIL_CHOICE and ENGLISH_CHOICE:
                 pair_desc = f"\u201c{TAMIL_CHOICE_NAME}\u201d and \u201c{ENGLISH_CHOICE_NAME}\u201d"
                 force_hint = f"To always switch between the detected Tamil and English keyboards ({pair_desc}) instead, enable the option below."
             else:
                 force_hint = "No Tamil/English keyboard pair could be auto-detected on this system."
             info_label.setText(
-                f"\u26a0\u202f More than two keyboard layouts are installed on this system. "
-                f"When quick switch is active it will toggle only between the first two "
-                f"layouts listed in your system keyboard settings \u2014 currently "
-                f"\u201c{first_name}\u201d and \u201c{second_name}\u201d. "
+                f"\u26a0\u202f You have more than two keyboard layouts installed. "
+                f"The quick switch will toggle between the first two in your system list \u2014 "
+                f"currently \u201c{first_name}\u201d and \u201c{second_name}\u201d. "
                 f"{force_hint}"
             )
-            info_label.setStyleSheet("color: #8B6914; background: #FFF8DC; "
-                                     "border: 1px solid #DEB887; border-radius: 4px; "
-                                     "padding: 6px;")
+            info_label.setStyleSheet(
+                "color: #8B6914; background: #FFF8DC; "
+                "border: 1px solid #DEB887; border-radius: 4px; "
+                "padding: 6px; margin-left: 20px;"
+            )
         outer.addWidget(info_label)
 
-        # ── Force auto-detected Tamil / English pair ─────────────────────────
-        # Build checkbox label showing which keyboards were detected.
+        # ── Force Tamil/English pair ───────────────────────────────────────
         if TAMIL_CHOICE and ENGLISH_CHOICE:
             force_label = (
                 f"Always switch between {TAMIL_CHOICE_NAME} and {ENGLISH_CHOICE_NAME} "
-                f"(auto-detected),\neven when other keyboard layouts are installed"
+                f"(auto-detected Tamil \u2194 English pair)"
             )
             force_cb_enabled = True
         else:
-            detected_parts = []
-            if TAMIL_CHOICE:
-                detected_parts.append(f"Tamil: {TAMIL_CHOICE_NAME}")
-            if ENGLISH_CHOICE:
-                detected_parts.append(f"English: {ENGLISH_CHOICE_NAME}")
             missing = "Tamil" if not TAMIL_CHOICE else "English"
             force_label = (
-                f"Always switch between auto-detected Tamil and English keyboards\n"
+                f"Always switch between auto-detected Tamil and English keyboards "
                 f"(no {missing} keyboard detected \u2014 option unavailable)"
             )
             force_cb_enabled = False
@@ -3264,19 +3823,23 @@ class Notepad(QMainWindow):
         if not force_cb_enabled:
             force_cb.setEnabled(False)
         outer.addWidget(force_cb)
+        force_hint_lbl = _hint(
+            "Useful when you have other layouts installed alongside Tamil and English. "
+            "This keeps the switch always between Tamil and English, ignoring everything else."
+        )
+        outer.addWidget(force_hint_lbl)
 
-        # ── Dynamic visibility: update labels/checkboxes as user toggles ────
+        # ── Dynamic visibility ────────────────────────────────────────────
         def _refresh_visibility():
             enabled = quick_switch_cb.isEnabled() and quick_switch_cb.isChecked()
             info_label.setVisible(enabled and ime_count > 2)
             force_cb.setVisible(enabled)
-            # Respect whether a Tamil/English pair was actually detected
+            force_hint_lbl.setVisible(enabled)
             force_cb.setEnabled(enabled and force_cb_enabled)
 
         quick_switch_cb.toggled.connect(lambda _checked: _refresh_visibility())
         _refresh_visibility()
 
-        # ── OK / Cancel ──────────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         btn_box.accepted.connect(dialog.accept)
         btn_box.rejected.connect(dialog.reject)
@@ -3286,12 +3849,9 @@ class Notepad(QMainWindow):
             new_qs = bool(quick_switch_cb.isChecked() and quick_switch_cb.isEnabled())
             new_force = bool(force_cb.isChecked())
 
-            # Update in-memory state immediately
             self._quick_switch_enabled = new_qs
             self._force_anjal_english = new_force
 
-            # If quick switch was just disabled, clear any pending Ctrl-press state
-            # so a stale first-press cannot accidentally fire a layout switch later.
             if not new_qs:
                 self._ctrl_press_time = 0
                 try:
@@ -3299,7 +3859,6 @@ class Notepad(QMainWindow):
                 except Exception:
                     pass
 
-            # Persist to settings file
             try:
                 data = self.settings.load()
                 data["quick_switch_enabled"] = new_qs
@@ -3378,6 +3937,373 @@ class Notepad(QMainWindow):
             self._english_reading_wpm = self._normalize_reading_speed(english_combo.currentData(), 250)
             self._save_preferences()
             self._update_status_bar()
+
+    def _show_appearance_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Appearance")
+        dialog.setMinimumWidth(520)
+
+        outer = QVBoxLayout(dialog)
+        outer.setSpacing(8)
+        outer.setContentsMargins(16, 16, 16, 16)
+
+        def _separator() -> QWidget:
+            line = QWidget(dialog)
+            line.setFixedHeight(1)
+            line.setStyleSheet("background: #aaaaaa;")
+            return line
+
+        def _info_btn(hint_text: str) -> QPushButton:
+            btn = QPushButton("\u24d8", dialog)
+            btn.setFixedSize(22, 22)
+            btn.setFlat(True)
+            btn.setStyleSheet("color: #0078d4; font-size: 14px; padding: 0; border: none;")
+            btn.setToolTip(hint_text)
+            btn.clicked.connect(lambda: QToolTip.showText(
+                btn.mapToGlobal(QPoint(0, btn.height())), hint_text, btn
+            ))
+            return btn
+
+        # ── THEME ─────────────────────────────────────────────────────────
+        theme_header_row = QHBoxLayout()
+        theme_hdr = QLabel("Theme", dialog)
+        theme_hdr.setStyleSheet("font-weight: 600; margin-top: 4px;")
+        theme_header_row.addWidget(theme_hdr)
+        theme_header_row.addStretch(1)
+        reset_theme_btn = QPushButton("Reset to defaults", dialog)
+        reset_theme_btn.setFixedWidth(130)
+        theme_header_row.addWidget(reset_theme_btn)
+        outer.addLayout(theme_header_row)
+
+        _mode_hint = (
+            "Follow OS adapts automatically to your system Light or Dark mode.\n"
+            "Force modes lock the editor regardless of system settings.\n"
+            "Custom Colors lets you pick exact background and text colors."
+        )
+        mode_row = QHBoxLayout()
+        mode_label = QLabel("Color mode:", dialog)
+        mode_combo = QComboBox(dialog)
+        mode_combo.addItem("Follow OS", "follow_os")
+        mode_combo.addItem("Force Dark", "dark")
+        mode_combo.addItem("Force Light", "light")
+        mode_combo.addItem("Custom Colors", "custom")
+        current_mode = self._normalize_theme_mode(getattr(self, "_appearance_theme_mode", "follow_os"))
+        mode_index = mode_combo.findData(current_mode)
+        mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+        mode_combo.setToolTip(_mode_hint)
+        mode_row.addWidget(mode_label)
+        mode_row.addWidget(mode_combo)
+        mode_row.addWidget(_info_btn(_mode_hint))
+        outer.addLayout(mode_row)
+
+        chosen_bg = self._normalize_hex_color(getattr(self, "_appearance_custom_bg", "#202124"), "#202124")
+        chosen_fg = self._normalize_hex_color(getattr(self, "_appearance_custom_fg", "#f1f3f4"), "#f1f3f4")
+
+        def _refresh_color_preview(preview: QLabel, hex_color: str):
+            text_color = "#000000" if QColor(hex_color).lightness() > 140 else "#ffffff"
+            preview.setText(hex_color.upper())
+            preview.setStyleSheet(
+                f"background: {hex_color}; color: {text_color}; border: 1px solid #888; padding: 2px;"
+            )
+
+        def _pick_color(current_hex: str) -> Optional[str]:
+            selected = QColorDialog.getColor(QColor(current_hex), dialog, "Choose Color")
+            if not selected.isValid():
+                return None
+            return selected.name(QColor.HexRgb)
+
+        _bg_hint = "The writing area color behind your text. Only applies in Custom Colors mode."
+        _fg_hint = "The color of the text you type. Only applies in Custom Colors mode."
+        custom_grid = QGridLayout()
+        bg_label = QLabel("Background color:", dialog)
+        fg_label = QLabel("Text color:", dialog)
+        bg_button = QPushButton("Choose\u2026", dialog)
+        fg_button = QPushButton("Choose\u2026", dialog)
+        bg_preview = QLabel(dialog)
+        fg_preview = QLabel(dialog)
+        bg_info = _info_btn(_bg_hint)
+        fg_info = _info_btn(_fg_hint)
+        bg_button.setToolTip(_bg_hint)
+        fg_button.setToolTip(_fg_hint)
+        for preview in (bg_preview, fg_preview):
+            preview.setFixedWidth(78)
+            preview.setAlignment(Qt.AlignCenter)
+
+        def _pick_background():
+            nonlocal chosen_bg
+            selected = _pick_color(chosen_bg)
+            if selected:
+                chosen_bg = selected
+                _refresh_color_preview(bg_preview, chosen_bg)
+
+        def _pick_foreground():
+            nonlocal chosen_fg
+            selected = _pick_color(chosen_fg)
+            if selected:
+                chosen_fg = selected
+                _refresh_color_preview(fg_preview, chosen_fg)
+
+        bg_button.clicked.connect(_pick_background)
+        fg_button.clicked.connect(_pick_foreground)
+        _refresh_color_preview(bg_preview, chosen_bg)
+        _refresh_color_preview(fg_preview, chosen_fg)
+
+        custom_grid.addWidget(bg_label, 0, 0)
+        custom_grid.addWidget(bg_button, 0, 1)
+        custom_grid.addWidget(bg_preview, 0, 2)
+        custom_grid.addWidget(bg_info, 0, 3)
+        custom_grid.addWidget(fg_label, 1, 0)
+        custom_grid.addWidget(fg_button, 1, 1)
+        custom_grid.addWidget(fg_preview, 1, 2)
+        custom_grid.addWidget(fg_info, 1, 3)
+        outer.addLayout(custom_grid)
+
+        outer.addWidget(_separator())
+
+        # ── WORD INDEX OVERLAY ────────────────────────────────────────────
+        overlay_header_row = QHBoxLayout()
+        overlay_hdr = QLabel("Word Index Overlay", dialog)
+        overlay_hdr.setStyleSheet("font-weight: 600; margin-top: 4px;")
+        overlay_header_row.addWidget(overlay_hdr)
+        overlay_header_row.addStretch(1)
+        reset_overlay_btn = QPushButton("Reset to defaults", dialog)
+        reset_overlay_btn.setFixedWidth(130)
+        overlay_header_row.addWidget(reset_overlay_btn)
+        outer.addLayout(overlay_header_row)
+
+        _density_hint = (
+            "When many words are on screen at once, numbers scale down slightly to avoid crowding.\n"
+            "Turn off to keep numbers at a fixed size at all times."
+        )
+        density_row = QHBoxLayout()
+        overlay_density_cb = QCheckBox("Shrink numbers when many words are visible", dialog)
+        overlay_density_cb.setChecked(bool(getattr(self, "_word_index_adaptive_density", True)))
+        overlay_density_cb.setToolTip(_density_hint)
+        density_row.addWidget(overlay_density_cb)
+        density_row.addWidget(_info_btn(_density_hint))
+        density_row.addStretch(1)
+        outer.addLayout(density_row)
+
+        _color_hint = "Color of the word number labels. Pick one that stands out against your current theme."
+        overlay_color_row = QHBoxLayout()
+        overlay_color_label = QLabel("Number color:", dialog)
+        overlay_color_combo = QComboBox(dialog)
+        for value in ("white", "grey", "black", "yellow", "green", "blue"):
+            overlay_color_combo.addItem(value.capitalize(), value)
+        current_overlay_color = self._normalize_word_index_color(getattr(self, "_word_index_color", "white"))
+        color_index = overlay_color_combo.findData(current_overlay_color)
+        overlay_color_combo.setCurrentIndex(color_index if color_index >= 0 else 0)
+        overlay_color_combo.setToolTip(_color_hint)
+        overlay_color_row.addWidget(overlay_color_label)
+        overlay_color_row.addWidget(overlay_color_combo)
+        overlay_color_row.addWidget(_info_btn(_color_hint))
+        outer.addLayout(overlay_color_row)
+
+        _align_hint = "Where each number appears relative to its word."
+        overlay_align_row = QHBoxLayout()
+        overlay_align_label = QLabel("Number position:", dialog)
+        overlay_align_combo = QComboBox(dialog)
+        overlay_align_combo.addItem("Left of word", "left")
+        overlay_align_combo.addItem("Centered above word", "center")
+        overlay_align_combo.addItem("Right of word", "right")
+        current_alignment = self._normalize_word_index_alignment(
+            getattr(self, "_word_index_alignment", "right")
+        )
+        align_index = overlay_align_combo.findData(current_alignment)
+        overlay_align_combo.setCurrentIndex(align_index if align_index >= 0 else 1)
+        overlay_align_combo.setToolTip(_align_hint)
+        overlay_align_row.addWidget(overlay_align_label)
+        overlay_align_row.addWidget(overlay_align_combo)
+        overlay_align_row.addWidget(_info_btn(_align_hint))
+        outer.addLayout(overlay_align_row)
+
+        _top_margin_hint = "Leaves this many pixels at the top of the editor uncovered, so the first line stays clean."
+        overlay_top_margin_row = QHBoxLayout()
+        overlay_top_margin_label = QLabel("Clear space at top (px):", dialog)
+        overlay_top_margin_spin = QSpinBox(dialog)
+        overlay_top_margin_spin.setRange(0, 60)
+        overlay_top_margin_spin.setValue(max(0, min(60, int(getattr(self, "_word_index_top_margin", 20)))))
+        overlay_top_margin_spin.setToolTip(_top_margin_hint)
+        overlay_top_margin_row.addWidget(overlay_top_margin_label)
+        overlay_top_margin_row.addWidget(overlay_top_margin_spin)
+        overlay_top_margin_row.addWidget(_info_btn(_top_margin_hint))
+        outer.addLayout(overlay_top_margin_row)
+
+        opacity_section_lbl = QLabel("Opacity fine-tuning  (0 = invisible  \u00b7  255 = fully solid)", dialog)
+        opacity_section_lbl.setStyleSheet("font-weight: 500; margin-top: 6px;")
+        outer.addWidget(opacity_section_lbl)
+
+        def _make_spin(value: int) -> QSpinBox:
+            spin = QSpinBox(dialog)
+            spin.setRange(0, 255)
+            spin.setValue(value)
+            return spin
+
+        overlay_grid = QGridLayout()
+        _bd_dark_hint = "A faint semi-transparent wash over the writing area that makes numbers easier to read (dark theme)."
+        backdrop_dark_spin = _make_spin(self._normalize_opacity(getattr(self, "_word_index_backdrop_opacity_dark", 72), 72))
+        backdrop_dark_spin.setToolTip(_bd_dark_hint)
+        overlay_grid.addWidget(QLabel("Backdrop \u2014 dark background:", dialog), 0, 0)
+        overlay_grid.addWidget(backdrop_dark_spin, 0, 1)
+        overlay_grid.addWidget(_info_btn(_bd_dark_hint), 0, 2)
+        _bd_light_hint = "Same backdrop wash, for light theme."
+        backdrop_light_spin = _make_spin(self._normalize_opacity(getattr(self, "_word_index_backdrop_opacity_light", 64), 64))
+        backdrop_light_spin.setToolTip(_bd_light_hint)
+        overlay_grid.addWidget(QLabel("Backdrop \u2014 light background:", dialog), 1, 0)
+        overlay_grid.addWidget(backdrop_light_spin, 1, 1)
+        overlay_grid.addWidget(_info_btn(_bd_light_hint), 1, 2)
+        _text_hint = "How opaque the word numbers themselves are."
+        text_spin = _make_spin(self._normalize_opacity(getattr(self, "_word_index_text_opacity", 255), 255))
+        text_spin.setToolTip(_text_hint)
+        overlay_grid.addWidget(QLabel("Number text:", dialog), 2, 0)
+        overlay_grid.addWidget(text_spin, 2, 1)
+        overlay_grid.addWidget(_info_btn(_text_hint), 2, 2)
+        _halo_dark_hint = "A soft contrasting aura around each number so it stays legible against any text beneath it (dark theme)."
+        halo_dark_spin = _make_spin(self._normalize_opacity(getattr(self, "_word_index_halo_opacity_dark", 220), 220))
+        halo_dark_spin.setToolTip(_halo_dark_hint)
+        overlay_grid.addWidget(QLabel("Glow \u2014 dark background:", dialog), 3, 0)
+        overlay_grid.addWidget(halo_dark_spin, 3, 1)
+        overlay_grid.addWidget(_info_btn(_halo_dark_hint), 3, 2)
+        _halo_light_hint = "Same glow, for light theme."
+        halo_light_spin = _make_spin(self._normalize_opacity(getattr(self, "_word_index_halo_opacity_light", 230), 230))
+        halo_light_spin.setToolTip(_halo_light_hint)
+        overlay_grid.addWidget(QLabel("Glow \u2014 light background:", dialog), 4, 0)
+        overlay_grid.addWidget(halo_light_spin, 4, 1)
+        overlay_grid.addWidget(_info_btn(_halo_light_hint), 4, 2)
+        outer.addLayout(overlay_grid)
+
+        def _apply_overlay_preset_for_selected_color():
+            preset = self._word_index_visual_preset_for_color(overlay_color_combo.currentData())
+            backdrop_dark_spin.setValue(preset["backdrop_dark"])
+            backdrop_light_spin.setValue(preset["backdrop_light"])
+            text_spin.setValue(preset["text"])
+            halo_dark_spin.setValue(preset["halo_dark"])
+            halo_light_spin.setValue(preset["halo_light"])
+
+        def _refresh_custom_controls():
+            is_custom = mode_combo.currentData() == "custom"
+            for widget in (bg_label, fg_label, bg_button, fg_button, bg_preview, fg_preview,
+                           bg_info, fg_info):
+                widget.setVisible(is_custom)
+
+        def _reset_theme_section():
+            nonlocal chosen_bg, chosen_fg
+            default_mode = "follow_os"
+            mode_idx = mode_combo.findData(default_mode)
+            if mode_idx >= 0:
+                mode_combo.setCurrentIndex(mode_idx)
+            chosen_bg = "#202124"
+            chosen_fg = "#f1f3f4"
+            _refresh_color_preview(bg_preview, chosen_bg)
+            _refresh_color_preview(fg_preview, chosen_fg)
+            _refresh_custom_controls()
+
+        def _reset_overlay_section():
+            overlay_density_cb.setChecked(True)
+            overlay_top_margin_spin.setValue(20)
+            default_color = "white"
+            color_idx = overlay_color_combo.findData(default_color)
+            if color_idx >= 0:
+                overlay_color_combo.setCurrentIndex(color_idx)
+            default_align = "right"
+            align_idx = overlay_align_combo.findData(default_align)
+            if align_idx >= 0:
+                overlay_align_combo.setCurrentIndex(align_idx)
+            _apply_overlay_preset_for_selected_color()
+
+        reset_theme_btn.clicked.connect(_reset_theme_section)
+        reset_overlay_btn.clicked.connect(_reset_overlay_section)
+        overlay_color_combo.currentIndexChanged.connect(lambda _idx: _apply_overlay_preset_for_selected_color())
+
+        mode_combo.currentIndexChanged.connect(lambda _idx: _refresh_custom_controls())
+        _refresh_custom_controls()
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        outer.addWidget(btn_box)
+
+        if dialog.exec():
+            self._appearance_theme_mode = self._normalize_theme_mode(mode_combo.currentData())
+            self._appearance_custom_bg = self._normalize_hex_color(chosen_bg, "#202124")
+            self._appearance_custom_fg = self._normalize_hex_color(chosen_fg, "#f1f3f4")
+
+            self._word_index_adaptive_density = bool(overlay_density_cb.isChecked())
+            self._word_index_color = self._normalize_word_index_color(overlay_color_combo.currentData())
+            self._word_index_alignment = self._normalize_word_index_alignment(overlay_align_combo.currentData())
+            self._word_index_top_margin = max(0, min(60, int(overlay_top_margin_spin.value())))
+            self._word_index_backdrop_opacity_dark = self._normalize_opacity(backdrop_dark_spin.value(), 72)
+            self._word_index_backdrop_opacity_light = self._normalize_opacity(backdrop_light_spin.value(), 64)
+            self._word_index_text_opacity = self._normalize_opacity(text_spin.value(), 255)
+            self._word_index_halo_opacity_dark = self._normalize_opacity(halo_dark_spin.value(), 220)
+            self._word_index_halo_opacity_light = self._normalize_opacity(halo_light_spin.value(), 230)
+
+            self._apply_theme_preferences()
+            self._apply_word_index_preferences()
+            self._save_preferences()
+
+    def _is_os_dark_mode(self) -> bool:
+        app = QApplication.instance()
+        if app is None:
+            return False
+        return app.palette().window().color().lightness() < 128
+
+    def _apply_theme_preferences(self):
+        mode = self._normalize_theme_mode(getattr(self, "_appearance_theme_mode", "follow_os"))
+        if mode == "follow_os":
+            mode = "dark" if self._is_os_dark_mode() else "light"
+
+        app = QApplication.instance()
+        if app is None:
+            return
+
+        if mode == "dark":
+            bg = QColor("#1e1f22")
+            fg = QColor("#f1f3f4")
+        elif mode == "light":
+            bg = QColor("#ffffff")
+            fg = QColor("#1f1f1f")
+        else:
+            bg = QColor(self._normalize_hex_color(getattr(self, "_appearance_custom_bg", "#202124"), "#202124"))
+            fg = QColor(self._normalize_hex_color(getattr(self, "_appearance_custom_fg", "#f1f3f4"), "#f1f3f4"))
+
+        palette = app.palette()
+
+        # Qt6 (PySide6) uses scoped enums: QPalette.ColorRole.Window, etc.
+        # Qt5 also exposes flat aliases, so support both forms safely.
+        color_role_enum = getattr(type(palette), "ColorRole", None)
+
+        def _role(name: str):
+            if color_role_enum is not None and hasattr(color_role_enum, name):
+                return getattr(color_role_enum, name)
+            return getattr(type(palette), name)
+
+        palette.setColor(_role("Window"), bg)
+        palette.setColor(_role("Base"), bg)
+        if bg.lightness() < 128:
+            alt_base = bg.lighter(118)
+        else:
+            alt_base = bg.darker(104)
+        palette.setColor(_role("AlternateBase"), alt_base)
+        palette.setColor(_role("Text"), fg)
+        palette.setColor(_role("WindowText"), fg)
+        palette.setColor(_role("ButtonText"), fg)
+        app.setPalette(palette)
+        self.editor.viewport().update()
+        self.editor.lineNumberArea.update()
+
+    def _apply_word_index_preferences(self):
+        self.editor.setWordIndexVisualOpacities(
+            self._word_index_backdrop_opacity_dark,
+            self._word_index_backdrop_opacity_light,
+            self._word_index_text_opacity,
+            self._word_index_halo_opacity_dark,
+            self._word_index_halo_opacity_light,
+        )
+        self.editor.setWordIndexColorName(self._word_index_color)
+        self.editor.setWordIndexAlignmentName(self._word_index_alignment)
+        self.editor.setWordIndexAdaptiveDensity(self._word_index_adaptive_density)
+        self.editor.setWordIndexTopMargin(self._word_index_top_margin)
 
     # --- Preferences ---
     def _load_preferences(self):
@@ -3470,9 +4396,29 @@ class Notepad(QMainWindow):
         self.line_numbers_act.setChecked(bool(line_numbers_visible))
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
 
+        # Status bar item visibility
+        self._status_show_words = bool(data.get("status_show_words", True))
+        self._status_show_sentences = bool(data.get("status_show_sentences", True))
+        self._status_show_chars = bool(data.get("status_show_chars", True))
+        self._status_show_line = bool(data.get("status_show_line", True))
+        self._status_show_col = bool(data.get("status_show_col", True))
+        self.status_words_act.setChecked(self._status_show_words)
+        self.status_sentences_act.setChecked(self._status_show_sentences)
+        self.status_chars_act.setChecked(self._status_show_chars)
+        self.status_line_act.setChecked(self._status_show_line)
+        self.status_col_act.setChecked(self._status_show_col)
+        self.words_label.setVisible(self._status_show_words)
+        self.sentences_label.setVisible(self._status_show_sentences)
+        self.chars_label.setVisible(self._status_show_chars)
+        self.line_label.setVisible(self._status_show_line)
+        self.col_label.setVisible(self._status_show_col)
+
         # Text margins
         margin_percent = data.get("text_margin_percent", 0)
         self._set_text_margin_percent(margin_percent, save=False, show_status=False)
+
+        line_spacing_preset = data.get("line_spacing_preset", "normal")
+        self._set_line_spacing_preset(line_spacing_preset, save=False, show_status=False)
 
         # Font
         family = data.get("font_family")
@@ -3499,10 +4445,48 @@ class Notepad(QMainWindow):
             self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
         self._force_anjal_english = bool(data.get("force_anjal_english", True))
 
+        # Appearance
+        raw_theme_mode = data.get("appearance_theme_mode", "follow_os")
+        raw_custom_bg = data.get("appearance_custom_bg", "#202124")
+        raw_custom_fg = data.get("appearance_custom_fg", "#f1f3f4")
+        self._appearance_theme_mode = self._normalize_theme_mode(raw_theme_mode)
+        self._appearance_custom_bg = self._normalize_hex_color(raw_custom_bg, "#202124")
+        self._appearance_custom_fg = self._normalize_hex_color(raw_custom_fg, "#f1f3f4")
+        self._apply_theme_preferences()
+
         # Experimental features
         self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
         self.unicode_substring_highlight_act.setChecked(self._unicode_substring_highlight)
         self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
+        self._word_index_enabled = bool(data.get("word_index_enabled", False))
+        self._word_index_adaptive_density = bool(data.get("word_index_adaptive_density", True))
+        raw_word_index_color = data.get("word_index_color", "white")
+        overlay_defaults = self._word_index_visual_preset_for_color(raw_word_index_color)
+        raw_backdrop_dark = data.get("word_index_backdrop_opacity_dark", overlay_defaults["backdrop_dark"])
+        raw_backdrop_light = data.get("word_index_backdrop_opacity_light", overlay_defaults["backdrop_light"])
+        raw_text_opacity = data.get("word_index_text_opacity", overlay_defaults["text"])
+        raw_halo_dark = data.get("word_index_halo_opacity_dark", overlay_defaults["halo_dark"])
+        raw_halo_light = data.get("word_index_halo_opacity_light", overlay_defaults["halo_light"])
+        raw_word_index_alignment = data.get("word_index_alignment", "right")
+        raw_word_index_top_margin = data.get("word_index_top_margin", 20)
+        self._word_index_backdrop_opacity_dark = self._normalize_opacity(
+            raw_backdrop_dark, 72
+        )
+        self._word_index_backdrop_opacity_light = self._normalize_opacity(
+            raw_backdrop_light, 64
+        )
+        self._word_index_text_opacity = self._normalize_opacity(
+            raw_text_opacity, 255
+        )
+        self._word_index_halo_opacity_dark = self._normalize_opacity(
+            raw_halo_dark, 220
+        )
+        self._word_index_halo_opacity_light = self._normalize_opacity(
+            raw_halo_light, 230
+        )
+        self._word_index_color = self._normalize_word_index_color(raw_word_index_color)
+        self._word_index_alignment = self._normalize_word_index_alignment(raw_word_index_alignment)
+        self._word_index_top_margin = max(0, min(60, int(raw_word_index_top_margin) if str(raw_word_index_top_margin).lstrip('-').isdigit() else 20))
         self._tamil_reading_wpm = self._normalize_reading_speed(data.get("tamil_reading_wpm", 150), 150)
         self._english_reading_wpm = self._normalize_reading_speed(data.get("english_reading_wpm", 250), 250)
         raw_google_prefix = data.get("google_search_url_prefix")
@@ -3513,16 +4497,38 @@ class Notepad(QMainWindow):
         self._sorkuvai_search_url_prefix = self._normalize_search_url_prefix(
             raw_sorkuvai_prefix, DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
         )
+        self._apply_word_index_preferences()
+        self.word_index_act.setChecked(self._word_index_enabled)
 
         # Seed defaults into settings on first run (or repair invalid/empty values)
         # so URL patterns can be changed later without rebuilding the app.
         if (
             raw_google_prefix != self._google_search_url_prefix
             or raw_sorkuvai_prefix != self._sorkuvai_search_url_prefix
+            or raw_backdrop_dark != self._word_index_backdrop_opacity_dark
+            or raw_backdrop_light != self._word_index_backdrop_opacity_light
+            or raw_text_opacity != self._word_index_text_opacity
+            or raw_halo_dark != self._word_index_halo_opacity_dark
+            or raw_halo_light != self._word_index_halo_opacity_light
+            or raw_word_index_color != self._word_index_color
+            or raw_word_index_alignment != self._word_index_alignment
+            or raw_theme_mode != self._appearance_theme_mode
+            or raw_custom_bg != self._appearance_custom_bg
+            or raw_custom_fg != self._appearance_custom_fg
         ):
             try:
                 data["google_search_url_prefix"] = self._google_search_url_prefix
                 data["sorkuvai_search_url_prefix"] = self._sorkuvai_search_url_prefix
+                data["word_index_backdrop_opacity_dark"] = self._word_index_backdrop_opacity_dark
+                data["word_index_backdrop_opacity_light"] = self._word_index_backdrop_opacity_light
+                data["word_index_text_opacity"] = self._word_index_text_opacity
+                data["word_index_halo_opacity_dark"] = self._word_index_halo_opacity_dark
+                data["word_index_halo_opacity_light"] = self._word_index_halo_opacity_light
+                data["word_index_color"] = self._word_index_color
+                data["word_index_alignment"] = self._word_index_alignment
+                data["appearance_theme_mode"] = self._appearance_theme_mode
+                data["appearance_custom_bg"] = self._appearance_custom_bg
+                data["appearance_custom_fg"] = self._appearance_custom_fg
                 self.settings.save(data)
             except Exception:
                 pass
@@ -3562,6 +4568,14 @@ class Notepad(QMainWindow):
             data.update({
                 "word_wrap": self.editor.isWordWrap(),
                 "line_numbers_visible": self.editor.isLineNumbersVisible(),
+                "status_show_words": getattr(self, "_status_show_words", True),
+                "status_show_sentences": getattr(self, "_status_show_sentences", True),
+                "status_show_chars": getattr(self, "_status_show_chars", True),
+                "status_show_line": getattr(self, "_status_show_line", True),
+                "status_show_col": getattr(self, "_status_show_col", True),
+                "line_spacing_preset": self._normalize_line_spacing_preset(
+                    getattr(self, '_line_spacing_preset', 'normal')
+                ),
                 "text_margin_percent": self.editor.textMarginPercent(),
                 "font_family": font.family(),
                 "font_size": int(font.pointSize()) if font.pointSize() > 0 else 12,
@@ -3570,10 +4584,43 @@ class Notepad(QMainWindow):
                 "window_maximized": bool(self.isMaximized()),
                 "autosave_interval": autosave_interval,
                 "last_opened_file": last_opened_file,
+                "appearance_theme_mode": self._normalize_theme_mode(
+                    getattr(self, '_appearance_theme_mode', 'follow_os')
+                ),
+                "appearance_custom_bg": self._normalize_hex_color(
+                    getattr(self, '_appearance_custom_bg', '#202124'), '#202124'
+                ),
+                "appearance_custom_fg": self._normalize_hex_color(
+                    getattr(self, '_appearance_custom_fg', '#f1f3f4'), '#f1f3f4'
+                ),
                 "quick_switch_enabled": getattr(self, '_quick_switch_enabled', True),
                 "force_anjal_english": getattr(self, '_force_anjal_english', True),
                 "unicode_substring_highlight": getattr(self, '_unicode_substring_highlight', False),
                 "reading_time_enabled": getattr(self, '_reading_time_enabled', False),
+                "word_index_enabled": getattr(self, '_word_index_enabled', False),
+                "word_index_adaptive_density": getattr(self, '_word_index_adaptive_density', True),
+                "word_index_backdrop_opacity_dark": self._normalize_opacity(
+                    getattr(self, '_word_index_backdrop_opacity_dark', 78), 78
+                ),
+                "word_index_backdrop_opacity_light": self._normalize_opacity(
+                    getattr(self, '_word_index_backdrop_opacity_light', 70), 70
+                ),
+                "word_index_text_opacity": self._normalize_opacity(
+                    getattr(self, '_word_index_text_opacity', 255), 255
+                ),
+                "word_index_halo_opacity_dark": self._normalize_opacity(
+                    getattr(self, '_word_index_halo_opacity_dark', 230), 230
+                ),
+                "word_index_halo_opacity_light": self._normalize_opacity(
+                    getattr(self, '_word_index_halo_opacity_light', 245), 245
+                ),
+                "word_index_color": self._normalize_word_index_color(
+                    getattr(self, '_word_index_color', 'white')
+                ),
+                "word_index_alignment": self._normalize_word_index_alignment(
+                    getattr(self, '_word_index_alignment', 'right')
+                ),
+                "word_index_top_margin": max(0, min(60, int(getattr(self, '_word_index_top_margin', 20)))),
                 "tamil_reading_wpm": self._normalize_reading_speed(getattr(self, '_tamil_reading_wpm', 150), 150),
                 "english_reading_wpm": self._normalize_reading_speed(getattr(self, '_english_reading_wpm', 250), 250),
                 "google_search_url_prefix": self._normalize_search_url_prefix(
@@ -3603,12 +4650,95 @@ class Notepad(QMainWindow):
         return 150
 
     @staticmethod
+    def _normalize_opacity(value, default: int) -> int:
+        try:
+            opacity = int(value)
+        except Exception:
+            opacity = int(default)
+        if opacity < 0:
+            return 0
+        if opacity > 255:
+            return 255
+        return opacity
+
+    @staticmethod
+    def _normalize_word_index_color(value) -> str:
+        allowed = {"white", "grey", "black", "yellow", "green", "blue"}
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in allowed:
+                return normalized
+        return "white"
+
+    @staticmethod
+    def _normalize_word_index_alignment(value) -> str:
+        allowed = {"left", "center", "right"}
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in allowed:
+                return normalized
+        return "right"
+
+    @staticmethod
+    def _word_index_visual_preset_for_color(color_name: str) -> dict:
+        normalized = Notepad._normalize_word_index_color(color_name)
+        presets = {
+            "white": {"backdrop_dark": 78, "backdrop_light": 70, "text": 255, "halo_dark": 230, "halo_light": 245},
+            "grey": {"backdrop_dark": 74, "backdrop_light": 66, "text": 245, "halo_dark": 220, "halo_light": 240},
+            "black": {"backdrop_dark": 88, "backdrop_light": 76, "text": 235, "halo_dark": 240, "halo_light": 240},
+            "yellow": {"backdrop_dark": 72, "backdrop_light": 64, "text": 255, "halo_dark": 220, "halo_light": 230},
+            "green": {"backdrop_dark": 74, "backdrop_light": 66, "text": 255, "halo_dark": 225, "halo_light": 235},
+            "blue": {"backdrop_dark": 76, "backdrop_light": 68, "text": 255, "halo_dark": 230, "halo_light": 240},
+        }
+        return presets.get(normalized, presets["white"]).copy()
+
+    @staticmethod
+    def _normalize_theme_mode(value) -> str:
+        allowed = {"follow_os", "dark", "light", "custom"}
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in allowed:
+                return normalized
+        return "follow_os"
+
+    @staticmethod
+    def _normalize_hex_color(value, default: str) -> str:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if re.fullmatch(r"#[0-9a-fA-F]{6}", cleaned):
+                return cleaned.lower()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", default):
+            return default.lower()
+        return "#202124"
+
+    @staticmethod
     def _normalize_search_url_prefix(value, default: str) -> str:
         if isinstance(value, str):
             cleaned = value.strip()
             if cleaned:
                 return cleaned
         return default
+
+    @staticmethod
+    def _normalize_line_spacing_preset(value) -> str:
+        allowed = {"extra_tight", "tight", "normal", "casual", "extra_casual"}
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace(" ", "_")
+            if normalized in allowed:
+                return normalized
+        return "normal"
+
+    @staticmethod
+    def _line_spacing_percent_for_preset(preset: str) -> int:
+        mapping = {
+            "extra_tight": 75,
+            "tight": 90,
+            "normal": 100,
+            "casual": 150,
+            "extra_casual": 200,
+        }
+        key = Notepad._normalize_line_spacing_preset(preset)
+        return mapping.get(key, 100)
 
     def change_font(self):
         current_font = self.editor.font()
@@ -3623,6 +4753,15 @@ class Notepad(QMainWindow):
         self._unicode_substring_highlight = bool(enabled)
         self._save_preferences()
 
+    def _toggle_word_index(self, enabled: bool):
+        self._word_index_enabled = bool(enabled)
+        self.editor.setWordIndexAdaptiveDensity(getattr(self, '_word_index_adaptive_density', True))
+        self.editor.setWordIndexVisible(self._word_index_enabled)
+        self._save_preferences()
+
+    def _toggle_word_index_from_status_label(self):
+        self.word_index_act.toggle()
+
     def _toggle_wrap(self, enabled: bool):
         self.editor.setWordWrap(bool(enabled))
         self._save_preferences()
@@ -3630,6 +4769,38 @@ class Notepad(QMainWindow):
     def _toggle_line_numbers(self, enabled: bool):
         self.editor.setLineNumbersVisible(bool(enabled))
         self._save_preferences()
+
+    def _set_line_spacing_preset(self, preset: str, *, save: bool = True, show_status: bool = True):
+        key = self._normalize_line_spacing_preset(preset)
+        self._line_spacing_preset = key
+        self._apply_line_spacing_to_document(self._line_spacing_percent_for_preset(key))
+        self._update_line_spacing_menu(key)
+        if save:
+            self._save_preferences()
+        if show_status:
+            pretty = {
+                "extra_tight": "Very Tight",
+                "tight": "Tight",
+                "normal": "Default",
+                "casual": "Relaxed",
+                "extra_casual": "Loose",
+            }.get(key, "Default")
+            self.status.showMessage(f"Line spacing: {pretty}", 1800)
+
+    def _apply_line_spacing_to_document(self, line_height_percent: int):
+        try:
+            percent = float(max(50, min(300, int(line_height_percent))))
+        except Exception:
+            percent = 100.0
+        self.editor.setLineSpacingPercent(percent)
+
+    def _update_line_spacing_menu(self, preset: str):
+        key = self._normalize_line_spacing_preset(preset)
+        self.line_spacing_extra_tight_act.setChecked(key == "extra_tight")
+        self.line_spacing_tight_act.setChecked(key == "tight")
+        self.line_spacing_normal_act.setChecked(key == "normal")
+        self.line_spacing_casual_act.setChecked(key == "casual")
+        self.line_spacing_extra_casual_act.setChecked(key == "extra_casual")
 
     def _set_text_margin_percent(self, percent: int, *, save: bool = True, show_status: bool = True):
         allowed = {0, 5, 10, 15, 20, 25}
@@ -3812,8 +4983,41 @@ class Notepad(QMainWindow):
         self.setWindowTitle(f"{name}{modified} - Neight")
 
     def _on_text_changed(self):
-        self._update_status_bar()
+        self._schedule_status_update()
         self._update_word_highlights()
+
+    def _schedule_status_update(self):
+        self._status_update_timer.start(90)
+
+    def _toggle_status_item(self, item: str, visible: bool):
+        """Show/hide an individual status bar counter and persist the change."""
+        attr_map = {
+            "words":     ("_status_show_words",     self.words_label),
+            "sentences": ("_status_show_sentences", self.sentences_label),
+            "chars":     ("_status_show_chars",     self.chars_label),
+            "line":      ("_status_show_line",      self.line_label),
+            "col":       ("_status_show_col",       self.col_label),
+        }
+        if item not in attr_map:
+            return
+        attr, widget = attr_map[item]
+        setattr(self, attr, bool(visible))
+        widget.setVisible(bool(visible))
+        if not visible:
+            widget.setText("")
+        else:
+            # Refresh content immediately so label isn't blank after re-enabling
+            self._update_status_bar()
+        self._save_preferences()
+
+    def _update_cursor_position_status(self):
+        cursor = self.editor.textCursor()
+        line = cursor.blockNumber() + 1
+        col = cursor.positionInBlock() + 1
+        if getattr(self, "_status_show_line", True):
+            self.line_label.setText(f"Ln {line}")
+        if getattr(self, "_status_show_col", True):
+            self.col_label.setText(f"Col {col}")
 
     def _clear_word_highlight_on_blur(self):
         self._clear_word_highlights()
@@ -3918,15 +5122,57 @@ class Notepad(QMainWindow):
             return 0
 
         chunks = re.split(r"[.!?\u0964\u0965\u3002\uff01\uff1f\u061f]+", text)
-        count = sum(1 for chunk in chunks if re.search(r"\S", chunk))
-        return max(1, count)
+        return sum(1 for chunk in chunks if re.search(r"\S", chunk))
 
-    def _update_reading_time_status(self, text: str):
+    @staticmethod
+    def _is_word_char(ch: str) -> bool:
+        category = unicodedata.category(ch)
+        return category.startswith(("L", "N", "M"))
+
+    @classmethod
+    def _extract_word_spans(cls, text: str) -> list[tuple[int, int]]:
+        if not text:
+            return []
+
+        spans = []
+        current_start = None
+        connector_chars = {"'", "’", "-", "‐"}
+        length = len(text)
+
+        for idx, ch in enumerate(text):
+            if cls._is_word_char(ch):
+                if current_start is None:
+                    current_start = idx
+                continue
+
+            if (
+                ch in connector_chars
+                and current_start is not None
+                and idx + 1 < length
+                and cls._is_word_char(text[idx + 1])
+            ):
+                continue
+
+            if current_start is not None:
+                spans.append((current_start, idx))
+                current_start = None
+
+        if current_start is not None:
+            spans.append((current_start, length))
+
+        return spans
+
+    @classmethod
+    def _extract_word_tokens(cls, text: str) -> list[str]:
+        return [text[start:end] for start, end in cls._extract_word_spans(text)]
+
+    def _update_reading_time_status(self, text: str, tokens: Optional[list[str]] = None):
         if not getattr(self, "_reading_time_enabled", False):
             self.reading_time_label.setText("")
             return
 
-        tokens = re.findall(r"\S+", text)
+        if tokens is None:
+            tokens = self._extract_word_tokens(text)
         if not tokens:
             self.reading_time_label.setText("Read: <1 min")
             return
@@ -3965,16 +5211,20 @@ class Notepad(QMainWindow):
 
     def _update_status_bar(self):
         text = self.editor.toPlainText()
-        words = len(re.findall(r"\S+", text))
-        sentences = self._count_sentences(text)
-        chars = len(text)
-        self.count_label.setText(f"Words: {words} | Sentences: {sentences} | Chars: {chars}")
-        self._update_reading_time_status(text)
-
-        cursor = self.editor.textCursor()
-        line = cursor.blockNumber() + 1
-        col = cursor.positionInBlock() + 1
-        self.pos_label.setText(f"Ln {line}, Col {col}")
+        # Only tokenise / count what is actually visible — skip expensive ops when hidden
+        show_words = getattr(self, "_status_show_words", True)
+        show_sentences = getattr(self, "_status_show_sentences", True)
+        show_chars = getattr(self, "_status_show_chars", True)
+        need_tokens = show_words or getattr(self, "_reading_time_enabled", False)
+        tokens = self._extract_word_tokens(text) if need_tokens else []
+        if show_words:
+            self.words_label.setText(f"Words: {len(tokens)}")
+        if show_sentences:
+            self.sentences_label.setText(f"Sentences: {self._count_sentences(text)}")
+        if show_chars:
+            self.chars_label.setText(f"Chars: {len(text)}")
+        self._update_reading_time_status(text, tokens=tokens if need_tokens else None)
+        self._update_cursor_position_status()
 
     # Confirm close with save prompt and persist settings
     def closeEvent(self, event):
