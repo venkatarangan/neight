@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.025** | [Version History](changes/VERSION_SUMMARY.md) | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.029** | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS, built for real writing: Tamil, English, mixed-language drafting, quick notes, Markdown, and distraction-free composition.
 
@@ -59,6 +59,10 @@ Language Switch settings on macOS:
 Debug information panel on macOS:
 
 ![Neight debug info on macOS](screenshots/macos/2026-May-06-mac-debuginfo-screenshot.jpg)
+
+Architecture infographic (high-level):
+
+![Neight architecture infographic](design/architecture_infographic_readme.png)
 
 Additional screenshots are available in the [screenshots](screenshots) folder.
 
@@ -456,13 +460,6 @@ This produces:
 
 - `dist/Neight.app`
 - `dist/Neight-mac-arm64-unsigned.app.zip`
-
-### macOS standalone onefile build
-
-```bash
-chmod +x changes/buildme_mac_onefile.sh
-./changes/buildme_mac_onefile.sh
-```
 
 ### Manual macOS build
 
