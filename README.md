@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.023** | [Version History](changes/VERSION_SUMMARY.md) | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.025** | [Version History](changes/VERSION_SUMMARY.md) | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS, built for real writing: Tamil, English, mixed-language drafting, quick notes, Markdown, and distraction-free composition.
 
@@ -124,7 +124,7 @@ Positions are fixed — hiding one item does not cause the others to shift.
 - **Adjustable line spacing** from **Format → Line Spacing** with five presets: Condensed, Single Line, 1.5 Lines, Double, and Triple
 - **Live status bar counts** for words, sentences, and characters — each independently shown or hidden
 - **Word-match highlighting** for single-word selections, with live match count in the status bar
-- **Auto-save** with configurable intervals under **Settings → Auto-save**
+- **Auto-save** with configurable intervals under **Settings → Auto-save**. Writes are atomic (written to a temporary file first, then renamed over the original) and run on a background thread. If a write fails, the document is marked unsaved and a status-bar message appears. A watchdog resets the state if a write thread becomes unresponsive (e.g., on a slow or disconnected network drive) and logs the event to `neight_autosave.log` in the same folder as `settings.json`.
 - **Plain-text paste** with `Shift+Ctrl+V` or `Shift+Insert`
 - **Quick Google Search** for selected text with `Ctrl+E`, or for the word under the cursor if nothing is selected
 - **Sorkuvai lookup** for a selected single Tamil word from the right-click context menu
@@ -153,10 +153,10 @@ Neight is optimized for typing speed. Writers working in long documents, or with
 
 Key optimizations:
 
-- **Debounced status bar updates** — counters update 90 ms after you stop typing, never on every keystroke. This keeps the UI thread free during bursts.
-- **Debounced Word Index overlay** — the Word Index repaints 150 ms after you pause, not per keystroke.
-- **Burst suppression flags** — during rapid typing, expensive full-document passes are skipped entirely. The overlay defers cache rebuilds and partial repaints until the burst ends.
+- **Debounced status bar updates** — word, sentence, and character counts update 250 ms after you stop typing, never on every keystroke. If all counters are hidden, the O(n) full-text copy is skipped entirely. This keeps the UI thread free during fast bursts.
+- **Debounced word-match highlighting** — the whole-document word scan is deferred 80 ms after selection changes, with an early-exit if the selected word has not changed since the last scan.
 - **Smart token reuse** — when both word count and reading time are enabled, the word tokenization pass runs only once per update cycle.
+- **Auto-save on a background thread** — disk writes for auto-save run entirely off the UI thread, so saving a large file never causes a visible pause or dropped keystroke. The document text is snapshotted on the UI thread before the write begins; results (success or failure) are posted back to the UI thread via Qt signals.
 - **`contentsChange` signal** — Neight uses Qt's lower-level `contentsChange` signal (which fires with change coordinates) rather than `contentsChanged` (which fires blindly for every event), so updates can be targeted rather than global.
 - **Custom line spacing engine** — Qt's `QPlainTextEdit` does not support true line-height adjustments through its standard formatting API. Neight uses a custom `SpacedPlainTextDocumentLayout` subclass that overrides `blockBoundingRect()` to reposition every visual `QTextLine` within each paragraph's layout. This produces genuine per-visual-line spacing — identical in effect to Word's line spacing — so wrapped lines within a paragraph are spaced, not just paragraph breaks.
 
@@ -308,6 +308,8 @@ All Markdown shortcuts live in the **Markdown** menu. Every item inserts or wrap
 - horizontal rules and table templates
 - image and hyperlink insertion with URL validation
 - automatic `https://` prefixing during link/image validation
+
+> **Privacy note:** URL validation in the image and hyperlink dialogs is an explicit, user-initiated action. When you click **Validate URL**, Neight makes a single HEAD request to the URL you typed — nothing else is sent, stored, or logged. This is not telemetry. Neight makes no network calls on its own.
 - open and save both `.txt` and `.md` files
 
 ### Smart tag replacement
@@ -384,6 +386,14 @@ Neight creates and updates `settings.json` automatically.
 
 - On first run, a default settings file is created automatically.
 - If settings are corrupted, a startup prompt shows the file path with three options: **Copy Path**, **Reset to Defaults**, or **Exit**.
+
+### Autosave diagnostic log
+
+If an auto-save write fails or the watchdog detects a hung write thread, Neight appends a timestamped entry to `neight_autosave.log` in the same folder as `settings.json`. The log is never created unless there is something to record.
+
+### Accessing these files
+
+**Help → Debug Info** shows the exact paths to both `settings.json` and `neight_autosave.log`, with copy and open buttons for each. A warning is shown as a reminder that modifying or deleting them can cause data loss or preference reset.
 
 ### Customizable URL prefixes
 
