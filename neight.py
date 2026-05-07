@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.026"
+VERSION = "2026.027"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -5565,13 +5565,53 @@ def main():
     # set before QApplication is constructed.
     os.environ.setdefault("QT_LOGGING_RULES", "qt.text.font.db=false")
 
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("venkatarangan.neight")
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
+
+    app_icon: Optional[QIcon] = None
+    if sys.platform == "win32":
+        def _resolve_app_icon() -> Optional[QIcon]:
+            """Return a usable application icon for source and frozen Windows builds."""
+            candidates: list[Path] = []
+
+            if getattr(sys, "frozen", False):
+                # In PyInstaller onefile mode, sys.executable is the packaged EXE.
+                candidates.append(Path(sys.executable))
+                meipass = getattr(sys, "_MEIPASS", None)
+                if meipass:
+                    candidates.append(Path(meipass) / "neight.ico")
+            else:
+                candidates.append(Path(__file__).resolve().parent / "neight.ico")
+
+            for icon_path in candidates:
+                try:
+                    if icon_path.exists():
+                        icon = QIcon(str(icon_path))
+                        if not icon.isNull():
+                            return icon
+                except Exception:
+                    continue
+            return None
+
+        app_icon = _resolve_app_icon()
+        if app_icon is not None:
+            app.setWindowIcon(app_icon)
+
     force_empty_window = "--new-window-empty" in sys.argv[1:]
     initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
     window = Notepad(initial_file=initial_file, restore_last_session=not force_empty_window)
     if getattr(window, "_startup_cancelled", False):
         window.deleteLater()
         sys.exit(0)
+
+    if sys.platform == "win32" and app_icon is not None:
+        window.setWindowIcon(app_icon)
+
     window.show()
     sys.exit(app.exec())
 
