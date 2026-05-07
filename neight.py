@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.027"
+VERSION = "2026.029"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -5580,11 +5580,13 @@ def main():
             candidates: list[Path] = []
 
             if getattr(sys, "frozen", False):
-                # In PyInstaller onefile mode, sys.executable is the packaged EXE.
-                candidates.append(Path(sys.executable))
                 meipass = getattr(sys, "_MEIPASS", None)
                 if meipass:
                     candidates.append(Path(meipass) / "neight.ico")
+                # In onefile mode sys.executable is the packaged EXE, while in onedir
+                # the icon file may be next to the executable.
+                candidates.append(Path(sys.executable).resolve().parent / "neight.ico")
+                candidates.append(Path(sys.executable))
             else:
                 candidates.append(Path(__file__).resolve().parent / "neight.ico")
 
