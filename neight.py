@@ -13,6 +13,8 @@ import time
 import webbrowser
 import unicodedata
 import ctypes
+import html
+import threading
 import urllib.request
 import platform
 from datetime import datetime
@@ -21,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.025"
+VERSION = "2026.026"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -470,6 +472,9 @@ class SettingsManager:
         self.path = self._determine_active_path()
         self.corrupted_settings_path: Optional[Path] = None
         self.corrupted_settings_reason: str = ""
+        self.last_save_error: str = ""
+        # Autosave diagnostic log — same directory as settings.json.
+        self.log_path: Path = self.path.parent / "neight_autosave.log"
 
     def _determine_active_path(self) -> Path:
         """Determine which path to use for settings (primary or fallback)."""
@@ -546,10 +551,12 @@ class SettingsManager:
 
         return {}
 
-    def save(self, data: dict) -> None:
+    def save(self, data: dict) -> bool:
+        self.last_save_error = ""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True
         except Exception as e:
             # If save fails and we're using primary path, try fallback
             if self.path == self.primary_path:
@@ -557,8 +564,12 @@ class SettingsManager:
                     self.path = self.fallback_path
                     self.path.parent.mkdir(parents=True, exist_ok=True)
                     self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                except Exception:
-                    pass  # Non-fatal
+                    return True
+                except Exception as e2:
+                    self.last_save_error = str(e2)
+                    return False
+            self.last_save_error = str(e)
+            return False
 
 
 # -------------------------------------
@@ -1660,6 +1671,12 @@ class FindReplaceDialog(QDialog):
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
+    # Signals used to marshal autosave results back to the UI thread from the
+    # background write thread (emitting a Signal from a non-Qt thread is safe
+    # in PySide6; the call is automatically queued to the main event loop).
+    _autosave_succeeded = Signal()
+    _autosave_failed = Signal(Exception)  # carries the exception from the worker
+
     def __init__(self, initial_file: Optional[str] = None, restore_last_session: bool = True):
         super().__init__()
         self.setWindowTitle("Untitled - Neight")
@@ -1780,6 +1797,19 @@ class Notepad(QMainWindow):
         self._status_update_timer = QTimer(self)
         self._status_update_timer.setSingleShot(True)
         self._status_update_timer.timeout.connect(self._update_status_bar)
+
+        # Debounce word-highlight scans on selectionChanged (collapses drag bursts).
+        self._word_highlight_timer = QTimer(self)
+        self._word_highlight_timer.setSingleShot(True)
+        self._word_highlight_timer.setInterval(80)
+        self._word_highlight_timer.timeout.connect(self._update_word_highlights)
+
+        # In-memory cache of the settings dict — avoids a disk read on every save.
+        self._settings_cache: dict = {}
+
+        # Autosave background-thread state.
+        self._autosave_in_progress: bool = False
+        self._autosave_started_at: float = 0.0
 
         self._create_actions()
         self._create_menus()
@@ -2161,6 +2191,15 @@ class Notepad(QMainWindow):
         self.autosave_5min_act.triggered.connect(lambda: self._set_autosave_interval(5))
         self.autosave_15min_act.triggered.connect(lambda: self._set_autosave_interval(15))
         self.autosave_30min_act.triggered.connect(lambda: self._set_autosave_interval(30))
+        self._autosave_succeeded.connect(self._on_autosave_success)
+        self._autosave_failed.connect(self._on_autosave_failure)
+
+        # Watchdog: fires every minute to reset a stuck _autosave_in_progress
+        # flag from a hung background thread (e.g. unresponsive NFS mount).
+        self._autosave_watchdog = QTimer(self)
+        self._autosave_watchdog.setInterval(60_000)
+        self._autosave_watchdog.timeout.connect(self._autosave_watchdog_check)
+        self._autosave_watchdog.start()
 
         # Time/Date
         self.time_date_act.triggered.connect(self.insert_time_date)
@@ -2211,7 +2250,7 @@ class Notepad(QMainWindow):
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
-        self.editor.selectionChanged.connect(self._update_word_highlights)
+        self.editor.selectionChanged.connect(self._schedule_word_highlight_update)
         self.editor.cursorPositionChanged.connect(self._update_cursor_position_status)
         self.count_label.clicked.connect(self._toggle_word_index_from_status_label)
 
@@ -2455,9 +2494,31 @@ class Notepad(QMainWindow):
         try:
             text = path_obj.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            if notify_errors:
-                QMessageBox.critical(self, "Encoding Error", "File is not valid UTF-8.")
-            return False
+            # UTF-8 failed — try other Unicode encodings before giving up
+            text = None
+            try:
+                raw_bytes = path_obj.read_bytes()
+            except Exception as e:
+                if notify_errors:
+                    QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
+                return False
+            for enc in ("utf-8-sig", "utf-16", "utf-32"):
+                try:
+                    text = raw_bytes.decode(enc)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            if text is None:
+                if notify_errors:
+                    QMessageBox.critical(
+                        self,
+                        "Cannot Open File",
+                        "This file could not be opened.\n\n"
+                        "It does not appear to be a Unicode text file "
+                        "(UTF-8, UTF-16, or UTF-32).\n"
+                        "It may be a binary file or use an unsupported encoding."
+                    )
+                return False
         except Exception as e:
             if notify_errors:
                 QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
@@ -2524,35 +2585,142 @@ class Notepad(QMainWindow):
         return self._write_to_path(path)
 
     def _write_to_path(self, path: str) -> bool:
+        tmp_path = None
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            path_obj = Path(path)
+            # PID-qualified name avoids collision when two Neight windows edit
+            # the same file simultaneously.
+            tmp_path = path_obj.with_name(path_obj.name + f".{os.getpid()}.tmp~")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(self.editor.toPlainText())
+            os.replace(str(tmp_path), path)
+            tmp_path = None  # rename succeeded; skip temp-file cleanup
             self.editor.document().setModified(False)
-            self._update_default_directory(Path(path).parent)
+            self._update_default_directory(path_obj.parent)
             self._update_title()
             self.status.showMessage(f"Saved: {path}", 2000)
-            
             if not self.autosave_enabled:
                 self._start_autosave()
-            
             return True
         except Exception as e:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
             QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
             return False
 
     def _autosave(self):
-        if self.current_path and self.editor.document().isModified():
+        """Autosave the current file.
+
+        The text snapshot and the modified-flag reset happen on the UI thread.
+        The actual disk write (open + write + os.replace) runs in a daemon
+        thread so it cannot stall the event loop.  Results are posted back via
+        _autosave_succeeded / _autosave_failed signals, which Qt queues to the
+        main thread automatically.
+        """
+        if not self.current_path or not self.editor.document().isModified():
+            return
+        # Guard against overlapping writes (shouldn't happen at 2–30 min
+        # intervals, but safe-guards against very slow filesystems).
+        if getattr(self, '_autosave_in_progress', False):
+            return
+
+        # Capture everything needed by the worker on the UI thread.
+        text = self.editor.toPlainText()
+        path = self.current_path
+
+        # Optimistically clear the dirty flag now; restored on failure.
+        self.editor.document().setModified(False)
+        self._autosave_in_progress = True
+
+        # Record when this write started so the watchdog can detect hangs.
+        self._autosave_started_at = time.monotonic()
+
+        def _worker():
+            tmp_path = None
             try:
-                with open(self.current_path, "w", encoding="utf-8") as f:
-                    f.write(self.editor.toPlainText())
-                self.editor.document().setModified(False)
-                self._update_title()
-                self.status.showMessage("Auto-saved", 1500)
-            except Exception:
-                pass
+                path_obj = Path(path)
+                # PID-qualified name prevents temp-file collisions when two
+                # Neight windows are editing the same file simultaneously.
+                tmp_path = path_obj.with_name(path_obj.name + f".{os.getpid()}.tmp~")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                    # fsync guarantees data is on physical storage before the
+                    # atomic rename, so a power loss cannot corrupt the file.
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp_path), path)
+                tmp_path = None  # rename succeeded; skip cleanup
+                self._autosave_succeeded.emit()
+            except Exception as exc:
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                self._autosave_failed.emit(exc)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_autosave_success(self):
+        """Called on the UI thread after a successful background autosave."""
+        self._autosave_in_progress = False
+        self._autosave_started_at = 0.0
+        self._update_title()
+        self.status.showMessage("Auto-saved", 1500)
+
+    def _on_autosave_failure(self, exc: Exception):
+        """Called on the UI thread after a failed background autosave."""
+        self._autosave_in_progress = False
+        self._autosave_started_at = 0.0
+        # Restore the dirty flag so the user is not left with an unsaved file.
+        self.editor.document().setModified(True)
+        self.status.showMessage("Auto-save failed — check disk or permissions", 3000)
+        self._write_autosave_log(f"FAIL: {exc!r}  path={self.current_path!r}")
+
+    def _autosave_watchdog_check(self):
+        """Periodic check: if a background write has been running for more than
+        2 × the autosave interval (minimum 4 min), the thread is considered
+        hung.  We reset the guard flag and log the event so the next scheduled
+        autosave can fire normally."""
+        if not self._autosave_in_progress:
+            return
+        started = self._autosave_started_at
+        if started == 0.0:
+            return
+        interval_sec = getattr(self, '_autosave_interval_minutes', 5) * 60
+        timeout_sec = max(interval_sec * 2, 240)  # at least 4 minutes
+        elapsed = time.monotonic() - started
+        if elapsed >= timeout_sec:
+            self._autosave_in_progress = False
+            self._autosave_started_at = 0.0
+            self.editor.document().setModified(True)
+            msg = (f"WATCHDOG: autosave thread hung for {elapsed:.0f}s "
+                   f"(threshold {timeout_sec:.0f}s). Flag reset. "
+                   f"path={self.current_path!r}")
+            self._write_autosave_log(msg)
+            self.status.showMessage(
+                "Auto-save watchdog triggered — see neight_autosave.log", 5000
+            )
+
+    def _write_autosave_log(self, message: str):
+        """Append a timestamped line to the autosave diagnostic log.
+        Runs on the UI thread; failures are silently ignored so a broken
+        log path never interrupts the user.
+        """
+        try:
+            log_path = self.settings.log_path
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(f"[{timestamp}] {message}\n")
+        except Exception:
+            pass
 
     def _start_autosave(self):
-        interval = self.settings.load().get("autosave_interval", 5)
+        interval = getattr(self, '_autosave_interval_minutes', 5)
         if interval > 0:
             self.autosave_timer.start(interval * 60 * 1000)
             self.autosave_enabled = True
@@ -2704,7 +2872,6 @@ class Notepad(QMainWindow):
         if not text:
             return False
         self._show_progress_indicator("Searching…")
-        QApplication.processEvents()
         found = self._find_forward(text)
         if found:
             if success_message:
@@ -2724,18 +2891,18 @@ class Notepad(QMainWindow):
         count = 0
         doc = self.editor.document()
 
-        while True:
-            match = doc.find(find_text, cursor)
-            if match.isNull():
-                break
-            match.insertText(replace_text)
-            cursor = match
-            count += 1
-            if count % 50 == 0:
-                self.status.showMessage(f"Replacing… {count}", 0)
-                QApplication.processEvents()
-
-        cursor.endEditBlock()
+        try:
+            while True:
+                match = doc.find(find_text, cursor)
+                if match.isNull():
+                    break
+                match.insertText(replace_text)
+                cursor = match
+                count += 1
+                if count % 50 == 0:
+                    self.status.showMessage(f"Replacing… {count}", 0)
+        finally:
+            cursor.endEditBlock()
         return count
 
     def _show_progress_indicator(self, message: str) -> None:
@@ -3095,27 +3262,56 @@ class Notepad(QMainWindow):
             cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor, 4)
             self.editor.setTextCursor(cursor)
 
-    def _create_url_validate_fn(self, url_input, status_label, validated_url, insert_btn):
-        """Return a validate() closure shared by the image and hyperlink dialogs."""
+    def _create_url_validate_fn(self, url_input, status_label, validated_url, insert_btn, validate_btn=None):
+        """Return a validate() closure shared by the image and hyperlink dialogs.
+
+        Validation runs in a background thread so the UI stays responsive.
+        The polling QTimer is parented to url_input and is therefore stopped
+        automatically if the dialog is closed before validation completes.
+        """
         def validate():
             url = url_input.text().strip()
             if not url:
                 status_label.setText("Please enter a URL")
                 status_label.setStyleSheet("color: red;")
                 return
-            status_label.setText("Validating...")
+            status_label.setText("Validating…")
             status_label.setStyleSheet("color: blue;")
-            QApplication.processEvents()
-            is_valid, result = self._validate_url(url)
-            if is_valid:
-                validated_url[0] = result
-                status_label.setText("✓ URL is valid")
-                status_label.setStyleSheet("color: green;")
-                insert_btn.setEnabled(True)
-            else:
-                validated_url[0] = None
-                status_label.setText(f"✗ {result}")
-                status_label.setStyleSheet("color: red;")
+            insert_btn.setEnabled(False)
+            if validate_btn is not None:
+                validate_btn.setEnabled(False)
+
+            result_box = [None]  # None = pending; (bool, str) = result ready
+
+            def _worker():
+                result_box[0] = self._validate_url(url)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+            # Parent the timer to url_input: Qt will stop and delete it
+            # automatically if the dialog is closed before we finish.
+            timer = QTimer(url_input)
+            timer.setInterval(50)
+
+            def _check():
+                if result_box[0] is None:
+                    return  # still running
+                timer.stop()
+                if validate_btn is not None:
+                    validate_btn.setEnabled(True)
+                is_valid, result = result_box[0]
+                if is_valid:
+                    validated_url[0] = result
+                    status_label.setText("✓ URL is valid")
+                    status_label.setStyleSheet("color: green;")
+                    insert_btn.setEnabled(True)
+                else:
+                    validated_url[0] = None
+                    status_label.setText(f"✗ {result}")
+                    status_label.setStyleSheet("color: red;")
+
+            timer.timeout.connect(_check)
+            timer.start()
         return validate
 
     def _validate_url(self, url: str) -> tuple[bool, str]:
@@ -3205,7 +3401,7 @@ class Notepad(QMainWindow):
         dialog.setLayout(layout)
         
         validated_url = [None]  # Use list to store in closure
-        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn)
+        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn, validate_btn)
         
         def insert():
             url = url_input.text().strip()
@@ -3292,7 +3488,7 @@ class Notepad(QMainWindow):
         dialog.setLayout(layout)
         
         validated_url = [None]  # Use list to store in closure
-        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn)
+        validate = self._create_url_validate_fn(url_input, status_label, validated_url, insert_btn, validate_btn)
         
         def insert():
             text = text_input.text().strip()
@@ -3538,7 +3734,7 @@ class Notepad(QMainWindow):
             
             if has_markdown:
                 # Convert markdown to HTML
-                html = markdown.markdown(
+                html_content = markdown.markdown(
                     markdown_text,
                     extensions=['extra', 'codehilite', 'tables', 'toc']
                 )
@@ -3561,7 +3757,7 @@ class Notepad(QMainWindow):
                     </style>
                 </head>
                 <body>
-                    {html}
+                    {html_content}
                 </body>
                 </html>
                 """
@@ -3573,40 +3769,43 @@ class Notepad(QMainWindow):
                 html_lines = []
                 
                 for line in lines:
+                    # HTML-escape content so user text cannot corrupt PDF HTML structure.
+                    # html.escape does not affect markdown syntax chars (*, #, ~, `).
+                    safe = html.escape(line)
                     # Headers
-                    if line.startswith('######'):
-                        html_lines.append(f'<h6>{line[6:].strip()}</h6>')
-                    elif line.startswith('#####'):
-                        html_lines.append(f'<h5>{line[5:].strip()}</h5>')
-                    elif line.startswith('####'):
-                        html_lines.append(f'<h4>{line[4:].strip()}</h4>')
-                    elif line.startswith('###'):
-                        html_lines.append(f'<h3>{line[3:].strip()}</h3>')
-                    elif line.startswith('##'):
-                        html_lines.append(f'<h2>{line[2:].strip()}</h2>')
-                    elif line.startswith('#'):
-                        html_lines.append(f'<h1>{line[1:].strip()}</h1>')
+                    if safe.startswith('######'):
+                        html_lines.append(f'<h6>{safe[6:].strip()}</h6>')
+                    elif safe.startswith('#####'):
+                        html_lines.append(f'<h5>{safe[5:].strip()}</h5>')
+                    elif safe.startswith('####'):
+                        html_lines.append(f'<h4>{safe[4:].strip()}</h4>')
+                    elif safe.startswith('###'):
+                        html_lines.append(f'<h3>{safe[3:].strip()}</h3>')
+                    elif safe.startswith('##'):
+                        html_lines.append(f'<h2>{safe[2:].strip()}</h2>')
+                    elif safe.startswith('#'):
+                        html_lines.append(f'<h1>{safe[1:].strip()}</h1>')
                     # Horizontal rule
-                    elif line.strip() in ['---', '***', '___']:
+                    elif safe.strip() in ['---', '***', '___']:
                         html_lines.append('<hr>')
                     # Lists
-                    elif line.strip().startswith('- '):
-                        html_lines.append(f'<li>{line.strip()[2:]}</li>')
+                    elif safe.strip().startswith('- '):
+                        html_lines.append(f'<li>{safe.strip()[2:]}</li>')
                     # Bold italic
-                    elif '***' in line:
-                        line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', line)
-                        html_lines.append(f'<p>{line}</p>')
+                    elif '***' in safe:
+                        safe = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', safe)
+                        html_lines.append(f'<p>{safe}</p>')
                     # Bold
-                    elif '**' in line:
-                        line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
-                        html_lines.append(f'<p>{line}</p>')
+                    elif '**' in safe:
+                        safe = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', safe)
+                        html_lines.append(f'<p>{safe}</p>')
                     # Italic
-                    elif '*' in line:
-                        line = re.sub(r'\*(.*?)\*', r'<em>\1</em>', line)
-                        html_lines.append(f'<p>{line}</p>')
+                    elif '*' in safe:
+                        safe = re.sub(r'\*(.*?)\*', r'<em>\1</em>', safe)
+                        html_lines.append(f'<p>{safe}</p>')
                     else:
-                        if line.strip():
-                            html_lines.append(f'<p>{line}</p>')
+                        if safe.strip():
+                            html_lines.append(f'<p>{safe}</p>')
                         else:
                             html_lines.append('<br>')
                 
@@ -3727,7 +3926,7 @@ class Notepad(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Debug Info")
-        dialog.setMinimumSize(560, 420)
+        dialog.setMinimumSize(600, 460)
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)
 
         layout = QVBoxLayout(dialog)
@@ -3745,6 +3944,72 @@ class Notepad(QMainWindow):
         text_box.setPlainText(text)
         text_box.setFont(QFont("Consolas", 9))
         layout.addWidget(text_box)
+
+        # ── File paths section ────────────────────────────────────────────
+        paths_header = QLabel("File Paths", dialog)
+        paths_header.setStyleSheet("font-weight: 600; margin-top: 6px;")
+        layout.addWidget(paths_header)
+
+        warning_label = QLabel(
+            "⚠  Caution: modifying or deleting these files may cause data loss or "
+            "reset your preferences.",
+            dialog
+        )
+        warning_label.setWordWrap(True)
+        warning_label.setStyleSheet(
+            "color: #8B4513; background: #FFF8DC; "
+            "border: 1px solid #DEB887; border-radius: 4px; padding: 6px;"
+        )
+        layout.addWidget(warning_label)
+
+        def _path_row(label_text: str, file_path: Path) -> QWidget:
+            row_widget = QWidget(dialog)
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(f"<b>{label_text}</b>", row_widget)
+            lbl.setFixedWidth(130)
+            path_edit = QLineEdit(str(file_path), row_widget)
+            path_edit.setReadOnly(True)
+            path_edit.setCursorPosition(0)
+            copy_btn = QPushButton()
+            copy_btn.setFixedWidth(28)
+            copy_btn.setFixedHeight(24)
+            copy_icon = QIcon.fromTheme("edit-copy")
+            if copy_icon.isNull():
+                copy_btn.setText("⧉")
+            else:
+                copy_btn.setIcon(copy_icon)
+            copy_btn.setToolTip("Copy path")
+            open_btn = QPushButton()
+            open_btn.setFixedWidth(28)
+            open_btn.setFixedHeight(24)
+            open_icon = QIcon.fromTheme("document-open")
+            if open_icon.isNull():
+                open_btn.setText("▶")
+            else:
+                open_btn.setIcon(open_icon)
+            open_btn.setToolTip("Open in default application")
+            exists_lbl = QLabel(
+                "exists" if file_path.exists() else "not yet created", row_widget
+            )
+            exists_lbl.setStyleSheet(
+                "color: green;" if file_path.exists() else "color: gray;"
+            )
+            exists_lbl.setFixedWidth(110)
+            path_str = str(file_path)
+            copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(path_str))
+            open_btn.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path_str))
+            )
+            row.addWidget(lbl)
+            row.addWidget(path_edit)
+            row.addWidget(copy_btn)
+            row.addWidget(open_btn)
+            row.addWidget(exists_lbl)
+            return row_widget
+
+        layout.addWidget(_path_row("Settings JSON:", self.settings.path))
+        layout.addWidget(_path_row("Autosave Log:", self.settings.log_path))
 
         btn_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
         btn_box.rejected.connect(dialog.reject)
@@ -4421,6 +4686,7 @@ class Notepad(QMainWindow):
         
         # Auto-save interval
         autosave_interval = data.get("autosave_interval", 5)
+        self._autosave_interval_minutes = autosave_interval
         self._update_autosave_menu(autosave_interval)
         
         # Word wrap
@@ -4578,12 +4844,13 @@ class Notepad(QMainWindow):
             else:
                 self._open_file_path(last_file, notify_errors=False, show_status=False)
 
+        self._settings_cache = data
         return True
 
     def _save_preferences(self):
         try:
             font = self.editor.font()
-            data = self.settings.load()
+            data = dict(self._settings_cache)
             if self.isMinimized():
                 normal_geom = self.normalGeometry()
                 size_obj = normal_geom.size() if normal_geom.isValid() else self.size()
@@ -4593,7 +4860,7 @@ class Notepad(QMainWindow):
             height = int(size_obj.height()) if size_obj.height() > 0 else 650
             width = max(width, 300)
             height = max(height, 200)
-            autosave_interval = data.get("autosave_interval", 5)
+            autosave_interval = getattr(self, '_autosave_interval_minutes', data.get("autosave_interval", 5))
             if self.current_path:
                 last_opened_file = self.current_path
             elif not self._restore_last_session:
@@ -4670,6 +4937,7 @@ class Notepad(QMainWindow):
                 ),
             })
             self.settings.save(data)
+            self._settings_cache = data
         except Exception:
             pass
 
@@ -4752,7 +5020,7 @@ class Notepad(QMainWindow):
     def _normalize_search_url_prefix(value, default: str) -> str:
         if isinstance(value, str):
             cleaned = value.strip()
-            if cleaned:
+            if cleaned and cleaned.startswith(("https://", "http://")):
                 return cleaned
         return default
 
@@ -4886,9 +5154,13 @@ class Notepad(QMainWindow):
         self._save_preferences()
 
     def _set_autosave_interval(self, minutes: int):
-        data = self.settings.load()
-        data["autosave_interval"] = minutes
-        self.settings.save(data)
+        self._autosave_interval_minutes = minutes
+        cache = getattr(self, '_settings_cache', {})
+        if not cache:
+            cache = self.settings.load()
+        cache["autosave_interval"] = minutes
+        self.settings.save(cache)
+        self._settings_cache = cache
         self._update_autosave_menu(minutes)
         
         if minutes > 0 and self.current_path:
@@ -5021,10 +5293,17 @@ class Notepad(QMainWindow):
 
     def _on_text_changed(self):
         self._schedule_status_update()
+        # Invalidate the same-word cache so a post-edit highlight scan always runs.
+        self._current_highlight_word = None
         self._update_word_highlights()
 
     def _schedule_status_update(self):
-        self._status_update_timer.start(90)
+        # 250 ms is imperceptible after keyup but collapses rapid-fire bursts
+        # from 10+ toPlainText() calls/sec down to ≤4.
+        self._status_update_timer.start(250)
+
+    def _schedule_word_highlight_update(self):
+        self._word_highlight_timer.start()
 
     def _toggle_status_item(self, item: str, visible: bool):
         """Show/hide an individual status bar counter and persist the change."""
@@ -5085,6 +5364,10 @@ class Notepad(QMainWindow):
         if not self._is_single_word(selected):
             self._clear_word_highlights()
             self._update_word_match_status(None, 0)
+            return
+
+        # Same word already highlighted — skip the full-document scan.
+        if selected == self._current_highlight_word:
             return
 
         self._clear_word_highlights()
@@ -5247,12 +5530,16 @@ class Notepad(QMainWindow):
         self.reading_time_label.setText(f"Read: {estimate} min | Ta {tamil_pct}% En {english_pct}%")
 
     def _update_status_bar(self):
-        text = self.editor.toPlainText()
-        # Only tokenise / count what is actually visible — skip expensive ops when hidden
         show_words = getattr(self, "_status_show_words", True)
         show_sentences = getattr(self, "_status_show_sentences", True)
         show_chars = getattr(self, "_status_show_chars", True)
-        need_tokens = show_words or getattr(self, "_reading_time_enabled", False)
+        reading_time = getattr(self, "_reading_time_enabled", False)
+        # Skip the O(n) toPlainText() copy entirely when nothing needs the document text.
+        if not show_words and not show_sentences and not show_chars and not reading_time:
+            self._update_cursor_position_status()
+            return
+        text = self.editor.toPlainText()
+        need_tokens = show_words or reading_time
         tokens = self._extract_word_tokens(text) if need_tokens else []
         if show_words:
             self.words_label.setText(f"Words: {len(tokens)}")
