@@ -18,7 +18,7 @@ echo Starting PyInstaller build...
 echo.
 
 REM Run PyInstaller
-pyinstaller --name Neight --onefile --windowed --icon neight.ico neight.py
+pyinstaller --name Neight --onefile --windowed --icon neight.ico --add-data "neight.ico;." neight.py
 if errorlevel 1 (
     echo Error: PyInstaller build failed
     pause
