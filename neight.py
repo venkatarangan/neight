@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.031"
+VERSION = "2026.032"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -4564,7 +4564,12 @@ class Notepad(QMainWindow):
             self._word_index_halo_opacity_dark = self._normalize_opacity(halo_dark_spin.value(), 220)
             self._word_index_halo_opacity_light = self._normalize_opacity(halo_light_spin.value(), 230)
 
+            _editor_font = self.editor.font()
             self._apply_theme_preferences()
+            # Re-assert editor font: app.setPalette() can trigger a style repolish
+            # on some platforms (e.g. Windows) that resets widget fonts.  Restoring
+            # the saved font ensures _save_preferences() captures the correct value.
+            self.editor.setFont(_editor_font)
             self._apply_word_index_preferences()
             self._save_preferences()
 
@@ -5076,6 +5081,7 @@ class Notepad(QMainWindow):
         if ok:
             self.editor.setFont(font)
             self._save_preferences()
+            self.status.showMessage(f"Font: {font.family()} {font.pointSize()}pt", 1500)
 
  
 
