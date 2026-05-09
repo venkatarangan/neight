@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.029** | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.034** | [Privacy Policy](PRIVACY.md)
 
 **Neight** is a lightweight text editor for Windows and macOS, built for real writing: Tamil, English, mixed-language drafting, quick notes, Markdown, and distraction-free composition.
 
@@ -94,7 +94,7 @@ Neight's menus are organized by what you are doing, not by how things are implem
 | **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Line Spacing, Margins, Word Wrap |
 | **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Status Bar controls |
-| **Settings** | Auto-save, Appearance, Language Switch |
+| **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch |
 | **Help** | About, Debug Info |
 
 ### Status Bar submenu (under View)
@@ -110,6 +110,8 @@ Every element in the status bar can be individually shown or hidden from **View 
 
 Positions are fixed — hiding one item does not cause the others to shift.
 
+**Quick access:** Click anywhere on the status bar to open this submenu directly, without navigating through the View menu.
+
 ---
 
 ## What Neight Can Do
@@ -123,9 +125,9 @@ Positions are fixed — hiding one item does not cause the others to shift.
 
 ### Writing-focused improvements
 
-- **Gutter Line Numbers** — line numbers alongside each paragraph, similar to code editors. Toggled from **View → Gutter Line Numbers**. Distinct from the status bar cursor-position display.
+- **Gutter Line Numbers** — line numbers alongside each paragraph, similar to code editors. Toggled from **View → Gutter Line Numbers** or with `Ctrl+Shift+L`. Distinct from the status bar cursor-position display.
 - **Adjustable margins** from **Format → Margins** for comfortable reading width
-- **Adjustable line spacing** from **Format → Line Spacing** with five presets: Condensed, Single Line, 1.5 Lines, Double, and Triple
+- **Adjustable line spacing** from **Format → Line Spacing** with five presets: Condensed, Single Line, 1.5 Lines, Double, and Triple. When spacing is above single-line, Neight automatically adds matching top and bottom viewport padding so the first and last visible lines are never clipped at the edge of the window.
 - **Live status bar counts** for words, sentences, and characters — each independently shown or hidden
 - **Word-match highlighting** for single-word selections, with live match count in the status bar
 - **Auto-save** with configurable intervals under **Settings → Auto-save**. Writes are atomic (written to a temporary file first, then renamed over the original) and run on a background thread. If a write fails, the document is marked unsaved and a status-bar message appears. A watchdog resets the state if a write thread becomes unresponsive (e.g., on a slow or disconnected network drive) and logs the event to `neight_autosave.log` in the same folder as `settings.json`.
@@ -133,6 +135,8 @@ Positions are fixed — hiding one item does not cause the others to shift.
 - **Quick Google Search** for selected text with `Ctrl+E`, or for the word under the cursor if nothing is selected
 - **Sorkuvai lookup** for a selected single Tamil word from the right-click context menu
 - **New Window** support for side-by-side writing
+- **Continue where you left off** — enabled by default under **Settings → Continue where you left off**. When on, Neight reopens the last file you had open at startup. Uncheck it to always start with a new empty file. The preference is saved immediately when toggled.
+- **Open With integration** — Neight registers itself as an editor for `.txt` files so it appears in the right-click **Open With** menu. On **Windows**, you can opt in or out from the **Help → Debug Info** dialog (no administrator rights required). On **macOS**, the app bundle already declares `.txt` and `.text` file support; selecting Neight in Finder's Open With menu opens the chosen file correctly.
 - **About** and **Debug Info** under **Help**
 
 ### Status bar
@@ -143,13 +147,15 @@ From left to right:
 
 - **Read:** — estimated reading time (when enabled)
 - **Matches:** — match count when a word is selected and highlighted
-- **Words:** — total word count
+- **Words:** — total word count (clickable — click to toggle the Word Index overlay)
 - **Sentences:** — total sentence count
 - **Chars:** — total character count
 - **Ln / Col** — cursor line and column
 - **Keyboard layout** — current input method on the far right
 
 Any element can be turned off from **View → Status Bar** without affecting the spacing of the others.
+
+**Tip:** Click anywhere on the status bar to open the Status Bar visibility submenu instantly.
 
 ### Performance
 
@@ -359,6 +365,7 @@ Requires the Python `markdown` package (included in [requirements.txt](requireme
 Neight remembers what you would expect a daily-use editor to remember:
 
 - last opened file and directory
+- whether to reopen the last file at startup (Continue where you left off)
 - window size
 - font family and size
 - word wrap state
@@ -486,6 +493,7 @@ pyinstaller --name Neight --windowed --icon neight.icns neight.py
 | Insert Date/Time | F5 |
 | Search with Google | Ctrl+E |
 | Plain-text Paste | Shift+Ctrl+V or Shift+Insert |
+| Gutter Line Numbers | Ctrl+Shift+L |
 | Word Index | Ctrl+Shift+W |
 | Language Switch | Double Ctrl (Win/Linux) or Double ⌃ Control (macOS) |
 | Switch to layout 1 / 2 | Ctrl+, / Ctrl+. |

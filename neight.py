@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.032"
+VERSION = "2026.034"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -37,8 +37,8 @@ from PySide6.QtWidgets import (
     QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
-from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF
+from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -438,6 +438,96 @@ def _activate_klid(klid: str) -> None:
         activate_hkl(hkl)
     elif sys.platform == "darwin":
         _macos_select_source(klid)
+
+
+# ----------------------------------------------------------
+# Windows HKCU file-association helpers (no elevation needed)
+# ----------------------------------------------------------
+_NEIGHT_PROGID = "Neight.txt"
+
+
+def _win_txt_association_registered() -> bool:
+    """Return True if Neight is registered in HKCU as an Open With handler for .txt."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key_path = r"Software\Classes\.txt\OpenWithProgids"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.QueryValueEx(key, _NEIGHT_PROGID)
+        return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _win_register_txt_association() -> None:
+    """Register Neight in HKCU so it appears in the .txt 'Open With' list."""
+    if sys.platform != "win32":
+        return
+    import winreg
+
+    # Resolve exe path (works for both frozen and source-run)
+    exe_path = os.path.abspath(
+        sys.executable if getattr(sys, "frozen", False) else sys.argv[0]
+    )
+
+    # 1. Define the ProgID with a friendly name and open command
+    with winreg.CreateKeyEx(
+        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{_NEIGHT_PROGID}"
+    ) as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Plain Text Document")
+    with winreg.CreateKeyEx(
+        winreg.HKEY_CURRENT_USER,
+        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open\command",
+    ) as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{exe_path}" "%1"')
+
+    # 2. Register the ProgID under .txt OpenWithProgids
+    with winreg.CreateKeyEx(
+        winreg.HKEY_CURRENT_USER, r"Software\Classes\.txt\OpenWithProgids"
+    ) as key:
+        winreg.SetValueEx(key, _NEIGHT_PROGID, 0, winreg.REG_NONE, b"")
+
+    # 3. Notify the shell so Explorer picks up the change immediately
+    SHCNE_ASSOCCHANGED = 0x08000000
+    SHCNF_IDLIST = 0x0000
+    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+
+
+def _win_unregister_txt_association() -> None:
+    """Remove the Neight HKCU .txt Open With registration."""
+    if sys.platform != "win32":
+        return
+    import winreg
+
+    # Remove ProgID value from .txt\OpenWithProgids
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Classes\.txt\OpenWithProgids",
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            winreg.DeleteValue(key, _NEIGHT_PROGID)
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Remove the ProgID subtree (leaf-to-root order)
+    for sub in (
+        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open\command",
+        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open",
+        rf"Software\Classes\{_NEIGHT_PROGID}\shell",
+        rf"Software\Classes\{_NEIGHT_PROGID}",
+    ):
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
+        except (FileNotFoundError, OSError):
+            pass
+
+    # Notify the shell
+    SHCNE_ASSOCCHANGED = 0x08000000
+    SHCNF_IDLIST = 0x0000
+    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
 
 
 # ---------------------
@@ -1978,6 +2068,7 @@ class Notepad(QMainWindow):
 
         self.line_numbers_act = QAction("Gutter Line Numbers", self, checkable=True)
         self.line_numbers_act.setChecked(True)
+        self.line_numbers_act.setShortcut(QKeySequence("Ctrl+Shift+L"))
 
         # Status bar item visibility
         self.status_words_act = QAction("Word Count", self, checkable=True)
@@ -2021,6 +2112,12 @@ class Notepad(QMainWindow):
         # Settings
         self.appearance_act = QAction("Appearance...", self)
         self.keyboards_act = QAction("Language Switch…", self)
+        self.reopen_last_act = QAction("Continue where you left off", self, checkable=True)
+        self.reopen_last_act.setChecked(True)  # default; overridden by _load_preferences
+        self.reopen_last_act.setToolTip(
+            "Reopens the last file you had open when Neight starts.\n"
+            "Uncheck to always start with a new empty file."
+        )
 
         # Advanced (experimental features)
         self.unicode_substring_highlight_act = QAction("Partial Word Highlighting", self, checkable=True)
@@ -2136,14 +2233,19 @@ class Notepad(QMainWindow):
         view_menu.addAction(self.word_index_act)
         view_menu.addAction(self.unicode_substring_highlight_act)
         view_menu.addSeparator()
-        status_bar_menu = view_menu.addMenu("Status Bar")
-        status_bar_menu.addAction(self.status_words_act)
-        status_bar_menu.addAction(self.status_sentences_act)
-        status_bar_menu.addAction(self.status_chars_act)
-        status_bar_menu.addAction(self.reading_time_act)
-        status_bar_menu.addSeparator()
-        status_bar_menu.addAction(self.status_line_act)
-        status_bar_menu.addAction(self.status_col_act)
+        self._status_bar_menu = view_menu.addMenu("Status Bar")
+        self._status_bar_menu.addAction(self.status_words_act)
+        self._status_bar_menu.addAction(self.status_sentences_act)
+        self._status_bar_menu.addAction(self.status_chars_act)
+        self._status_bar_menu.addAction(self.reading_time_act)
+        self._status_bar_menu.addSeparator()
+        self._status_bar_menu.addAction(self.status_line_act)
+        self._status_bar_menu.addAction(self.status_col_act)
+
+        # Clicking anywhere on the status bar opens the Status Bar submenu
+        def _status_bar_clicked(event):
+            self._status_bar_menu.exec(event.globalPosition().toPoint())
+        self.status.mousePressEvent = _status_bar_clicked
 
         settings_menu = menubar.addMenu("&Settings")
         autosave_menu = settings_menu.addMenu("Auto-save")
@@ -2152,6 +2254,7 @@ class Notepad(QMainWindow):
         autosave_menu.addAction(self.autosave_5min_act)
         autosave_menu.addAction(self.autosave_15min_act)
         autosave_menu.addAction(self.autosave_30min_act)
+        settings_menu.addAction(self.reopen_last_act)
         settings_menu.addSeparator()
         settings_menu.addAction(self.appearance_act)
         settings_menu.addAction(self.keyboards_act)
@@ -2260,6 +2363,7 @@ class Notepad(QMainWindow):
 
         # Settings
         self.appearance_act.triggered.connect(self._show_appearance_dialog)
+        self.reopen_last_act.toggled.connect(self._on_reopen_last_toggled)
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
 
         # Advanced (experimental features)
@@ -4035,11 +4139,49 @@ class Notepad(QMainWindow):
         layout.addWidget(_path_row("Settings JSON:", self.settings.path))
         layout.addWidget(_path_row("Autosave Log:", self.settings.log_path))
 
+        # ── Experimental features section (Windows only) ──────────────────
+        if sys.platform == "win32":
+            exp_header = QLabel("Experimental Features", dialog)
+            exp_header.setStyleSheet("font-weight: 600; margin-top: 10px;")
+            layout.addWidget(exp_header)
+
+            chk_txt = QCheckBox("Always show Neight in 'Open With' for .txt files", dialog)
+            chk_txt.setChecked(_win_txt_association_registered())
+            chk_txt.setToolTip(
+                "Registers Neight in your user account (no admin rights required).\n"
+                "Neight will appear in the right-click → Open With menu for .txt files."
+            )
+
+            def _on_txt_assoc_toggled(checked: bool) -> None:
+                try:
+                    if checked:
+                        _win_register_txt_association()
+                    else:
+                        _win_unregister_txt_association()
+                except Exception as exc:
+                    QMessageBox.warning(
+                        dialog,
+                        "Registration Error",
+                        f"Could not update file association:\n{exc}",
+                    )
+                    # Revert checkbox to reflect actual state
+                    chk_txt.blockSignals(True)
+                    chk_txt.setChecked(_win_txt_association_registered())
+                    chk_txt.blockSignals(False)
+
+            chk_txt.toggled.connect(_on_txt_assoc_toggled)
+            layout.addWidget(chk_txt)
+
         btn_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
         btn_box.rejected.connect(dialog.reject)
         layout.addWidget(btn_box)
 
         dialog.exec()
+
+    def _on_reopen_last_toggled(self, checked: bool) -> None:
+        """Persist the 'Continue where you left off' preference immediately."""
+        self._restore_last_session = checked
+        self._save_preferences()
 
     def _show_keyboards_dialog(self):
         dialog = QDialog(self)
@@ -4866,6 +5008,13 @@ class Notepad(QMainWindow):
             except Exception:
                 pass
 
+        # Startup behaviour: reopen last file vs. new empty file
+        reopen = data.get("reopen_last_file_on_launch", True)
+        self._restore_last_session = bool(reopen)
+        self.reopen_last_act.blockSignals(True)
+        self.reopen_last_act.setChecked(self._restore_last_session)
+        self.reopen_last_act.blockSignals(False)
+
         # Last opened file
         last_file = data.get("last_opened_file")
         if self._restore_last_session and isinstance(last_file, str) and last_file:
@@ -4918,6 +5067,7 @@ class Notepad(QMainWindow):
                 "window_maximized": bool(self.isMaximized()),
                 "autosave_interval": autosave_interval,
                 "last_opened_file": last_opened_file,
+                "reopen_last_file_on_launch": self._restore_last_session,
                 "appearance_theme_mode": self._normalize_theme_mode(
                     getattr(self, '_appearance_theme_mode', 'follow_os')
                 ),
@@ -5590,6 +5740,30 @@ class Notepad(QMainWindow):
             event.ignore()
 
 
+class NeightApplication(QApplication):
+    """QApplication subclass that handles macOS QFileOpenEvent (Apple Events / 'Open With')."""
+
+    def __init__(self, argv):
+        super().__init__(argv)
+        self._pending_file_open: Optional[str] = None
+        self._main_window = None  # Set to Notepad instance after window creation
+
+    def event(self, event):
+        if event.type() == QEvent.Type.FileOpen:
+            path = event.file()
+            if path:
+                if self._main_window is not None:
+                    # Post-startup: a file was opened while the app is already running.
+                    win = self._main_window
+                    if win._maybe_save_changes():
+                        win._open_file_path(path)
+                else:
+                    # Pre-startup: buffer so main() can pass it as initial_file.
+                    self._pending_file_open = path
+            return True
+        return super().event(event)
+
+
 def main():
     # Suppress Qt font-database warnings about missing OpenType support for certain
     # scripts (e.g. script 16 = Tamil on macOS with .AppleSystemUIFont).  Must be
@@ -5602,7 +5776,13 @@ def main():
         except Exception:
             pass
 
-    app = QApplication(sys.argv)
+    app = NeightApplication(sys.argv)
+
+    # On macOS, 'Open With' delivers the file via a QFileOpenEvent (Apple Event)
+    # rather than sys.argv. Flush pending events now so any such event is captured
+    # in app._pending_file_open before we decide on initial_file.
+    if sys.platform == "darwin":
+        app.processEvents()
 
     app_icon: Optional[QIcon] = None
     if sys.platform == "win32":
@@ -5637,10 +5817,18 @@ def main():
 
     force_empty_window = "--new-window-empty" in sys.argv[1:]
     initial_file = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
+    # On macOS, prefer a file received via QFileOpenEvent over sys.argv (more reliable).
+    # If argv_emulation already populated sys.argv, initial_file is already set and we skip this.
+    if not initial_file and app._pending_file_open:
+        initial_file = app._pending_file_open
+        app._pending_file_open = None
     window = Notepad(initial_file=initial_file, restore_last_session=not force_empty_window)
     if getattr(window, "_startup_cancelled", False):
         window.deleteLater()
         sys.exit(0)
+
+    # Register the window so post-startup QFileOpenEvents are forwarded to it.
+    app._main_window = window
 
     if sys.platform == "win32" and app_icon is not None:
         window.setWindowIcon(app_icon)

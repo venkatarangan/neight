@@ -33,38 +33,15 @@ echo ""
 echo "Cleaning old build artifacts..."
 rm -rf build
 rm -rf dist/Neight.app
-[ -f "Neight.spec" ] && rm -f Neight.spec
 rm -rf __pycache__ .pytest_cache
 
 echo ""
-echo "Starting PyInstaller .app build..."
+echo "Starting PyInstaller .app build from Neight.spec..."
 
-# Build PyInstaller command
-PYINSTALLER_CMD="pyinstaller"
-PYINSTALLER_CMD="$PYINSTALLER_CMD --name Neight"
-PYINSTALLER_CMD="$PYINSTALLER_CMD --windowed"
-PYINSTALLER_CMD="$PYINSTALLER_CMD --hidden-import=PySide6.QtPrintSupport"
-
-# Add icon if it exists
-if [ -f "neight.icns" ]; then
-    PYINSTALLER_CMD="$PYINSTALLER_CMD --icon=neight.icns"
-else
-    echo "Note: neight.icns not found; building without a custom icon."
-    echo "      Convert neight.ico to neight.icns with:"
-    echo "      sips -s format icns neight.ico --out neight.icns"
-    echo ""
-fi
-
-PYINSTALLER_CMD="$PYINSTALLER_CMD neight.py"
-
-echo "Running: $PYINSTALLER_CMD"
-echo ""
-
-# Run PyInstaller with error capture
-if ! eval "$PYINSTALLER_CMD"; then
+# Run PyInstaller using the committed spec file (preserves info_plist, argv_emulation, etc.)
+if ! pyinstaller Neight.spec; then
     echo ""
     echo "Error: PyInstaller command failed."
-    echo "Command was: $PYINSTALLER_CMD"
     exit 1
 fi
 
