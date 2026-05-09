@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.029"
+VERSION = "2026.031"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -1082,11 +1082,28 @@ class CodeEditor(QPlainTextEdit):
 
         return min(requested_each, max_each)
 
+    def _line_spacing_edge_margin_px(self) -> int:
+        """Extra top/bottom viewport margin to prevent clipping when line spacing > 1.0.
+
+        When line spacing is above single-line, each line is taller than the natural
+        line height, so the first and last visible lines get partially clipped by the
+        viewport edge.  Adding (mult - 1) * lineHeight pixels of padding at both edges
+        gives each line exactly enough room to render fully.  At single-line spacing
+        (mult <= 1.0) this returns 0 so there is no behavioural change.
+        """
+        mult = getattr(self, '_line_spacing_percent', 100.0) / 100.0
+        if mult <= 1.0:
+            return 0
+        return int((mult - 1.0) * self.fontMetrics().height())
+
     def _apply_viewport_margins(self):
         line_area = self.lineNumberAreaWidth()
         text_margin = self._effective_text_margin_px()
-        top_margin = self._word_index_top_margin if self._word_index_visible else 0
-        self.setViewportMargins(line_area + text_margin, top_margin, text_margin, 0)
+        word_index_top = self._word_index_top_margin if self._word_index_visible else 0
+        spacing_edge = self._line_spacing_edge_margin_px()
+        top_margin = word_index_top + spacing_edge
+        bottom_margin = spacing_edge
+        self.setViewportMargins(line_area + text_margin, top_margin, text_margin, bottom_margin)
         self.lineNumberArea.setVisible(self._line_numbers_visible)
 
     def lineNumberAreaSizeHint(self):
@@ -1173,7 +1190,13 @@ class CodeEditor(QPlainTextEdit):
 
     def setFont(self, font):
         super().setFont(font)
+        # Explicitly sync the document's default font.  super().setFont() triggers a
+        # FontChange event which Qt handles internally, but calling setDefaultFont()
+        # directly guarantees the document is in sync regardless of event-loop timing
+        # or platform quirks (e.g. Windows style repolish resetting the widget font).
+        self.document().setDefaultFont(font)
         self._apply_layout_spacing()  # base px changes with font, recalculate
+        self._apply_viewport_margins()  # edge margins depend on fontMetrics().height()
         self.wordIndexOverlay.invalidate_cache()
         self._update_word_index_overlay()
 
@@ -1236,6 +1259,7 @@ class CodeEditor(QPlainTextEdit):
             value = 100.0
         self._line_spacing_percent = value
         self._apply_layout_spacing()
+        self._apply_viewport_margins()
 
     def _apply_layout_spacing(self):
         """Convert stored percent to a multiplier and push to the spacing layout."""
@@ -4723,16 +4747,6 @@ class Notepad(QMainWindow):
         line_spacing_preset = data.get("line_spacing_preset", "single_line")
         self._set_line_spacing_preset(line_spacing_preset, save=False, show_status=False)
 
-        # Font
-        family = data.get("font_family")
-        size = data.get("font_size")
-        if family and isinstance(size, int) and size > 0:
-            try:
-                font = QFont(family, size)
-                self.editor.setFont(font)
-            except Exception:
-                pass
-
         # Keyboard quick switch settings
         try:
             self._installed_imes = get_installed_ime_list()
@@ -4833,6 +4847,17 @@ class Notepad(QMainWindow):
                 data["appearance_custom_bg"] = self._appearance_custom_bg
                 data["appearance_custom_fg"] = self._appearance_custom_fg
                 self.settings.save(data)
+            except Exception:
+                pass
+
+        # Font — applied last so that _apply_theme_preferences() / app.setPalette() cannot
+        # reset the widget font before the user starts typing.
+        family = data.get("font_family")
+        size = data.get("font_size")
+        if family and isinstance(size, int) and size > 0:
+            try:
+                font = QFont(family, size)
+                self.editor.setFont(font)
             except Exception:
                 pass
 
