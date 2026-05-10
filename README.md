@@ -93,9 +93,9 @@ Neight's menus are organized by what you are doing, not by how things are implem
 | **Edit** | Undo/Redo, clipboard, Find/Replace, Go To, Time/Date, Search with Google, blank-line tools, Normalize Unicode |
 | **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Line Spacing, Margins, Word Wrap |
-| **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Status Bar controls |
+| **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Auto-Hide Scrollbar, Status Bar controls |
 | **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch |
-| **Help** | About, Debug Info |
+| **Help** | About, Debug Info, சொல்வெளி (Writer) Mode, பொறியாளர் (Engineer) Mode |
 
 ### Status Bar submenu (under View)
 
@@ -130,14 +130,75 @@ Positions are fixed — hiding one item does not cause the others to shift.
 - **Adjustable line spacing** from **Format → Line Spacing** with five presets: Condensed, Single Line, 1.5 Lines, Double, and Triple. When spacing is above single-line, Neight automatically adds matching top and bottom viewport padding so the first and last visible lines are never clipped at the edge of the window.
 - **Live status bar counts** for words, sentences, and characters — each independently shown or hidden
 - **Word-match highlighting** for single-word selections, with live match count in the status bar
-- **Auto-save** with configurable intervals under **Settings → Auto-save**. Writes are atomic (written to a temporary file first, then renamed over the original) and run on a background thread. If a write fails, the document is marked unsaved and a status-bar message appears. A watchdog resets the state if a write thread becomes unresponsive (e.g., on a slow or disconnected network drive) and logs the event to `neight_autosave.log` in the same folder as `settings.json`.
+- **Auto-save** with configurable intervals under **Settings → Auto-save**. Writes are atomic (written to a temporary file first, then renamed over the original) and run on a background thread. If a write fails, the document is marked unsaved and a status-bar message appears. A watchdog resets the state if a write thread becomes unresponsive (e.g., on a slow or disconnected network drive) and logs the event to a dated diagnostic log file in the same folder as `settings.json` (see [Autosave diagnostic log](#autosave-diagnostic-log) below).
 - **Plain-text paste** with `Shift+Ctrl+V` or `Shift+Insert`
 - **Quick Google Search** for selected text with `Ctrl+E`, or for the word under the cursor if nothing is selected
 - **Sorkuvai lookup** for a selected single Tamil word from the right-click context menu
 - **New Window** support for side-by-side writing
 - **Continue where you left off** — enabled by default under **Settings → Continue where you left off**. When on, Neight reopens the last file you had open at startup. Uncheck it to always start with a new empty file. The preference is saved immediately when toggled.
-- **Open With integration** — Neight registers itself as an editor for `.txt` files so it appears in the right-click **Open With** menu. On **Windows**, you can opt in or out from the **Help → Debug Info** dialog (no administrator rights required). On **macOS**, the app bundle already declares `.txt` and `.text` file support; selecting Neight in Finder's Open With menu opens the chosen file correctly.
+- **Open With integration** — Neight registers itself as an editor for `.txt` files so it appears in the right-click **Open With** menu. On **Windows**, you can opt in or out from the **Help → Debug Info** dialog (no administrator rights required). On **macOS**, the app bundle already declares `.txt` and `.text` file support; selecting Neight in Finder's **Open With** menu opens the chosen file correctly. See [macOS Open With](#macos-open-with) below for details.
+- **Auto-Hide Scrollbar** — toggled from **View → Auto-Hide Scrollbar**. When enabled, the vertical scrollbar stays hidden and briefly flashes visible for 1.5 seconds whenever you scroll or the document changes, then hides again automatically. This keeps the writing area clean without losing scroll feedback. The preference is saved and restored across launches.
 - **About** and **Debug Info** under **Help**
+- **சொல்வெளி (Writer) Mode** under **Help** — see below
+- **பொறியாளர் (Engineer) Mode** under **Help** — see below
+
+### macOS Open With
+
+Neight's macOS app bundle declares support for `.txt` and `.text` files via its `Info.plist`. This means Finder's **Open With** menu lists Neight automatically — no manual configuration required.
+
+**How it works:**
+
+- Right-click any `.txt` or `.text` file in Finder and choose **Open With → Neight**.
+- To make Neight the default for `.txt` files, choose **Open With → Other…**, select Neight, and tick **Always Open With**.
+- When Neight receives a file this way, macOS sends an Apple Event (`QFileOpenEvent`) rather than passing the path through command-line arguments. Neight handles this transparently — the file opens exactly as if you had used **File → Open** from inside the app.
+- Files received via **Open With** before the main window is ready are buffered and opened as soon as the window appears, so nothing is lost even during a cold launch.
+
+> The app bundle targets **Apple Silicon (arm64)**. Intel Mac support would require a separate build on appropriate hardware.
+
+### சொல்வெளி (Writer) Mode
+
+**Help → சொல்வெளி (Writer) Mode** applies a one-click professional writer preset optimised for Tamil prose. It sets all of the following at once and saves preferences atomically:
+
+| Setting | Value applied |
+|---|---|
+| Font | Noto Serif Tamil Regular 24 pt (falls back to any Tamil-script font, then the system default, always at 24 pt) |
+| Line spacing | Double |
+| Text margins | 25% |
+| Word wrap | On |
+| Word Count | Shown |
+| Sentence / Char / Reading Time / Line / Col | Hidden |
+| Auto-save | Every 2 minutes |
+| Gutter line numbers | Off |
+| Continue where you left off | Off |
+| Typing layout | Tamil Anjal (if available on this machine) |
+
+The preset applies to the live UI immediately. All settings are written in a single JSON save so the file is never left partially updated.
+
+---
+
+### பொறியாளர் (Engineer) Mode
+
+**Help → பொறியாளர் (Engineer) Mode** applies a one-click preset optimised for software engineers. All status bar counters are turned on, gutter line numbers are enabled, and the layout is kept compact and information-dense. It sets all of the following at once and saves preferences atomically:
+
+| Setting | Value applied |
+|---|---|
+| Font | Noto Sans Tamil Thin 14 pt (falls back to system default at 14 pt if unavailable) |
+| Line spacing | Single Line |
+| Text margins | 0% |
+| Word wrap | On |
+| Word Count | Shown |
+| Sentence Count | Shown |
+| Character Count | Shown |
+| Reading Time | Shown |
+| Cursor Line | Shown |
+| Cursor Column | Shown |
+| Auto-save | Every 2 minutes |
+| Gutter line numbers | On |
+| Continue where you left off | On |
+
+The preset applies to the live UI immediately. All settings are written in a single JSON save so the file is never left partially updated.
+
+---
 
 ### Status bar
 
@@ -397,14 +458,28 @@ Neight creates and updates `settings.json` automatically.
 
 - On first run, a default settings file is created automatically.
 - If settings are corrupted, a startup prompt shows the file path with three options: **Copy Path**, **Reset to Defaults**, or **Exit**.
+- All numeric settings loaded from the file are validated and clamped before use. A corrupted or maliciously crafted settings file cannot cause a crash, a timer arithmetic error, or an out-of-range value being applied to the UI.
+- Font size is clamped to 4–256 pt; auto-save interval is restricted to the allowed set {0, 2, 5, 15, 30} minutes; font family must be a string.
+
+### File size limit
+
+Neight checks a file's size before reading it. Files larger than **50 MB** are rejected with a clear error message rather than being loaded into memory. This protects against accidental opening of binary files and memory exhaustion from crafted oversized text files.
 
 ### Autosave diagnostic log
 
-If an auto-save write fails or the watchdog detects a hung write thread, Neight appends a timestamped entry to `neight_autosave.log` in the same folder as `settings.json`. The log is never created unless there is something to record.
+If an auto-save write fails or the watchdog detects a hung write thread, Neight appends a timestamped entry to a diagnostic log file in the same folder as `settings.json`. The log is never created unless there is something to record.
+
+The log file is named with today's date: `neight_autosave_YYYY-MM-DD.log` (for example, `neight_autosave_2026-05-11.log`). A new file is started automatically each calendar day, so no single log file grows unbounded over time. Days with no errors produce no file at all.
 
 ### Accessing these files
 
-**Help → Debug Info** shows the exact paths to both `settings.json` and `neight_autosave.log`, with copy and open buttons for each. A warning is shown as a reminder that modifying or deleting them can cause data loss or preference reset.
+**Help → Debug Info** shows the exact paths to both `settings.json` and today's autosave log file, with buttons alongside each:
+
+- **Copy path** — copies the path to the clipboard
+- **Open** — opens the file in your default application
+- **Reset configuration** (Settings JSON row only) — permanently erases all saved preferences and restores factory defaults. A confirmation dialog warns before proceeding. The autosave log for the current day is also cleared. Use with caution and restart Neight afterwards for changes to take effect.
+
+A warning is shown in the dialog as a reminder that modifying or deleting these files can cause data loss or preference reset.
 
 ### Customizable URL prefixes
 

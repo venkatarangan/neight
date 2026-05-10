@@ -1,122 +1,258 @@
-from pathlib import Path
+#!/usr/bin/env python3
+"""
+gen_social_preview.py — GitHub / social-media banner for Neight · சொல்வெளி
+Output: 1280 × 640 px PNG
 
+Light background, green ruled lines, icon palette accents.
+"""
+
+import subprocess, shutil, tempfile
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+# ── Canvas ─────────────────────────────────────────────────────────────────
 WIDTH, HEIGHT = 1280, 640
-CANVAS_BG = (244, 247, 242, 255)
-PANEL_BG = (253, 255, 252, 255)
-PANEL_BORDER = (126, 154, 98, 255)
-TITLE_COLOR = (28, 42, 27, 255)
-TEXT_COLOR = (45, 62, 42, 255)
-ACCENT = (108, 166, 63, 255)
-ACCENT_LIGHT = (165, 210, 130, 255)
 
-ROOT = Path(__file__).resolve().parent
+# ── Palette ────────────────────────────────────────────────────────────────
+BG            = (245, 248, 243, 255)  # warm off-white, slight green tint
+PANEL         = (253, 255, 252, 255)  # near-white panel
+MID_GREEN     = (30,  122,  78, 255)  # #1E7A4E — icon light half
+DARK_GREEN    = (12,   53,  32, 255)  # #0C3520 — icon dark half
+TITLE_COLOR   = (18,   42,  26, 255)  # near-black green for headings
+TEXT_COLOR    = (40,   72,  50, 255)  # body text
+ACCENT        = (30,  122,  78, 255)  # same as MID_GREEN
+ACCENT_DIM    = ( 80, 140, 100, 255)  # sub-tagline, credit
+RULE          = ( 30, 122,  78,  55)  # ruled lines — visible but gentle
+PANEL_BORDER  = (126, 172,  98, 255)  # panel outline
+BADGE_BG      = (232, 242, 234, 255)  # light green chip
+BADGE_BORDER  = ( 30, 122,  78, 200)
+BADGE_TEXT    = (18,   42,  26, 255)
+
+ROOT      = Path(__file__).resolve().parent.parent   # project root (parent of design/)
 ICON_PATH = ROOT / "neight.ico"
-OUT_PATH = ROOT / "social-preview-neight.png"
+OUT_PATH  = ROOT / "social-preview-neight.png"
 
 
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    candidates = []
-    if bold:
-        candidates.extend(
-            [
-                "/System/Library/Fonts/SFNS.ttf",
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                "/Library/Fonts/Arial Bold.ttf",
-            ]
-        )
-    else:
-        candidates.extend(
-            [
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/Library/Fonts/Arial.ttf",
-            ]
-        )
-
-    for candidate in candidates:
-        path = Path(candidate)
-        if path.exists():
-            return ImageFont.truetype(str(path), size=size)
-
-    return ImageFont.load_default()
+def _find_chrome() -> str:
+    candidates = [
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ]
+    for c in candidates:
+        if c and Path(c).exists():
+            return c
+    raise RuntimeError("Chrome/Chromium not found. Install Google Chrome or ensure it is on PATH.")
 
 
-def draw_round_rect(draw: ImageDraw.ImageDraw, box, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+CHROME = _find_chrome()
 
+
+# ── Fonts ──────────────────────────────────────────────────────────────────
+
+def _first_existing(paths: list[str], size: int) -> ImageFont.FreeTypeFont:
+    for p in paths:
+        if Path(p).exists():
+            return ImageFont.truetype(p, size=size)
+    return ImageFont.load_default(size=size)
+
+
+_GILL = "/System/Library/Fonts/Supplemental/GillSans.ttc"
+
+
+def font_bold(size: int) -> ImageFont.FreeTypeFont:
+    if Path(_GILL).exists():
+        return ImageFont.truetype(_GILL, size=size, index=1)   # Gill Sans Bold
+    return _first_existing([
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    ], size)
+
+
+def font_semibold(size: int) -> ImageFont.FreeTypeFont:
+    if Path(_GILL).exists():
+        return ImageFont.truetype(_GILL, size=size, index=4)   # Gill Sans SemiBold
+    return font_bold(size)
+
+
+def font_regular(size: int) -> ImageFont.FreeTypeFont:
+    if Path(_GILL).exists():
+        return ImageFont.truetype(_GILL, size=size, index=0)   # Gill Sans Regular
+    return _first_existing([
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+    ], size)
+
+
+def font_tamil(size: int) -> ImageFont.FreeTypeFont:
+    return _first_existing([
+        str(Path.home() / "Library/Fonts/NotoSerifTamil-VariableFont_wdth,wght.ttf"),
+        "/Library/Fonts/NotoSerifTamil-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSerifTamil-Regular.ttf",
+    ], size)
+
+
+def render_tamil(text: str, font_size: int, color: tuple) -> Image.Image:
+    """Render Tamil text via Chrome headless — Pillow lacks HarfBuzz shaping."""
+    r, g, b = color[:3]
+    _tamil_candidates = [
+        Path.home() / "Library/Fonts/NotoSerifTamil-VariableFont_wdth,wght.ttf",
+        Path("/Library/Fonts/NotoSerifTamil-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSerifTamil-Regular.ttf"),
+    ]
+    font_path = next((p for p in _tamil_candidates if p.exists()), _tamil_candidates[0])
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+@font-face{{font-family:'NotoTamil';src:url('file://{font_path}');font-weight:400;}}
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:transparent;display:inline-block;padding:4px 6px;}}
+span{{font-family:'NotoTamil',serif;font-size:{font_size}px;font-weight:400;
+      color:rgb({r},{g},{b});white-space:nowrap;line-height:1.4;}}
+</style></head><body><span>{text}</span></body></html>"""
+
+    _tmpdir = Path(tempfile.gettempdir())
+    html_p  = _tmpdir / "_ta_preview.html"
+    png_p   = _tmpdir / "_ta_preview.png"
+    html_p.write_text(html, encoding="utf-8")
+    est_w  = font_size * (len(text) + 4) * 2
+    est_h  = font_size * 3
+    subprocess.run(
+        [CHROME, "--headless=new",
+         f"--screenshot={png_p}",
+         f"--window-size={est_w},{est_h}",
+         "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+         "--default-background-color=00000000",
+         str(html_p)],
+        capture_output=True, timeout=25,
+    )
+    rendered = Image.open(png_p).convert("RGBA")
+    bbox = rendered.getbbox()
+    if bbox:
+        rendered = rendered.crop(bbox)
+    html_p.unlink(missing_ok=True)
+    png_p.unlink(missing_ok=True)
+    return rendered
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
 
 def load_icon(size: int) -> Image.Image:
-    with Image.open(ICON_PATH) as icon:
-        icon = icon.convert("RGBA")
-        return icon.resize((size, size), Image.Resampling.LANCZOS)
+    with Image.open(ICON_PATH) as ic:
+        return ic.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
+
+def ruled_lines(draw: ImageDraw.ImageDraw,
+                x0: int, x1: int, y0: int, y1: int,
+                step: int = 30) -> None:
+    y = y0
+    while y <= y1:
+        draw.line([(x0, y), (x1, y)], fill=RULE, width=1)
+        y += step
+
+
+def badge(draw: ImageDraw.ImageDraw, x: int, y: int,
+          label: str, f: ImageFont.FreeTypeFont) -> int:
+    tw  = int(f.getlength(label))
+    bw  = tw + 52
+    bh  = 52
+    box = (x, y, x + bw, y + bh)
+    draw.rounded_rectangle(box, radius=13,
+                           fill=BADGE_BG, outline=BADGE_BORDER, width=2)
+    draw.text((x + bw // 2, y + bh // 2), label,
+              font=f, fill=BADGE_TEXT, anchor="mm")
+    return bw
+
+
+# ── Main ───────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    img = Image.new("RGBA", (WIDTH, HEIGHT), CANVAS_BG)
+
+    # ── Base canvas ─────────────────────────────────────────────────────
+    img  = Image.new("RGBA", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(img)
 
-    # Atmospheric background glow.
-    glow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow)
-    glow_draw.ellipse((760, -80, 1380, 560), fill=(185, 221, 146, 100))
-    glow_draw.ellipse((-220, 290, 500, 900), fill=(145, 190, 108, 90))
-    glow = glow.filter(ImageFilter.GaussianBlur(42))
-    img = Image.alpha_composite(img, glow)
-    draw = ImageDraw.Draw(img)
+    # ── White panel with green border ────────────────────────────────────
+    PAD = 40
+    draw.rounded_rectangle(
+        [(PAD, PAD), (WIDTH - PAD, HEIGHT - PAD)],
+        radius=28, fill=PANEL, outline=PANEL_BORDER, width=5,
+    )
 
-    panel_margin_x = 56
-    panel_margin_y = 42
-    panel_box = (panel_margin_x, panel_margin_y, WIDTH - panel_margin_x, HEIGHT - panel_margin_y)
-    draw_round_rect(draw, panel_box, radius=28, fill=PANEL_BG, outline=PANEL_BORDER, width=6)
+    # ── Vertical separator inside panel ─────────────────────────────────
+    draw.line([(368, PAD + 48), (368, HEIGHT - PAD - 48)],
+              fill=(*MID_GREEN[:3], 80), width=1)
 
-    # Decorative lines inspired by GitHub's social card safe area template.
-    draw.line((82, 118, WIDTH - 82, 118), fill=(153, 182, 126, 160), width=2)
-    draw.line((82, HEIGHT - 118, WIDTH - 82, HEIGHT - 118), fill=(153, 182, 126, 160), width=2)
+    # ── LEFT ZONE — icon + name ──────────────────────────────────────────
+    ICON_SZ = 180
+    ix = PAD + (368 - PAD - ICON_SZ) // 2   # centred in left zone
+    iy = (HEIGHT - ICON_SZ) // 2 - 30
 
-    left = 122
-    top = 140
+    icon_img = load_icon(ICON_SZ)
+    img.alpha_composite(icon_img, (ix, iy))
 
-    icon = load_icon(176)
-    img.alpha_composite(icon, (left, top))
+    # App name under icon — stacked vertically (inline Tamil overflows left zone)
+    nm_en    = font_bold(28)
+    en_text  = "Neight"
+    en_w     = int(nm_en.getlength(en_text))
+    left_w   = 368 - PAD         # usable left-zone width (328 px)
+    ny       = iy + ICON_SZ + 20
 
-    title_font = load_font(94, bold=True)
-    subtitle_font = load_font(44, bold=True)
-    body_font = load_font(36, bold=False)
-    badge_font = load_font(30, bold=True)
+    draw.text((PAD + (left_w - en_w) // 2, ny), en_text,
+              font=nm_en, fill=TITLE_COLOR)
 
-    text_x = left + 210
-    draw.text((text_x, top + 8), "Neight", font=title_font, fill=TITLE_COLOR)
-    draw.text((text_x, top + 112), "Write into the night. Notepad, reimagined.", font=subtitle_font, fill=ACCENT)
+    ta_img = render_tamil("சொல்வெளி", 30, ACCENT)
+    ta_x   = PAD + (left_w - ta_img.width) // 2
+    img.alpha_composite(ta_img, (max(PAD, ta_x), ny + 40))
 
-    body = "Built to feel at home on both Windows 11 and Mac OS."
-    draw.text((left, top + 250), body, font=body_font, fill=TEXT_COLOR)
+    # ── RIGHT ZONE — text ────────────────────────────────────────────────
+    RX = 392   # right zone left margin
+    RM = WIDTH - PAD - 44
+    ty = PAD + 82
 
-    badge_y = top + 330
-    win_badge = (left, badge_y, left + 320, badge_y + 82)
-    mac_badge = (left + 344, badge_y, left + 664, badge_y + 82)
+    # Tagline
+    tl_font = font_bold(60)
+    draw.text((RX, ty), "Write into the night.", font=tl_font, fill=TITLE_COLOR)
 
-    draw_round_rect(draw, win_badge, radius=18, fill=(231, 241, 222, 255), outline=(133, 171, 102, 255), width=3)
-    draw_round_rect(draw, mac_badge, radius=18, fill=(231, 241, 222, 255), outline=(133, 171, 102, 255), width=3)
+    # Sub-tagline
+    sl_font = font_regular(33)
+    draw.text((RX, ty + 76), "Notepad, reimagined.", font=sl_font, fill=ACCENT)
 
-    draw.text((win_badge[0] + 28, win_badge[1] + 23), "Windows 11", font=badge_font, fill=TITLE_COLOR)
-    draw.text((mac_badge[0] + 56, mac_badge[1] + 23), "Mac OS", font=badge_font, fill=TITLE_COLOR)
+    # Horizontal rule
+    draw.line([(RX, ty + 130), (RM, ty + 130)],
+              fill=(*MID_GREEN[:3], 100), width=1)
 
-    # Free & Open Source callout - bottom right
-    oss_font = load_font(32, bold=True)
-    draw.text((WIDTH - 420, HEIGHT - 110), "Free & Open Source", font=oss_font, fill=ACCENT)
+    # Body
+    body_font = font_regular(28)
+    draw.text((RX, ty + 150),
+              "Built to feel at home on both Windows and macOS.",
+              font=body_font, fill=TEXT_COLOR)
+    draw.text((RX, ty + 190),
+              "For Writers and Engineers alike.",
+              font=body_font, fill=TEXT_COLOR)
 
-    # Bottom-right app mark.
-    mark = Image.new("RGBA", (240, 240), (0, 0, 0, 0))
-    md = ImageDraw.Draw(mark)
-    md.ellipse((22, 22, 218, 218), fill=(108, 166, 63, 56), outline=(108, 166, 63, 150), width=3)
-    md.ellipse((68, 68, 172, 172), fill=ACCENT_LIGHT)
-    md.ellipse((102, 78, 186, 162), fill=PANEL_BG)
-    mark = mark.filter(ImageFilter.GaussianBlur(0.4))
-    img.alpha_composite(mark, (WIDTH - 320, HEIGHT - 290))
+    # Platform badges
+    badge_font = font_bold(23)
+    badge_y    = ty + 262
+    bx         = RX
+    for label in ("Windows", "macOS"):
+        bw  = badge(draw, bx, badge_y, label, badge_font)
+        bx += bw + 16
 
-    img.save(OUT_PATH)
-    print(f"Saved: {OUT_PATH}")
+    # Free & Open Source
+    oss_font = font_bold(23)
+    draw.text((RM, badge_y + 26), "Free & Open Source",
+              font=oss_font, fill=ACCENT, anchor="rm")
+
+    # Author credit
+    credit_font = font_regular(20)
+    draw.text((RX, HEIGHT - PAD - 44), "Download from neight.app",
+              font=credit_font, fill=ACCENT_DIM)
+
+    # ── Save ──────────────────────────────────────────────────────────────
+    img.convert("RGB").save(OUT_PATH, quality=95)
+    print(f"Saved → {OUT_PATH}")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.035"
+VERSION = "2026.040"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
-from PySide6.QtGui import QKeySequence, QPainter, QFont, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
+from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
 from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent
 QT_LIB = "PySide6"
 
@@ -563,8 +563,14 @@ class SettingsManager:
         self.corrupted_settings_path: Optional[Path] = None
         self.corrupted_settings_reason: str = ""
         self.last_save_error: str = ""
-        # Autosave diagnostic log — same directory as settings.json.
-        self.log_path: Path = self.path.parent / "neight_autosave.log"
+
+    @property
+    def log_path(self) -> Path:
+        """Return today's dated autosave diagnostic log path.
+        A new file is used each calendar day so no single file grows unbounded.
+        """
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return self.path.parent / f"neight_autosave_{date_str}.log"
 
     def _determine_active_path(self) -> Path:
         """Determine which path to use for settings (primary or fallback)."""
@@ -1090,14 +1096,32 @@ class CodeEditor(QPlainTextEdit):
         self._overlay_dirty_timer.setInterval(150)
         self._overlay_dirty_timer.timeout.connect(self._flush_overlay_update)
 
+        # Cursor-line visibility: one reusable timer, interval=0 → fires once
+        # after the event loop drains.  Restarting an already-pending single-shot
+        # timer is a no-op accumulation guard during fast typing.
+        self._cursor_vis_timer = QTimer(self)
+        self._cursor_vis_timer.setSingleShot(True)
+        self._cursor_vis_timer.setInterval(0)
+        self._cursor_vis_timer.timeout.connect(self._ensure_cursor_line_fully_visible)
+
+        # Auto-hide scrollbar
+        self._auto_hide_scrollbar = False
+        self._scrollbar_hide_timer = QTimer(self)
+        self._scrollbar_hide_timer.setSingleShot(True)
+        self._scrollbar_hide_timer.setInterval(1500)
+        self._scrollbar_hide_timer.timeout.connect(self._on_scrollbar_hide_timer)
+
         # Signals to keep the number area in sync
         self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
         self.updateRequest.connect(self.updateLineNumberArea)
         self.updateRequest.connect(self._sync_word_index_overlay)
         self.cursorPositionChanged.connect(self.updateCurrentLineHighlight)
+        self.cursorPositionChanged.connect(self._schedule_cursor_visibility_check)
         self.document().contentsChange.connect(self._on_document_contents_change)
         self.verticalScrollBar().valueChanged.connect(self._update_word_index_overlay)
         self.horizontalScrollBar().valueChanged.connect(self._update_word_index_overlay)
+        self.verticalScrollBar().valueChanged.connect(lambda _: self._flash_scrollbar())
+        self.blockCountChanged.connect(lambda _: self._flash_scrollbar())
 
         self.updateLineNumberAreaWidth(0)
         self.setWordWrap(True)
@@ -1145,6 +1169,36 @@ class CodeEditor(QPlainTextEdit):
         finally:
             self._refreshing_wrap_layout = False
 
+    # ----- Auto-hide scrollbar -----
+    def setAutoHideScrollbar(self, enabled: bool):
+        self._auto_hide_scrollbar = bool(enabled)
+        vsb = self.verticalScrollBar()
+        if self._auto_hide_scrollbar:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+            vsb.setVisible(False)
+        else:
+            self._scrollbar_hide_timer.stop()
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            # Let Qt decide visibility based on content; don't force show/hide
+
+    def isAutoHideScrollbar(self) -> bool:
+        return self._auto_hide_scrollbar
+
+    def _flash_scrollbar(self):
+        """Show the scrollbar and (re)start the hide countdown."""
+        if not self._auto_hide_scrollbar:
+            return
+        vsb = self.verticalScrollBar()
+        # Only show if there is actually scrollable content
+        if vsb.minimum() == vsb.maximum():
+            return
+        vsb.setVisible(True)
+        self._scrollbar_hide_timer.start()
+
+    def _on_scrollbar_hide_timer(self):
+        if self._auto_hide_scrollbar:
+            self.verticalScrollBar().setVisible(False)
+
     # ----- Line numbers plumbing -----
     def lineNumberAreaWidth(self) -> int:
         if not self._line_numbers_visible:
@@ -1187,14 +1241,46 @@ class CodeEditor(QPlainTextEdit):
         return int((mult - 1.0) * self.fontMetrics().height())
 
     def _apply_viewport_margins(self):
-        line_area = self.lineNumberAreaWidth()
-        text_margin = self._effective_text_margin_px()
-        word_index_top = self._word_index_top_margin if self._word_index_visible else 0
-        spacing_edge = self._line_spacing_edge_margin_px()
-        top_margin = word_index_top + spacing_edge
-        bottom_margin = spacing_edge
-        self.setViewportMargins(line_area + text_margin, top_margin, text_margin, bottom_margin)
-        self.lineNumberArea.setVisible(self._line_numbers_visible)
+        # Guard against re-entry: setViewportMargins triggers updateRequest which
+        # can call back here via updateLineNumberArea → updateLineNumberAreaWidth.
+        if getattr(self, '_applying_margins', False):
+            return
+        self._applying_margins = True
+        try:
+            line_area = self.lineNumberAreaWidth()
+            text_margin = self._effective_text_margin_px()
+            word_index_top = self._word_index_top_margin if self._word_index_visible else 0
+            spacing_edge = self._line_spacing_edge_margin_px()
+            top_margin = word_index_top + spacing_edge
+            bottom_margin = spacing_edge
+            self.setViewportMargins(line_area + text_margin, top_margin, text_margin, bottom_margin)
+
+            # Snap: ensure the viewport height is an exact multiple of the actual
+            # rendered line height so no partial line is visible at the bottom.
+            # Use blockBoundingRect on the first block for the true pixel height
+            # (QPlainTextDocumentLayout uses height(), not lineSpacing()).
+            # Divide by the visual line count in case the first block is wrapped.
+            _snap_block = self.document().firstBlock()
+            if (_snap_block.isValid()
+                    and _snap_block.layout() is not None
+                    and _snap_block.layout().lineCount() > 0):
+                _n = _snap_block.layout().lineCount()
+                spaced = max(1, int(round(
+                    self.blockBoundingRect(_snap_block).height() / _n
+                )))
+            else:
+                spaced = max(1, self.fontMetrics().height())
+            vh = self.viewport().height()
+            remainder = vh % spaced
+            if remainder > 0:
+                self.setViewportMargins(
+                    line_area + text_margin, top_margin,
+                    text_margin, bottom_margin + remainder,
+                )
+
+            self.lineNumberArea.setVisible(self._line_numbers_visible)
+        finally:
+            self._applying_margins = False
 
     def lineNumberAreaSizeHint(self):
         return self.sizeHint().expandedTo(self.viewport().size())
@@ -1277,6 +1363,20 @@ class CodeEditor(QPlainTextEdit):
             return
         # Keep simple; rely on palette for current line appearance.
         pass
+
+    def _schedule_cursor_visibility_check(self):
+        """Defer cursor-line visibility check to after Qt finishes its own scrolling.
+        Restarting an already-pending QTimer is free — no new object created."""
+        self._cursor_vis_timer.start()
+
+    def _ensure_cursor_line_fully_visible(self):
+        """If the cursor's line is clipped at the viewport bottom, scroll to reveal it."""
+        cr = self.cursorRect()
+        vr = self.viewport().rect()
+        overshoot = cr.bottom() - vr.bottom()
+        if overshoot > 0:
+            vsb = self.verticalScrollBar()
+            vsb.setValue(vsb.value() + overshoot)
 
     def setFont(self, font):
         super().setFont(font)
@@ -1889,6 +1989,9 @@ class Notepad(QMainWindow):
         self._status_show_line = True
         self._status_show_col = True
 
+        # Scroll bar
+        self._auto_hide_scrollbar = False
+
         # Experimental features (defaults; overridden in _load_preferences)
         self._unicode_substring_highlight = False
         self._reading_time_enabled = False
@@ -1920,6 +2023,10 @@ class Notepad(QMainWindow):
 
         # In-memory cache of the settings dict — avoids a disk read on every save.
         self._settings_cache: dict = {}
+
+        # Set to True after a deliberate reset so closeEvent does not
+        # overwrite the freshly-emptied settings file with stale in-memory state.
+        self._settings_reset_pending: bool = False
 
         # Autosave background-thread state.
         self._autosave_in_progress: bool = False
@@ -2119,6 +2226,10 @@ class Notepad(QMainWindow):
             "Uncheck to always start with a new empty file."
         )
 
+        # Scroll bar
+        self.auto_hide_scrollbar_act = QAction("Auto-Hide Scrollbar", self, checkable=True)
+        self.auto_hide_scrollbar_act.setChecked(False)
+
         # Advanced (experimental features)
         self.unicode_substring_highlight_act = QAction("Partial Word Highlighting", self, checkable=True)
         self.unicode_substring_highlight_act.setChecked(False)
@@ -2130,6 +2241,18 @@ class Notepad(QMainWindow):
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
+        self.solveli_act = QAction("சொல்வெளி (Writer) Mode", self)
+        self.solveli_act.setToolTip(
+            "Configures a set of preferred settings for professional Tamil writers: "
+            "generous margins, double spacing, a large Tamil serif font, clean status bar, "
+            "auto-save, word wrap, and Tamil Anjal typing layout."
+        )
+        self.engineer_act = QAction("பொறியாளர் (Engineer) Mode", self)
+        self.engineer_act.setToolTip(
+            "Applies a preset optimised for software engineers: all status bar counters on, "
+            "gutter line numbers, single spacing, zero margins, a compact monospace-friendly "
+            "Tamil sans font, auto-save every 2 minutes, and full session restore."
+        )
 
     def _create_menus(self):
         menubar = self.menuBar()
@@ -2232,6 +2355,7 @@ class Notepad(QMainWindow):
         view_menu.addAction(self.line_numbers_act)
         view_menu.addAction(self.word_index_act)
         view_menu.addAction(self.unicode_substring_highlight_act)
+        view_menu.addAction(self.auto_hide_scrollbar_act)
         view_menu.addSeparator()
         self._status_bar_menu = view_menu.addMenu("Status Bar")
         self._status_bar_menu.addAction(self.status_words_act)
@@ -2260,6 +2384,9 @@ class Notepad(QMainWindow):
         settings_menu.addAction(self.keyboards_act)
 
         help_menu = menubar.addMenu("&Help")
+        help_menu.addAction(self.solveli_act)
+        help_menu.addAction(self.engineer_act)
+        help_menu.addSeparator()
         help_menu.addAction(self.about_act)
         help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
@@ -2366,6 +2493,9 @@ class Notepad(QMainWindow):
         self.reopen_last_act.toggled.connect(self._on_reopen_last_toggled)
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
 
+        # Scroll bar
+        self.auto_hide_scrollbar_act.toggled.connect(self._toggle_auto_hide_scrollbar)
+
         # Advanced (experimental features)
         self.reading_time_act.triggered.connect(self._show_reading_time_dialog)
         self.word_index_act.toggled.connect(self._toggle_word_index)
@@ -2375,6 +2505,8 @@ class Notepad(QMainWindow):
         # Help
         self.about_act.triggered.connect(self.show_about)
         self.debug_info_act.triggered.connect(self._show_debug_info)
+        self.solveli_act.triggered.connect(self._apply_solveli_preset)
+        self.engineer_act.triggered.connect(self._apply_engineer_preset)
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
@@ -2606,6 +2738,10 @@ class Notepad(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "New Window Failed", f"Could not open a new window:\n{e}")
 
+    # Maximum file size accepted for opening (50 MB). Prevents memory exhaustion
+    # from a maliciously large or accidental binary file.
+    _MAX_OPEN_FILE_BYTES: int = 50 * 1024 * 1024
+
     def _open_file_path(self, path: Path | str, *, notify_errors: bool = True, show_status: bool = True) -> bool:
         try:
             path_obj = Path(path).expanduser()
@@ -2617,6 +2753,25 @@ class Notepad(QMainWindow):
         if not path_obj.exists() or not path_obj.is_file():
             if notify_errors:
                 QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
+            return False
+
+        try:
+            file_size = path_obj.stat().st_size
+        except Exception as e:
+            if notify_errors:
+                QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
+            return False
+
+        if file_size > self._MAX_OPEN_FILE_BYTES:
+            limit_mb = self._MAX_OPEN_FILE_BYTES // (1024 * 1024)
+            actual_mb = file_size / (1024 * 1024)
+            if notify_errors:
+                QMessageBox.warning(
+                    self,
+                    "File Too Large",
+                    f"This file is {actual_mb:.1f} MB, which exceeds the {limit_mb} MB limit.\n\n"
+                    "Neight is a plain-text editor and is not designed for very large files.",
+                )
             return False
 
         try:
@@ -2830,7 +2985,7 @@ class Notepad(QMainWindow):
                    f"path={self.current_path!r}")
             self._write_autosave_log(msg)
             self.status.showMessage(
-                "Auto-save watchdog triggered — see neight_autosave.log", 5000
+                "Auto-save watchdog triggered — check today's autosave log in Help › Debug Info", 5000
             )
 
     def _write_autosave_log(self, message: str):
@@ -3973,20 +4128,36 @@ class Notepad(QMainWindow):
             )
 
     def show_about(self):
-        QMessageBox.information(
-            self,
-            "About",
-            f"""
-            <b>Neight v{VERSION}</b> (Using {QT_LIB})<br><br>
-
-            A lightweight Unicode text editor with advanced features, word count, line numbers and more.<br><br>
-            
-            Brewed at <a href='https://venkatarangan.com'>venkatarangan.com</a> with GitHub Copilot and Madras filter coffee.<br><br>
-            
-            <span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br><br>
-            <span style='color:#666;'>Full details: <a href='https://github.com/venkatarangan/neight/blob/main/README.md'>README</a> | <a href='https://github.com/venkatarangan/neight/blob/main/PRIVACY.md'>Privacy</a></span>
-            """
+        msg = QMessageBox(self)
+        msg.setWindowTitle("About")
+        msg.setText(
+            f"<b>Neight v{VERSION}</b> (Using {QT_LIB})<br><br>"
+            "A lightweight Unicode text editor with advanced features, word count, line numbers and more.<br><br>"
+            "Brewed at <a href='https://venkatarangan.com'>venkatarangan.com</a> with GitHub Copilot and Madras filter coffee.<br><br>"
+            "<span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br><br>"
+            "<span style='color:#666;'>Full details: "
+            "<a href='https://github.com/venkatarangan/neight/blob/main/README.md'>README</a> | "
+            "<a href='https://github.com/venkatarangan/neight/blob/main/PRIVACY.md'>Privacy</a></span>"
         )
+        # Use the app's own icon instead of the platform information icon.
+        icon = self.windowIcon()
+        if icon.isNull():
+            # macOS frozen build: icon is in Contents/Resources/ next to the bundle.
+            if sys.platform == "darwin" and getattr(sys, "frozen", False):
+                icns_path = Path(sys.executable).resolve().parent.parent / "Resources" / "neight.icns"
+                if icns_path.exists():
+                    icon = QIcon(str(icns_path))
+            if icon.isNull():
+                # Source / dev run fallback — check both icon formats.
+                for _name in ("neight.icns", "neight.ico"):
+                    _p = Path(__file__).resolve().parent / _name
+                    if _p.exists():
+                        icon = QIcon(str(_p))
+                        if not icon.isNull():
+                            break
+        if not icon.isNull():
+            msg.setIconPixmap(icon.pixmap(64, 64))
+        msg.exec()
 
     def _show_debug_info(self):
         """Show a dialog with diagnostic information useful for bug reports."""
@@ -4136,7 +4307,62 @@ class Notepad(QMainWindow):
             row.addWidget(exists_lbl)
             return row_widget
 
-        layout.addWidget(_path_row("Settings JSON:", self.settings.path))
+        settings_row_widget = _path_row("Settings JSON:", self.settings.path)
+        settings_row_layout = settings_row_widget.layout()
+        reset_btn = QPushButton()
+        reset_btn.setFixedWidth(28)
+        reset_btn.setFixedHeight(24)
+        reset_icon = QIcon.fromTheme("view-refresh")
+        if reset_icon.isNull():
+            reset_btn.setText("↺")
+        else:
+            reset_btn.setIcon(reset_icon)
+        reset_btn.setToolTip("Reset configuration")
+
+        def _confirm_reset():
+            reply = QMessageBox.warning(
+                dialog,
+                "Reset Configuration",
+                "This will permanently erase your current configuration and restore all "
+                "settings to their factory defaults.\n\n"
+                "All customizations — including appearance, preferences, and behavior "
+                "options — will be lost and cannot be recovered.\n\n"
+                "Use with caution. Restart Neight after resetting for changes to take effect.\n\n"
+                "Are you sure you want to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if reply == QMessageBox.Yes:
+                if not self.settings.save({}):
+                    QMessageBox.critical(
+                        dialog,
+                        "Reset Failed",
+                        "Could not reset the configuration file:\n\n"
+                        f"{self.settings.last_save_error or 'Unknown error'}",
+                    )
+                    return
+                log_path = self.settings.log_path
+                if log_path.exists():
+                    try:
+                        log_path.write_text("", encoding="utf-8")
+                    except Exception as exc:
+                        QMessageBox.warning(
+                            dialog,
+                            "Log Clear Failed",
+                            f"Configuration was reset, but the autosave log could not be cleared:\n\n{exc}",
+                        )
+                # Clear the in-memory cache so _save_preferences cannot
+                # overwrite the empty file with stale current-session values.
+                self._settings_cache = {}
+                self._settings_reset_pending = True
+                self.status.showMessage(
+                    "Configuration reset to defaults. Restart Neight to apply.", 5000
+                )
+
+        reset_btn.clicked.connect(_confirm_reset)
+        # Insert reset button between the open button and the status label
+        settings_row_layout.insertWidget(settings_row_layout.count() - 1, reset_btn)
+        layout.addWidget(settings_row_widget)
         layout.addWidget(_path_row("Autosave Log:", self.settings.log_path))
 
         # ── Experimental features section (Windows only) ──────────────────
@@ -4855,8 +5081,15 @@ class Notepad(QMainWindow):
 
         self._restore_maximized = bool(data.get("window_maximized", False))
         
-        # Auto-save interval
-        autosave_interval = data.get("autosave_interval", 5)
+        # Auto-save interval — clamp to known valid values; reject any non-int
+        # to prevent TypeError in _start_autosave (interval * 60 * 1000).
+        _VALID_AUTOSAVE = {0, 2, 5, 15, 30}
+        try:
+            autosave_interval = int(data.get("autosave_interval", 5))
+        except (TypeError, ValueError):
+            autosave_interval = 5
+        if autosave_interval not in _VALID_AUTOSAVE:
+            autosave_interval = 5
         self._autosave_interval_minutes = autosave_interval
         self._update_autosave_menu(autosave_interval)
         
@@ -4869,6 +5102,14 @@ class Notepad(QMainWindow):
         line_numbers_visible = data.get("line_numbers_visible", True)
         self.line_numbers_act.setChecked(bool(line_numbers_visible))
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
+
+        # Auto-hide scrollbar
+        auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
+        self._auto_hide_scrollbar = auto_hide_scrollbar
+        self.auto_hide_scrollbar_act.blockSignals(True)
+        self.auto_hide_scrollbar_act.setChecked(auto_hide_scrollbar)
+        self.auto_hide_scrollbar_act.blockSignals(False)
+        self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
 
         # Status bar item visibility
         self._status_show_words = bool(data.get("status_show_words", True))
@@ -5001,9 +5242,15 @@ class Notepad(QMainWindow):
         # reset the widget font before the user starts typing.
         family = data.get("font_family")
         size = data.get("font_size")
-        if family and isinstance(size, int) and size > 0:
+        if family and isinstance(family, str) and isinstance(size, int) and 4 <= size <= 256:
             try:
                 font = QFont(family, size)
+                raw_weight = data.get("font_weight")
+                if raw_weight is not None:
+                    try:
+                        font.setWeight(QFont.Weight(int(raw_weight)))
+                    except Exception:
+                        pass
                 self.editor.setFont(font)
             except Exception:
                 pass
@@ -5027,6 +5274,8 @@ class Notepad(QMainWindow):
         return True
 
     def _save_preferences(self):
+        if getattr(self, '_settings_reset_pending', False):
+            return
         try:
             font = self.editor.font()
             data = dict(self._settings_cache)
@@ -5051,6 +5300,7 @@ class Notepad(QMainWindow):
             data.update({
                 "word_wrap": self.editor.isWordWrap(),
                 "line_numbers_visible": self.editor.isLineNumbersVisible(),
+                "auto_hide_scrollbar": getattr(self, '_auto_hide_scrollbar', False),
                 "status_show_words": getattr(self, "_status_show_words", True),
                 "status_show_sentences": getattr(self, "_status_show_sentences", True),
                 "status_show_chars": getattr(self, "_status_show_chars", True),
@@ -5062,6 +5312,7 @@ class Notepad(QMainWindow):
                 "text_margin_percent": self.editor.textMarginPercent(),
                 "font_family": font.family(),
                 "font_size": int(font.pointSize()) if font.pointSize() > 0 else 12,
+                "font_weight": int(font.weight()),
                 "default_directory": str(self.default_directory),
                 "window_size": {"width": width, "height": height},
                 "window_maximized": bool(self.isMaximized()),
@@ -5228,12 +5479,275 @@ class Notepad(QMainWindow):
     def change_font(self):
         current_font = self.editor.font()
         ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
+
+    def _apply_solveli_preset(self):
+        """Apply the சொல்வெளி (Writer) Mode professional-writer preset.
+
+        Settings applied:
+          - Margins: 25 %
+          - Line spacing: Double
+          - Font: Noto Serif Tamil Regular 24 pt
+                  (falls back to the first available Tamil-script font at 24 pt)
+          - Status bar: Words ON; Sentences/Chars/Reading Time/Line/Col OFF
+          - Auto-save: 2 minutes
+          - Word wrap: ON
+          - Continue where you left off: OFF
+          - Gutter line numbers: OFF
+          - Typing layout: Tamil Anjal (if available on this machine)
+
+        Everything is applied to the live UI immediately and persisted with a
+        single JSON write so the file is never left in a partial/corrupt state.
+        """
+        # ── 1. Margins ──────────────────────────────────────────────────────
+        self.editor.setTextMarginPercent(25)
+        for act, val in [
+            (self.margin_5_act, 5), (self.margin_10_act, 10),
+            (self.margin_15_act, 15), (self.margin_20_act, 20),
+            (self.margin_25_act, 25),
+        ]:
+            act.blockSignals(True)
+            act.setChecked(val == 25)
+            act.blockSignals(False)
+
+        # ── 2. Line spacing ─────────────────────────────────────────────────
+        self._line_spacing_preset = "double"
+        self._apply_line_spacing_to_document(self._line_spacing_percent_for_preset("double"))
+        self._update_line_spacing_menu("double")
+
+        # ── 3. Font ─────────────────────────────────────────────────────────
+        # Priority: Noto Serif Tamil  →  any Tamil-script font  →  system default.
+        # QFontDatabase.WritingSystem.Tamil works on macOS and Windows (Qt6).
+        target_family = "Noto Serif Tamil"
+        all_families = QFontDatabase.families()
+        found_family = next(
+            (f for f in all_families if f.lower() == target_family.lower()), None
+        )
+        if found_family is None:
+            # Fall back to the first font the OS advertises for the Tamil script.
+            try:
+                tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
+                found_family = tamil_families[0] if tamil_families else None
+            except Exception:
+                found_family = None
+
+        if found_family:
+            new_font = QFont(found_family, 24)
+        else:
+            # No Tamil font found at all — use the application default at 24 pt.
+            new_font = QFont()
+            new_font.setPointSize(24)
+        new_font.setWeight(QFont.Weight.Normal)              # Regular (400)
+        self.editor.setFont(new_font)
+
+        # ── 4. Status bar ────────────────────────────────────────────────────
+        # Words: ON
+        self._status_show_words = True
+        self.words_label.setVisible(True)
+        self.status_words_act.blockSignals(True)
+        self.status_words_act.setChecked(True)
+        self.status_words_act.blockSignals(False)
+
+        # Sentences: OFF
+        self._status_show_sentences = False
+        self.sentences_label.setVisible(False)
+        self.sentences_label.setText("")
+        self.status_sentences_act.blockSignals(True)
+        self.status_sentences_act.setChecked(False)
+        self.status_sentences_act.blockSignals(False)
+
+        # Chars: OFF
+        self._status_show_chars = False
+        self.chars_label.setVisible(False)
+        self.chars_label.setText("")
+        self.status_chars_act.blockSignals(True)
+        self.status_chars_act.setChecked(False)
+        self.status_chars_act.blockSignals(False)
+
+        # Reading Time: OFF
+        self._reading_time_enabled = False
+        self.reading_time_label.setVisible(False)
+        self.reading_time_label.setText("")
+
+        # Cursor Line: OFF
+        self._status_show_line = False
+        self.line_label.setVisible(False)
+        self.line_label.setText("")
+        self.status_line_act.blockSignals(True)
+        self.status_line_act.setChecked(False)
+        self.status_line_act.blockSignals(False)
+
+        # Cursor Column: OFF
+        self._status_show_col = False
+        self.col_label.setVisible(False)
+        self.col_label.setText("")
+        self.status_col_act.blockSignals(True)
+        self.status_col_act.setChecked(False)
+        self.status_col_act.blockSignals(False)
+
+        # ── 5. Auto-save ─────────────────────────────────────────────────────
+        self._autosave_interval_minutes = 2
+        self._update_autosave_menu(2)
+        if self.current_path:
+            self.autosave_timer.start(2 * 60 * 1000)
+            self.autosave_enabled = True
+
+        # ── 6. Word wrap ─────────────────────────────────────────────────────
+        self.editor.setWordWrap(True)
+        self.wrap_act.blockSignals(True)
+        self.wrap_act.setChecked(True)
+        self.wrap_act.blockSignals(False)
+
+        # ── 7. Continue where you left off ───────────────────────────────────
+        self._restore_last_session = False
+        self.reopen_last_act.blockSignals(True)
+        self.reopen_last_act.setChecked(False)
+        self.reopen_last_act.blockSignals(False)
+
+        # ── 8. Gutter line numbers ───────────────────────────────────────────
+        self.editor.setLineNumbersVisible(False)
+        self.line_numbers_act.blockSignals(True)
+        self.line_numbers_act.setChecked(False)
+        self.line_numbers_act.blockSignals(False)
+
+        # ── 9. One atomic JSON write ──────────────────────────────────────────
+        self._save_preferences()
+
+        # ── 10. Tamil Anjal typing layout ────────────────────────────────────
+        # Done after the save so a layout-switch failure cannot corrupt JSON.
+        if TAMIL_CHOICE:
+            try:
+                switch_to_tamil_anjal()
+                self._current_layout = 1
+            except Exception:
+                pass   # Layout unavailable on this machine — silently skip.
+
+        # Refresh word count display immediately.
+        self._update_status_bar()
+        self.status.showMessage("சொல்வெளி (Writer) Mode applied", 3000)
+
+    def _apply_engineer_preset(self):
+        """Apply the பொறியாளர் (Engineer) Mode preset.
+
+        Settings applied:
+          - Margins: 0 %
+          - Line spacing: Single Line
+          - Font: Noto Sans Tamil Thin 14 pt
+                  (falls back to system default at 14 pt if unavailable)
+          - Status bar: Words, Sentences, Chars, Reading Time, Line, Col — all ON
+          - Auto-save: 2 minutes
+          - Word wrap: ON
+          - Continue where you left off: ON
+          - Gutter line numbers: ON
+
+        Everything is applied to the live UI immediately and persisted with a
+        single atomic JSON write so the file is never left in a partial state.
+        """
+        # ── 1. Margins ──────────────────────────────────────────────────────
+        self._set_text_margin_percent(0, save=False, show_status=False)
+
+        # ── 2. Line spacing ─────────────────────────────────────────────────
+        self._line_spacing_preset = "single_line"
+        self._apply_line_spacing_to_document(
+            self._line_spacing_percent_for_preset("single_line")
+        )
+        self._update_line_spacing_menu("single_line")
+
+        # ── 3. Font ─────────────────────────────────────────────────────────
+        # Target: Noto Sans Tamil Thin 14 pt.
+        # Fallback: system default at 14 pt (no Tamil-specific fallback — this
+        # preset is not Tamil-exclusive, so a generic default is appropriate).
+        target_family = "Noto Sans Tamil"
+        all_families = QFontDatabase.families()
+        found_family = next(
+            (f for f in all_families if f.lower() == target_family.lower()), None
+        )
+        if found_family:
+            new_font = QFont(found_family, 14)
+            new_font.setWeight(QFont.Weight.Thin)   # 100 — lightest available
+        else:
+            new_font = QFont()
+            new_font.setPointSize(14)
+        self.editor.setFont(new_font)
+
+        # ── 4. Status bar — all counters ON ──────────────────────────────────
+        # Words
+        self._status_show_words = True
+        self.words_label.setVisible(True)
+        self.status_words_act.blockSignals(True)
+        self.status_words_act.setChecked(True)
+        self.status_words_act.blockSignals(False)
+
+        # Sentences
+        self._status_show_sentences = True
+        self.sentences_label.setVisible(True)
+        self.status_sentences_act.blockSignals(True)
+        self.status_sentences_act.setChecked(True)
+        self.status_sentences_act.blockSignals(False)
+
+        # Chars
+        self._status_show_chars = True
+        self.chars_label.setVisible(True)
+        self.status_chars_act.blockSignals(True)
+        self.status_chars_act.setChecked(True)
+        self.status_chars_act.blockSignals(False)
+
+        # Reading Time
+        self._reading_time_enabled = True
+        self.reading_time_label.setVisible(True)
+
+        # Cursor Line
+        self._status_show_line = True
+        self.line_label.setVisible(True)
+        self.status_line_act.blockSignals(True)
+        self.status_line_act.setChecked(True)
+        self.status_line_act.blockSignals(False)
+
+        # Cursor Column
+        self._status_show_col = True
+        self.col_label.setVisible(True)
+        self.status_col_act.blockSignals(True)
+        self.status_col_act.setChecked(True)
+        self.status_col_act.blockSignals(False)
+
+        # ── 5. Auto-save ─────────────────────────────────────────────────────
+        self._autosave_interval_minutes = 2
+        self._update_autosave_menu(2)
+        if self.current_path:
+            self.autosave_timer.start(2 * 60 * 1000)
+            self.autosave_enabled = True
+
+        # ── 6. Word wrap ─────────────────────────────────────────────────────
+        self.editor.setWordWrap(True)
+        self.wrap_act.blockSignals(True)
+        self.wrap_act.setChecked(True)
+        self.wrap_act.blockSignals(False)
+
+        # ── 7. Continue where you left off ───────────────────────────────────
+        self._restore_last_session = True
+        self.reopen_last_act.blockSignals(True)
+        self.reopen_last_act.setChecked(True)
+        self.reopen_last_act.blockSignals(False)
+
+        # ── 8. Gutter line numbers ───────────────────────────────────────────
+        self.editor.setLineNumbersVisible(True)
+        self.line_numbers_act.blockSignals(True)
+        self.line_numbers_act.setChecked(True)
+        self.line_numbers_act.blockSignals(False)
+
+        # ── 9. One atomic JSON write ──────────────────────────────────────────
+        self._save_preferences()
+
+        # Refresh status bar display immediately.
+        self._update_status_bar()
+        self.status.showMessage("பொறியாளர் (Engineer) Mode applied", 3000)
+
+    def change_font(self):
+        current_font = self.editor.font()
+        ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
         if ok:
             self.editor.setFont(font)
             self._save_preferences()
             self.status.showMessage(f"Font: {font.family()} {font.pointSize()}pt", 1500)
-
- 
 
     def _toggle_unicode_substring_highlight(self, enabled: bool):
         self._unicode_substring_highlight = bool(enabled)
@@ -5254,6 +5768,11 @@ class Notepad(QMainWindow):
 
     def _toggle_line_numbers(self, enabled: bool):
         self.editor.setLineNumbersVisible(bool(enabled))
+        self._save_preferences()
+
+    def _toggle_auto_hide_scrollbar(self, enabled: bool):
+        self._auto_hide_scrollbar = bool(enabled)
+        self.editor.setAutoHideScrollbar(self._auto_hide_scrollbar)
         self._save_preferences()
 
     def _set_line_spacing_preset(self, preset: str, *, save: bool = True, show_status: bool = True):
@@ -5734,7 +6253,8 @@ class Notepad(QMainWindow):
     # Confirm close with save prompt and persist settings
     def closeEvent(self, event):
         if self._maybe_save_changes():
-            self._save_preferences()
+            if not getattr(self, '_settings_reset_pending', False):
+                self._save_preferences()
             event.accept()
         else:
             event.ignore()
