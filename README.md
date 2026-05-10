@@ -169,6 +169,8 @@ Neight's macOS app bundle declares support for `.txt` and `.text` files via its 
 | Sentence / Char / Reading Time / Line / Col | Hidden |
 | Auto-save | Every 2 minutes |
 | Gutter line numbers | Off |
+| Auto-hide scrollbar | On |
+| Partial word highlighting | Off |
 | Continue where you left off | Off |
 | Typing layout | Tamil Anjal (if available on this machine) |
 
@@ -194,6 +196,8 @@ The preset applies to the live UI immediately. All settings are written in a sin
 | Cursor Column | Shown |
 | Auto-save | Every 2 minutes |
 | Gutter line numbers | On |
+| Auto-hide scrollbar | Off |
+| Partial word highlighting | On |
 | Continue where you left off | On |
 
 The preset applies to the live UI immediately. All settings are written in a single JSON save so the file is never left partially updated.

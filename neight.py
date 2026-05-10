@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.040"
+VERSION = "2026.041"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -5493,6 +5493,8 @@ class Notepad(QMainWindow):
           - Word wrap: ON
           - Continue where you left off: OFF
           - Gutter line numbers: OFF
+          - Auto-hide scrollbar: ON
+          - Partial word highlighting: OFF
           - Typing layout: Tamil Anjal (if available on this machine)
 
         Everything is applied to the live UI immediately and persisted with a
@@ -5609,10 +5611,23 @@ class Notepad(QMainWindow):
         self.line_numbers_act.setChecked(False)
         self.line_numbers_act.blockSignals(False)
 
-        # ── 9. One atomic JSON write ──────────────────────────────────────────
+        # ── 9. Auto-hide scrollbar ───────────────────────────────────────────
+        self._auto_hide_scrollbar = True
+        self.editor.setAutoHideScrollbar(True)
+        self.auto_hide_scrollbar_act.blockSignals(True)
+        self.auto_hide_scrollbar_act.setChecked(True)
+        self.auto_hide_scrollbar_act.blockSignals(False)
+
+        # ── 10. Partial word highlighting ────────────────────────────────────
+        self._unicode_substring_highlight = False
+        self.unicode_substring_highlight_act.blockSignals(True)
+        self.unicode_substring_highlight_act.setChecked(False)
+        self.unicode_substring_highlight_act.blockSignals(False)
+
+        # ── 11. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
 
-        # ── 10. Tamil Anjal typing layout ────────────────────────────────────
+        # ── 12. Tamil Anjal typing layout ────────────────────────────────────
         # Done after the save so a layout-switch failure cannot corrupt JSON.
         if TAMIL_CHOICE:
             try:
@@ -5638,6 +5653,8 @@ class Notepad(QMainWindow):
           - Word wrap: ON
           - Continue where you left off: ON
           - Gutter line numbers: ON
+          - Auto-hide scrollbar: OFF
+          - Partial word highlighting: ON
 
         Everything is applied to the live UI immediately and persisted with a
         single atomic JSON write so the file is never left in a partial state.
@@ -5734,7 +5751,20 @@ class Notepad(QMainWindow):
         self.line_numbers_act.setChecked(True)
         self.line_numbers_act.blockSignals(False)
 
-        # ── 9. One atomic JSON write ──────────────────────────────────────────
+        # ── 9. Auto-hide scrollbar ───────────────────────────────────────────
+        self._auto_hide_scrollbar = False
+        self.editor.setAutoHideScrollbar(False)
+        self.auto_hide_scrollbar_act.blockSignals(True)
+        self.auto_hide_scrollbar_act.setChecked(False)
+        self.auto_hide_scrollbar_act.blockSignals(False)
+
+        # ── 10. Partial word highlighting ────────────────────────────────────
+        self._unicode_substring_highlight = True
+        self.unicode_substring_highlight_act.blockSignals(True)
+        self.unicode_substring_highlight_act.setChecked(True)
+        self.unicode_substring_highlight_act.blockSignals(False)
+
+        # ── 11. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
 
         # Refresh status bar display immediately.
