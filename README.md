@@ -95,7 +95,7 @@ Neight's menus are organized by what you are doing, not by how things are implem
 | **Format** | Font, Line Spacing, Margins, Word Wrap |
 | **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Auto-Hide Scrollbar, Status Bar controls |
 | **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch |
-| **Help** | About, Debug Info, சொல்வெளி (Writer) Mode, பொறியாளர் (Engineer) Mode |
+| **Help** | About, Debug Info, சொல்வெளி (Writer) Mode, நுட்பர் (Techie) Mode |
 
 ### Status Bar submenu (under View)
 
@@ -140,7 +140,7 @@ Positions are fixed — hiding one item does not cause the others to shift.
 - **Auto-Hide Scrollbar** — toggled from **View → Auto-Hide Scrollbar**. When enabled, the vertical scrollbar stays hidden and briefly flashes visible for 1.5 seconds whenever you scroll or the document changes, then hides again automatically. This keeps the writing area clean without losing scroll feedback. The preference is saved and restored across launches.
 - **About** and **Debug Info** under **Help**
 - **சொல்வெளி (Writer) Mode** under **Help** — see below
-- **பொறியாளர் (Engineer) Mode** under **Help** — see below
+- **நுட்பர் (Techie) Mode** under **Help** — see below
 
 ### macOS Open With
 
@@ -172,15 +172,16 @@ Neight's macOS app bundle declares support for `.txt` and `.text` files via its 
 | Auto-hide scrollbar | On |
 | Partial word highlighting | Off |
 | Continue where you left off | Off |
+| Appearance theme | Follow OS |
 | Typing layout | Tamil Anjal (if available on this machine) |
 
 The preset applies to the live UI immediately. All settings are written in a single JSON save so the file is never left partially updated.
 
 ---
 
-### பொறியாளர் (Engineer) Mode
+### நுட்பர் (Techie) Mode
 
-**Help → பொறியாளர் (Engineer) Mode** applies a one-click preset optimised for software engineers. All status bar counters are turned on, gutter line numbers are enabled, and the layout is kept compact and information-dense. It sets all of the following at once and saves preferences atomically:
+**Help → நுட்பர் (Techie) Mode** applies a one-click preset optimised for software engineers. All status bar counters are turned on, gutter line numbers are enabled, and the layout is kept compact and information-dense. It sets all of the following at once and saves preferences atomically:
 
 | Setting | Value applied |
 |---|---|
@@ -199,6 +200,7 @@ The preset applies to the live UI immediately. All settings are written in a sin
 | Auto-hide scrollbar | Off |
 | Partial word highlighting | On |
 | Continue where you left off | On |
+| Appearance theme | Follow OS |
 
 The preset applies to the live UI immediately. All settings are written in a single JSON save so the file is never left partially updated.
 
