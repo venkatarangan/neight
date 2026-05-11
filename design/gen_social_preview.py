@@ -229,7 +229,7 @@ def main() -> None:
               "Built to feel at home on both Windows and macOS.",
               font=body_font, fill=TEXT_COLOR)
     draw.text((RX, ty + 190),
-              "For Writers and Engineers alike.",
+              "For Writers and Techies alike.",
               font=body_font, fill=TEXT_COLOR)
 
     # Platform badges
