@@ -237,7 +237,7 @@ When you have typed content but have not yet named or saved the file, Neight sil
 - On the first autosave tick after the window opens with unsaved content, Neight creates a recovery file inside `~/Documents/Neight/` with a name like `recovery-12345-678901.txt` (process ID + random number).
 - Each subsequent tick overwrites the same file so only one copy accumulates per window session.
 - The write uses the same atomic pattern as normal autosave: a temp file is written and fsync'd first, then renamed over the previous copy — the recovery file is never left in a corrupt state.
-- **The recovery file is deleted automatically** the moment you save the document (giving it a real name), open a different file, or start a new document. You do not need to clean up manually during normal use.
+- **The recovery file is deleted automatically** the moment you save the document (giving it a real name), open a different file, start a new document, or close the window and choose **Don't Save**. You do not need to clean up manually during normal use.
 - The feature is completely silent — no status bar message, no notification.
 
 ### Accessing recovery files
