@@ -181,6 +181,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude AI
+#  Local Claude AI agent configuration and session files
+.claude/
+
 # Neight editor settings
 # User-specific configuration file with personal preferences, paths, and window state
 settings.json
