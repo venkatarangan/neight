@@ -17,7 +17,7 @@ Neight ships with two built-in mode presets accessible from the **Help** menu. E
 
 | Setting | Value |
 |---|---|
-| Font | Noto Serif Tamil Regular 24 pt (falls back to any Tamil-script font, then system default) |
+| Font | **macOS:** Tamil MN 24 pt (falls back to system default at 24 pt) · **Windows:** Nirmala UI 24 pt (falls back to system default at 24 pt) |
 | Line spacing | Double |
 | Text margins | 25% |
 | Word wrap | On |
@@ -41,7 +41,7 @@ All settings are applied to the live UI immediately and written atomically — t
 
 | Setting | Value |
 |---|---|
-| Font | Noto Sans Tamil Thin 14 pt (falls back to system default at 14 pt) |
+| Font | **macOS:** Tamil Sangam MN 14 pt (falls back to system default at 14 pt) · **Windows:** Nirmala UI 14 pt (falls back to system default at 14 pt) |
 | Line spacing | Single Line |
 | Text margins | 0% |
 | Word wrap | On |
@@ -104,7 +104,7 @@ Where $W_t$, $W_e$, $W_o$ are word counts and $R_t$, $R_e$, $R_o$ are the config
 
 ## Word Index Overlay
 
-The Word Index Overlay numbers every word in the document and floats those numbers over the text. Useful for quickly finding, citing, or referencing a specific word during review or editing.
+The Word Index Overlay numbers every word in the document and floats those numbers over the text — a semi-transparent wash over the page, lovingly called the **butter paper effect** (like placing a translucent sheet over a manuscript to annotate word positions). Useful for quickly finding, citing, or referencing a specific word during review or editing.
 
 Toggle it from **View → Word Index**, or click the **Words:** label in the status bar.
 
@@ -181,6 +181,16 @@ When enabled (**View → Partial Word Highlighting**), Neight highlights substri
 Example: selecting `நடிகர்` also highlights `நடிகர்கள்` and `நடிகர்களே`.
 
 Off by default.
+
+### Match limit
+
+To keep the editor fast even in very long documents, Neight caps highlighting at **1,000 matches** per selection. When the limit is reached:
+
+- The status bar shows **Matches: 1000+** instead of an exact count.
+- A brief message appears explaining that only the first 1,000 matches are shown.
+- The full document is not blocked or slowed — the scan stops as soon as the cap is hit.
+
+In practice the cap is only reached when searching for extremely common single characters or short stems in a large document. For normal stems it will never be hit.
 
 ---
 
