@@ -1,15 +1,9 @@
 #!/bin/bash
 # Build script for Neight on macOS
-# Produces a distributable unsigned .app bundle in dist/
-# and creates a zip archive suitable for GitHub Releases.
-#
-# No Apple Developer account required:
-# - Uses ad-hoc signing only (local integrity, not notarized)
-# - Users may still need right-click -> Open on first launch
 #
 # Usage:
-# chmod +x buildme_mac_app.sh
-# ./buildme_mac_app.sh
+#   chmod +x buildme_mac_app.sh
+#   ./buildme_mac_app.sh            # increments version, builds app
 
 set -euo pipefail
 
@@ -25,6 +19,7 @@ if [ "${ARCH}" = "arm64" ]; then
 else
     echo "Build target: Intel-compatible (${ARCH})"
 fi
+echo ""
 
 # Run the Python script to increment version
 python3 increment_version.py
@@ -77,3 +72,9 @@ echo "1) Download and unzip ${ZIP_NAME}"
 echo "2) Drag Neight.app to Applications"
 echo "3) First launch: right-click Neight.app -> Open -> Open"
 echo "4) If blocked, run: xattr -dr com.apple.quarantine /Applications/Neight.app"
+echo ""
+echo "To publish a signed release:"
+echo "  Sign dist/Neight.app externally, then re-zip it into stable/:"
+echo "    ditto -c -k --sequesterRsrc --keepParent dist/Neight.app stable/Neight-mac-arm64-signed.zip"
+echo "  Then run to release to GitHub and end users:"
+echo "    ./release_macos.sh"
