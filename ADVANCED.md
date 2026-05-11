@@ -106,7 +106,7 @@ Where $W_t$, $W_e$, $W_o$ are word counts and $R_t$, $R_e$, $R_o$ are the config
 
 The Word Index Overlay numbers every word in the document and floats those numbers over the text — a semi-transparent wash over the page, lovingly called the **butter paper effect** (like placing a translucent sheet over a manuscript to annotate word positions). Useful for quickly finding, citing, or referencing a specific word during review or editing.
 
-Toggle it from **View → Word Index**, or click the **Words:** label in the status bar.
+Toggle it from **View → Word Index Overlay**, or click the **Words:** label in the status bar.
 
 ### How it works
 
@@ -228,6 +228,53 @@ This is especially useful when searching for linebreaks, paragraph separators, o
 
 ---
 
+## Recovery Copies for Unsaved Documents
+
+When you have typed content but have not yet named or saved the file, Neight silently keeps a recovery copy on every autosave tick. This means your work is protected even before you ever press `Ctrl+S`.
+
+### How it works
+
+- On the first autosave tick after the window opens with unsaved content, Neight creates a recovery file inside `~/Documents/Neight/` with a name like `recovery-12345-678901.txt` (process ID + random number).
+- Each subsequent tick overwrites the same file so only one copy accumulates per window session.
+- The write uses the same atomic pattern as normal autosave: a temp file is written and fsync'd first, then renamed over the previous copy — the recovery file is never left in a corrupt state.
+- **The recovery file is deleted automatically** the moment you save the document (giving it a real name), open a different file, or start a new document. You do not need to clean up manually during normal use.
+- The feature is completely silent — no status bar message, no notification.
+
+### Accessing recovery files
+
+**File → View Recovery Folder** opens `~/Documents/Neight/` in Finder (macOS) or Explorer (Windows). The folder is created automatically if it does not yet exist.
+
+**Help → Empty Recovery Folder** permanently deletes all `recovery-*.txt` and `recovery-*.md` files in the folder. A confirmation dialog warns before proceeding, and the file belonging to the current window (if any) is always skipped. Use this periodically to keep the folder tidy.
+
+### When autosave is disabled
+
+If the autosave interval is set to **Off** (0 minutes), the timer never starts and no recovery copies are written. This matches the existing behaviour — recovery writes use the same timer as normal autosave.
+
+---
+
+## Smart Suggested Filename
+
+When you press `Ctrl+S` (`Cmd+S` on macOS) on a document that has never been named, the save dialog opens pre-filled with a filename derived from the first words of your text.
+
+### Naming rules
+
+| Rule | Detail |
+|---|---|
+| Source | First 4 words of the document (fewer if the document is shorter) |
+| Maximum length | 100 characters including the `.txt` extension (stem capped at 96) |
+| Word count preference | As many words as fit within the 96-character stem limit; fewer words tried before hard-trimming |
+| Illegal characters | Characters invalid on Windows or macOS (`\ / : * ? " < > |` and ASCII control characters) are stripped before the name is used |
+| Trailing dots | Removed (Windows rejects filenames ending with `.`) |
+| Empty result | If the document contains no words, or only illegal characters, the dialog falls back to `Untitled.txt` as usual |
+
+### Behaviour
+
+- The suggestion fires **only** from `Ctrl+S` on an unsaved document. **File → Save As** (direct menu action) always opens the dialog with `Untitled.txt` as today — no suggestion is injected.
+- The user can accept the suggested name, edit it, or navigate to a completely different location. The dialog is fully interactive and behaves identically to a normal Save As.
+- Once the file is saved under any name, subsequent `Ctrl+S` presses write directly to that file (normal save), and the suggestion is never shown again for that session.
+
+---
+
 ## Settings and File Locations
 
 Neight creates and updates `settings.json` automatically.
@@ -257,6 +304,14 @@ User mode presets (see [Save Presets](#save-presets-power-user-feature) above) a
 - `~/Documents/neight/techie_mode.json`
 
 These files are plain JSON, survive app reinstallation, and can be copied between machines.
+
+### Recovery folder
+
+Recovery copies of unsaved documents (see [Recovery Copies for Unsaved Documents](#recovery-copies-for-unsaved-documents) above) are written to:
+
+- `~/Documents/Neight/recovery-<PID>-<random>.txt`
+
+This folder is separate from the settings and preset folders. Files here are cleaned up automatically during normal use. Use **Help → Empty Recovery Folder** to delete any leftovers.
 
 ---
 

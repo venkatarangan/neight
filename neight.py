@@ -15,6 +15,7 @@ import unicodedata
 import ctypes
 import html
 import threading
+import random
 import urllib.request
 import platform
 from datetime import datetime
@@ -23,10 +24,14 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.046"
+VERSION = "2026.047"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
+
+# Characters illegal in filenames on Windows (and macOS disallows / and :).
+# Also strips ASCII control characters (0x00–0x1f).
+_FILENAME_ILLEGAL_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
 from PySide6.QtWidgets import (
@@ -1190,8 +1195,10 @@ class CodeEditor(QPlainTextEdit):
             vsb.setVisible(False)
         else:
             self._scrollbar_hide_timer.stop()
+            # Undo the explicit hide that was applied when auto-hide was enabled,
+            # then let the policy decide visibility based on content.
+            vsb.setVisible(True)
             self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            # Let Qt decide visibility based on content; don't force show/hide
 
     def isAutoHideScrollbar(self) -> bool:
         return self._auto_hide_scrollbar
@@ -1981,6 +1988,8 @@ class Notepad(QMainWindow):
     # in PySide6; the call is automatically queued to the main event loop).
     _autosave_succeeded = Signal()
     _autosave_failed = Signal(Exception)  # carries the exception from the worker
+    _recovery_succeeded = Signal(str)     # str = path written by the recovery worker
+    _recovery_failed = Signal()           # recovery write failed (always silent)
 
     def __init__(self, initial_file: Optional[str] = None, restore_last_session: bool = True):
         super().__init__()
@@ -2051,6 +2060,8 @@ class Notepad(QMainWindow):
         self._pending_update_version = None
 
         self.current_path = None
+        self._recovery_path: Optional[Path] = None
+        self._recovery_in_progress = False
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self._autosave)
         self.autosave_enabled = False
@@ -2326,7 +2337,7 @@ class Notepad(QMainWindow):
         self.unicode_substring_highlight_act = QAction("Partial Word Highlighting", self, checkable=True)
         self.unicode_substring_highlight_act.setChecked(False)
         self.reading_time_act = QAction("Reading Time...", self)
-        self.word_index_act = QAction("Word Index", self, checkable=True)
+        self.word_index_act = QAction("Word Index Overlay", self, checkable=True)
         self.word_index_act.setShortcut(QKeySequence("Ctrl+Shift+W"))
         self.normalize_unicode_act = QAction("Normalize Unicode (NFC)", self)
 
@@ -2334,6 +2345,14 @@ class Notepad(QMainWindow):
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
         self.check_updates_act = QAction("Check for Updates...", self)
+        self.view_recovery_folder_act = QAction("View Recovery Folder", self)
+        self.view_recovery_folder_act.setToolTip(
+            "Open the Neight recovery folder in Finder (macOS) or Explorer (Windows)."
+        )
+        self.empty_recovery_act = QAction("Empty Recovery Folder", self)
+        self.empty_recovery_act.setToolTip(
+            "Delete all recovery-*.txt and recovery-*.md files from the Neight recovery folder."
+        )
         self.solveli_act = QAction("Writer (சொல்வெளி) Mode", self)
         self.solveli_act.setToolTip(
             "Configures a set of preferred settings for professional Tamil writers: "
@@ -2370,6 +2389,8 @@ class Notepad(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.export_text_pdf_act)
         file_menu.addAction(self.export_md_pdf_act)
+        file_menu.addSeparator()
+        file_menu.addAction(self.view_recovery_folder_act)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_act)
         
@@ -2501,6 +2522,8 @@ class Notepad(QMainWindow):
         help_menu.addAction(self.about_act)
         help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
+        help_menu.addSeparator()
+        help_menu.addAction(self.empty_recovery_act)
 
     def _connect_signals(self):
         # File
@@ -2558,6 +2581,8 @@ class Notepad(QMainWindow):
         self.autosave_30min_act.triggered.connect(lambda: self._set_autosave_interval(30))
         self._autosave_succeeded.connect(self._on_autosave_success)
         self._autosave_failed.connect(self._on_autosave_failure)
+        self._recovery_succeeded.connect(self._on_recovery_success)
+        self._recovery_failed.connect(self._on_recovery_failure)
 
         # Watchdog: fires every minute to reset a stuck _autosave_in_progress
         # flag from a hung background thread (e.g. unresponsive NFS mount).
@@ -2617,6 +2642,8 @@ class Notepad(QMainWindow):
         self.about_act.triggered.connect(self.show_about)
         self.debug_info_act.triggered.connect(self._show_debug_info)
         self.check_updates_act.triggered.connect(self._check_for_updates)
+        self.view_recovery_folder_act.triggered.connect(self._view_recovery_folder)
+        self.empty_recovery_act.triggered.connect(self._empty_recovery_folder)
         self.solveli_act.triggered.connect(self._apply_solveli_preset)
         self.engineer_act.triggered.connect(self._apply_engineer_preset)
         self.save_as_solveli_preset_act.triggered.connect(self._save_as_solveli_preset)
@@ -2669,6 +2696,13 @@ class Notepad(QMainWindow):
     def keyReleaseEvent(self, event):
         """Detect double Ctrl press to toggle keyboard layout."""
         if sys.platform not in ("win32", "darwin"):
+            super().keyReleaseEvent(event)
+            return
+
+        # Don't accumulate Ctrl presses while a file dialog is open —
+        # releasing Ctrl to copy/paste in the filename field would otherwise
+        # prime (or fire) the double-Ctrl quick switch.
+        if getattr(self, '_in_file_dialog', False):
             super().keyReleaseEvent(event)
             return
 
@@ -2747,6 +2781,9 @@ class Notepad(QMainWindow):
         """
         if sys.platform not in ("win32", "darwin"):
             return
+        # Don't let application-level shortcuts interfere with file dialogs.
+        if getattr(self, '_in_file_dialog', False):
+            return
 
         self._current_layout = target_layout
         try:
@@ -2783,6 +2820,9 @@ class Notepad(QMainWindow):
         if sys.platform not in ("win32", "darwin"):
             return
         if not getattr(self, '_quick_switch_enabled', False):
+            return
+        # Don't misfire while a file dialog is open.
+        if getattr(self, '_in_file_dialog', False):
             return
         try:
             if getattr(self, '_force_anjal_english', True):
@@ -2843,6 +2883,7 @@ class Notepad(QMainWindow):
     def new_file(self):
         if not self._maybe_save_changes():
             return
+        self._clear_recovery_file()
         self.editor.clear()
         self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = None
@@ -2951,6 +2992,7 @@ class Notepad(QMainWindow):
             return False
 
         self.editor.setPlainText(text)
+        self._clear_recovery_file()
         self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = str(path_obj)
         self.editor.document().setModified(False)
@@ -2978,31 +3020,102 @@ class Notepad(QMainWindow):
                 if self._open_file_path(fallback, notify_errors=False, show_status=False):
                     self.status.showMessage(f"Opened last session file: {fallback}", 3000)
 
+    def _pre_file_dialog(self):
+        """Mark that a file dialog is about to open.
+
+        Neight's layout-switching shortcuts (Ctrl+,/Ctrl+.) use
+        Qt.ApplicationShortcut context, meaning they fire even inside a native
+        macOS/Windows file dialog sheet.  The double-Ctrl quick switch can also
+        misfire because the main window still receives Ctrl key-release events
+        while the sheet is open.  Setting this flag suppresses all
+        Neight-initiated layout switches until _post_file_dialog() clears it,
+        so the user's layout is left exactly as-is during the dialog.
+        """
+        self._in_file_dialog = True
+
+    def _post_file_dialog(self):
+        """Clear the file-dialog guard and sync layout tracking to reality.
+
+        Whatever layout is active when the dialog closes (whether the user
+        changed it via the system switcher or left it alone) is now the
+        current layout.  Sync _current_layout so subsequent quick-switch
+        toggles start from the correct baseline.
+        """
+        self._in_file_dialog = False
+        if sys.platform not in ("win32", "darwin"):
+            return
+        try:
+            self._current_layout = get_current_layout()
+            if hasattr(self, "layout_label"):
+                self.layout_label.setText(get_current_layout_label())
+        except Exception:
+            pass
+
     def open_file(self):
         if not self._maybe_save_changes():
             return
+        self._pre_file_dialog()
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Text File",
             str(self.default_directory),
             "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
+        self._post_file_dialog()
         if path:
             self._open_file_path(path)
 
     def save_file(self):
         if self.current_path is None:
-            return self.save_file_as()
+            suggested = self._suggest_filename()
+            return self.save_file_as(suggested=suggested)
         return self._write_to_path(self.current_path)
 
-    def save_file_as(self):
-        initial_path = self.current_path or str(self.default_directory / "Untitled.txt")
+    def _suggest_filename(self) -> str:
+        """Return a sanitised filename stem (no extension) built from the first
+        words of the document, or '' if the document has no words.
+
+        Rules:
+        - Use up to 4 words, preferring more words while the joined stem stays
+          at or under 96 characters (leaving 4 for the '.txt' extension so the
+          full name fits within 100 chars).
+        - Illegal filename characters (Windows + macOS) and ASCII control chars
+          are stripped via _FILENAME_ILLEGAL_RE.
+        - Trailing dots and spaces are stripped (Windows rejects them).
+        - Fewer words are tried before hard-trimming; hard-trim is a last resort
+          only when a single word already exceeds 96 characters.
+        """
+        MAX_STEM = 96
+        words = self.editor.toPlainText().split()
+        if not words:
+            return ""
+        candidates = words[:4]
+        for n in range(len(candidates), 0, -1):
+            joined = " ".join(candidates[:n])
+            sanitised = _FILENAME_ILLEGAL_RE.sub("", joined).strip().rstrip(".")
+            if not sanitised:
+                continue
+            if len(sanitised) <= MAX_STEM:
+                return sanitised
+            if n == 1:
+                # Single word still too long — hard-trim as a last resort.
+                return sanitised[:MAX_STEM].rstrip().rstrip(".")
+            # This many words exceeded the limit; try one fewer.
+        return ""
+
+    def save_file_as(self, suggested: str = ""):
+        if suggested:
+            initial_path = str(self.default_directory / (suggested + ".txt"))
+        else:
+            initial_path = self.current_path or str(self.default_directory / "Untitled.txt")
+        self._pre_file_dialog()
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save File As",
             initial_path,
             "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
+        self._post_file_dialog()
         if not path:
             return False
         self.current_path = path
@@ -3022,6 +3135,7 @@ class Notepad(QMainWindow):
             os.replace(str(tmp_path), path)
             tmp_path = None  # rename succeeded; skip temp-file cleanup
             self.editor.document().setModified(False)
+            self._clear_recovery_file()
             self._update_default_directory(path_obj.parent)
             self._update_title()
             self.status.showMessage(f"Saved: {path}", 2000)
@@ -3046,7 +3160,11 @@ class Notepad(QMainWindow):
         _autosave_succeeded / _autosave_failed signals, which Qt queues to the
         main thread automatically.
         """
-        if not self.current_path or not self.editor.document().isModified():
+        if not self.current_path:
+            if self.editor.document().isModified():
+                self._recovery_write()
+            return
+        if not self.editor.document().isModified():
             return
         # Guard against overlapping writes (shouldn't happen at 2–30 min
         # intervals, but safe-guards against very slow filesystems).
@@ -3106,6 +3224,175 @@ class Notepad(QMainWindow):
         self.status.showMessage("Auto-save failed — check disk or permissions", 3000)
         self._write_autosave_log(f"FAIL: {exc!r}  path={self.current_path!r}")
 
+    # ------------------------------------------------------------------
+    # Recovery writes (for unsaved documents with no current_path)
+    # ------------------------------------------------------------------
+
+    def _recovery_write(self):
+        """Write a background recovery copy when the document has never been
+        manually saved (current_path is None).
+
+        A unique filename (recovery-<PID>-<6-digit-random>.txt) is generated
+        once per window session and reused on every subsequent autosave tick,
+        so only one file accumulates per unsaved session.
+
+        The write uses the same tmp → fsync → os.replace pattern as _autosave
+        so the recovery file is never left in a corrupt state.
+
+        This is a silent best-effort operation: if the write fails for any
+        reason (disk full, permissions, etc.) no error is surfaced to the user.
+        """
+        if getattr(self, '_recovery_in_progress', False):
+            return
+
+        # Generate a unique recovery path the first time we need it.
+        if self._recovery_path is None:
+            try:
+                folder = Path.home() / "Documents" / "Neight"
+                folder.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                return  # Cannot create folder — skip silently this tick
+            rand = random.randint(100_000, 999_999)
+            self._recovery_path = folder / f"recovery-{os.getpid()}-{rand}.txt"
+
+        text = self.editor.toPlainText()
+        recovery_path = self._recovery_path  # local snapshot; safe across threads
+        self._recovery_in_progress = True
+
+        def _worker():
+            tmp_path = None
+            try:
+                tmp_path = recovery_path.with_name(recovery_path.name + ".tmp~")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp_path), str(recovery_path))
+                tmp_path = None
+                self._recovery_succeeded.emit(str(recovery_path))
+            except Exception:
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                self._recovery_failed.emit()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_recovery_success(self, written_path: str):
+        """Called on the UI thread after a successful background recovery write."""
+        self._recovery_in_progress = False
+        # If _clear_recovery_file() was called while the write was in flight
+        # (e.g. the user manually saved during the background write), the
+        # recovery file is no longer needed — delete the file that was just
+        # written.  _recovery_path will be None in that case.
+        if self._recovery_path is None:
+            try:
+                Path(written_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _on_recovery_failure(self):
+        """Called on the UI thread after a failed background recovery write."""
+        self._recovery_in_progress = False
+
+    def _clear_recovery_file(self):
+        """Delete the recovery file and clear _recovery_path.
+
+        Called whenever the document content is safely committed to a real
+        file (manual save, save-as, open, new).
+
+        _recovery_path is set to None *before* the unlink so that if a
+        recovery write is in flight, _on_recovery_success will see None and
+        delete the file that was just written, closing the race cleanly.
+        """
+        path = self._recovery_path
+        self._recovery_path = None  # clear first so in-flight worker sees None
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _view_recovery_folder(self):
+        """Open the recovery folder in Finder (macOS) or Explorer (Windows)."""
+        try:
+            folder = Path.home() / "Documents" / "Neight"
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Recovery Folder",
+                f"Could not access the recovery folder:\n{e}"
+            )
+            return
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(folder)], check=False)
+            elif sys.platform == "win32":
+                subprocess.run(["explorer", str(folder)], check=False)
+            else:
+                QMessageBox.information(
+                    self, "Recovery Folder",
+                    f"Recovery folder location:\n{folder}"
+                )
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Recovery Folder",
+                f"Could not open the recovery folder:\n{e}"
+            )
+
+    def _empty_recovery_folder(self):
+        """Delete all recovery-*.txt and recovery-*.md files in the recovery
+        folder.  The file this window is currently writing to (if any) is
+        never deleted.
+        """
+        folder = Path.home() / "Documents" / "Neight"
+        ret = QMessageBox.warning(
+            self,
+            "Empty Recovery Folder",
+            "This will permanently delete all recovery files\n"
+            "(recovery-*.txt and recovery-*.md) from the\n"
+            "Neight recovery folder.\n\n"
+            "Any unsaved work stored there will be lost.\n\n"
+            "It is recommended you do this periodically\n"
+            "to keep the folder tidy.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if ret != QMessageBox.Yes:
+            return
+
+        if not folder.exists():
+            self.status.showMessage("Recovery folder is already empty", 2000)
+            return
+
+        deleted = 0
+        errors = 0
+        for pattern in ("recovery-*.txt", "recovery-*.md"):
+            for f in folder.glob(pattern):
+                # Never delete the file this window is currently writing to.
+                if f == self._recovery_path:
+                    continue
+                try:
+                    f.unlink()
+                    deleted += 1
+                except Exception:
+                    errors += 1
+
+        if errors:
+            self.status.showMessage(
+                f"Recovery folder: {deleted} file(s) deleted, {errors} could not be removed",
+                3000,
+            )
+        elif deleted == 0:
+            self.status.showMessage("Recovery folder was already empty", 2000)
+        else:
+            self.status.showMessage(
+                f"Recovery folder emptied ({deleted} file(s) deleted)", 2000
+            )
+
     def _autosave_watchdog_check(self):
         """Periodic check: if a background write has been running for more than
         2 × the autosave interval (minimum 4 min), the thread is considered
@@ -3150,6 +3437,9 @@ class Notepad(QMainWindow):
         if interval > 0:
             self.autosave_timer.start(interval * 60 * 1000)
             self.autosave_enabled = True
+            # Note: the timer fires regardless of whether a file path is set.
+            # _autosave() handles both cases: writes to current_path when saved,
+            # or writes a recovery copy when the document is still unsaved.
 
     def _stop_autosave(self):
         self.autosave_timer.stop()
@@ -3995,16 +4285,18 @@ class Notepad(QMainWindow):
         if self.current_path:
             default_name = Path(self.current_path).stem + ".pdf"
         
+        self._pre_file_dialog()
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Text to PDF",
             str(self.default_directory / default_name),
-            "PDF Files (*.pdf)"
+            "PDF Files (*.pdf)",
         )
-        
+        self._post_file_dialog()
+
         if not save_path:
             return
-        
+
         if not HAS_PRINT_SUPPORT:
             QMessageBox.critical(self, "Export Failed",
                                  "PDF export requires QtPrintSupport, which is not available.")
@@ -4125,16 +4417,18 @@ class Notepad(QMainWindow):
         if self.current_path:
             default_name = Path(self.current_path).stem + ".pdf"
         
+        self._pre_file_dialog()
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Markdown to PDF",
             str(self.default_directory / default_name),
-            "PDF Files (*.pdf)"
+            "PDF Files (*.pdf)",
         )
-        
+        self._post_file_dialog()
+
         if not save_path:
             return
-        
+
         try:
             # Try to import markdown library
             try:
@@ -4413,6 +4707,88 @@ class Notepad(QMainWindow):
                 lines.append("  (none found)")
         except Exception:
             lines.append("  N/A")
+
+        # ── Appearance / editor settings ─────────────────────────────────────
+        lines.append("")
+        lines.append("Appearance & Editor Settings:")
+        try:
+            ef = self.editor.font()
+            fam = ef.family() or "(system default)"
+            fsize = ef.pointSize()
+            lines.append(f"  Font                : {fam} {fsize} pt")
+        except Exception:
+            lines.append("  Font                : N/A")
+        try:
+            theme_labels = {
+                "follow_os": "Follow OS",
+                "light": "Light",
+                "dark": "Dark",
+            }
+            theme = getattr(self, "_appearance_theme_mode", "follow_os")
+            lines.append(f"  Color Mode          : {theme_labels.get(theme, theme)}")
+        except Exception:
+            lines.append("  Color Mode          : N/A")
+        try:
+            spacing_labels = {
+                "condensed": "Condensed",
+                "single_line": "Single Line",
+                "one_half_lines": "1.5 Lines",
+                "double": "Double",
+                "triple": "Triple",
+            }
+            sp = getattr(self, "_line_spacing_preset", "single_line")
+            lines.append(f"  Line Spacing        : {spacing_labels.get(sp, sp)}")
+        except Exception:
+            lines.append("  Line Spacing        : N/A")
+        try:
+            margin = getattr(self.editor, "_text_margin_percent", 0)
+            lines.append(f"  Text Margins        : {margin}%")
+        except Exception:
+            lines.append("  Text Margins        : N/A")
+        try:
+            interval = getattr(self, "_autosave_interval_minutes", 0)
+            autosave_str = f"Every {interval} min" if interval > 0 else "Disabled"
+            lines.append(f"  Auto-Save           : {autosave_str}")
+        except Exception:
+            lines.append("  Auto-Save           : N/A")
+        try:
+            counters = []
+            if getattr(self, "_status_show_words", True):
+                counters.append("Words")
+            if getattr(self, "_status_show_sentences", True):
+                counters.append("Sentences")
+            if getattr(self, "_status_show_chars", True):
+                counters.append("Characters")
+            if getattr(self, "_reading_time_enabled", False):
+                counters.append("Reading Time")
+            if getattr(self, "_status_show_line", True):
+                counters.append("Line")
+            if getattr(self, "_status_show_col", True):
+                counters.append("Column")
+            lines.append(f"  Status Bar Counters : {', '.join(counters) if counters else '(none)'}")
+        except Exception:
+            lines.append("  Status Bar Counters : N/A")
+        try:
+            lines.append(f"  Continue Last File  : {'On' if getattr(self, '_restore_last_session', False) else 'Off'}")
+        except Exception:
+            lines.append("  Continue Last File  : N/A")
+        try:
+            lines.append(f"  Auto-Hide Scrollbar : {'On' if getattr(self, '_auto_hide_scrollbar', False) else 'Off'}")
+        except Exception:
+            lines.append("  Auto-Hide Scrollbar : N/A")
+        try:
+            ln = self.editor._line_numbers_visible if hasattr(self.editor, "_line_numbers_visible") else False
+            lines.append(f"  Gutter Line Numbers : {'On' if ln else 'Off'}")
+        except Exception:
+            lines.append("  Gutter Line Numbers : N/A")
+        try:
+            lines.append(f"  Partial Word Highlight: {'On' if getattr(self, '_unicode_substring_highlight', False) else 'Off'}")
+        except Exception:
+            lines.append("  Partial Word Highlight: N/A")
+        try:
+            lines.append(f"  Word Wrap           : {'On' if self.editor.wordWrapMode() != 0 else 'Off'}")
+        except Exception:
+            lines.append("  Word Wrap           : N/A")
 
         text = "\n".join(lines)
 
@@ -5709,6 +6085,11 @@ class Notepad(QMainWindow):
                 self._open_file_path(last_file, notify_errors=False, show_status=False)
 
         self._settings_cache = data
+        # Start the autosave timer now so recovery writes fire even for brand-new
+        # sessions where the user has not yet opened or saved any file.
+        # (If a last-session file was just opened above, the timer is already
+        # running from _open_file_path → _start_autosave; restarting is harmless.)
+        self._start_autosave()
         return True
 
     def _save_preferences(self):
@@ -5988,7 +6369,7 @@ class Notepad(QMainWindow):
                             self._apply_settings_dict(merged)
                             self._settings_cache = merged
                             _interval = self._autosave_interval_minutes
-                            if _interval > 0 and self.current_path:
+                            if _interval > 0:
                                 self.autosave_timer.start(_interval * 60 * 1000)
                                 self.autosave_enabled = True
                             else:
@@ -6074,9 +6455,8 @@ class Notepad(QMainWindow):
         # ── 5. Auto-save ─────────────────────────────────────────────────────
         self._autosave_interval_minutes = 2
         self._update_autosave_menu(2)
-        if self.current_path:
-            self.autosave_timer.start(2 * 60 * 1000)
-            self.autosave_enabled = True
+        self.autosave_timer.start(2 * 60 * 1000)
+        self.autosave_enabled = True
 
         # ── 6. Word wrap ─────────────────────────────────────────────────────
         self.editor.setWordWrap(True)
@@ -6232,7 +6612,7 @@ class Notepad(QMainWindow):
                             self._apply_settings_dict(merged)
                             self._settings_cache = merged
                             _interval = self._autosave_interval_minutes
-                            if _interval > 0 and self.current_path:
+                            if _interval > 0:
                                 self.autosave_timer.start(_interval * 60 * 1000)
                                 self.autosave_enabled = True
                             else:
@@ -6307,9 +6687,8 @@ class Notepad(QMainWindow):
         # ── 5. Auto-save ─────────────────────────────────────────────────────
         self._autosave_interval_minutes = 2
         self._update_autosave_menu(2)
-        if self.current_path:
-            self.autosave_timer.start(2 * 60 * 1000)
-            self.autosave_enabled = True
+        self.autosave_timer.start(2 * 60 * 1000)
+        self.autosave_enabled = True
 
         # ── 6. Word wrap ─────────────────────────────────────────────────────
         self.editor.setWordWrap(True)
@@ -6627,7 +7006,7 @@ class Notepad(QMainWindow):
         self._settings_cache = cache
         self._update_autosave_menu(minutes)
         
-        if minutes > 0 and self.current_path:
+        if minutes > 0:
             self.autosave_timer.start(minutes * 60 * 1000)
             self.autosave_enabled = True
             self.status.showMessage(f"Auto-save enabled ({minutes} min)", 2000)
