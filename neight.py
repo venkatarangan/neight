@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.042"
+VERSION = "2026.043"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -4131,8 +4131,9 @@ class Notepad(QMainWindow):
         msg = QMessageBox(self)
         msg.setWindowTitle("About")
         msg.setText(
-            f"<b>Neight v{VERSION}</b> (Using {QT_LIB})<br><br>"
-            "A lightweight Unicode text editor with advanced features, word count, line numbers and more.<br><br>"
+            f"<b>Neight v{VERSION}</b> · pronounced \"N8\" · Handcrafted with AI<br><br>"
+            "A text editor made for writers who write in Tamil and English on Windows and macOS — built for real writing.<br><br>"
+
             "Brewed at <a href='https://venkatarangan.com'>venkatarangan.com</a> with GitHub Copilot and Madras filter coffee.<br><br>"
             "<span style='color:#666;'>Provided AS IS. No warranty of performance, accuracy, or fitness for a particular purpose.</span><br><br>"
             "<span style='color:#666;'>Full details: "
