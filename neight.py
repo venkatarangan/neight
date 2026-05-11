@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.048"
+VERSION = "2026.049"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -3105,7 +3105,11 @@ class Notepad(QMainWindow):
 
     def save_file_as(self, suggested: str = ""):
         if suggested:
-            initial_path = str(self.default_directory / (suggested + ".txt"))
+            # Use only the final filename component so a pathological stem
+            # (e.g. one that somehow still contains a separator after sanitisation)
+            # cannot escape the default_directory.
+            safe_name = Path(suggested).name or "Untitled"
+            initial_path = str(self.default_directory / (safe_name + ".txt"))
         else:
             initial_path = self.current_path or str(self.default_directory / "Untitled.txt")
         self._pre_file_dialog()
@@ -7408,6 +7412,7 @@ class Notepad(QMainWindow):
     # Confirm close with save prompt and persist settings
     def closeEvent(self, event):
         if self._maybe_save_changes():
+            self._clear_recovery_file()
             if not getattr(self, '_settings_reset_pending', False):
                 self._save_preferences()
             event.accept()
