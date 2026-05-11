@@ -7,6 +7,14 @@ For advanced user features see [ADVANCED.md](ADVANCED.md).
 
 ---
 
+## Debug Information Panel
+
+Neight includes a built-in debug info panel (**Help → Debug Info…**). It shows the current version, Python and Qt versions, platform details, font configuration, and key runtime settings — useful when troubleshooting an issue or filing a bug report.
+
+![Neight debug info on macOS](screenshots/macos/2026-May-06-mac-debuginfo-screenshot.jpg)
+
+---
+
 ## Running from Source
 
 ```bash
