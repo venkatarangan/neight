@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.045"
+VERSION = "2026.046"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
-from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
+from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QPalette, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
 from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QThread
 QT_LIB = "PySide6"
 
@@ -651,17 +651,29 @@ class SettingsManager:
         self.last_save_error = ""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp = self.path.with_suffix(".tmp~")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(str(tmp), str(self.path))
             return True
         except Exception as e:
+            try:
+                self.path.with_suffix(".tmp~").unlink(missing_ok=True)
+            except Exception:
+                pass
             # If save fails and we're using primary path, try fallback
             if self.path == self.primary_path:
                 try:
                     self.path = self.fallback_path
                     self.path.parent.mkdir(parents=True, exist_ok=True)
-                    self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    tmp = self.path.with_suffix(".tmp~")
+                    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    os.replace(str(tmp), str(self.path))
                     return True
                 except Exception as e2:
+                    try:
+                        self.path.with_suffix(".tmp~").unlink(missing_ok=True)
+                    except Exception:
+                        pass
                     self.last_save_error = str(e2)
                     return False
             self.last_save_error = str(e)
@@ -1685,7 +1697,7 @@ class FindReplaceDialog(QDialog):
 
         tip_text = "ℹ️ <a href=\"#\">Escape sequences…</a>"
         self.tip_label = QLabel(tip_text, self)
-        self.tip_label.setStyleSheet("color: #666666;")
+        self.tip_label.setStyleSheet("color: #888888;")
         self.tip_label.setWordWrap(True)
         self.tip_label.setTextFormat(Qt.RichText)
         self.tip_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
@@ -1741,6 +1753,9 @@ class FindReplaceDialog(QDialog):
         dialog.setWindowTitle("Escape Sequences")
         dialog.setModal(True)
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        parent_notepad = self.parent()
+        if hasattr(parent_notepad, '_make_dialog_stylesheet'):
+            dialog.setStyleSheet(parent_notepad._make_dialog_stylesheet())
 
         layout = QVBoxLayout()
         dialog.setLayout(layout)
@@ -1891,6 +1906,8 @@ class _UpdateCheckWorker(QThread):
     result_ready = Signal(str, str)  # (latest_version, error_message)
 
     def run(self):
+        # ── Network request ──────────────────────────────────────────────────
+        raw = None
         try:
             req = urllib.request.Request(
                 _RELEASES_API_URL,
@@ -1900,11 +1917,59 @@ class _UpdateCheckWorker(QThread):
                 },
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            tag = data.get("tag_name", "").lstrip("v")
-            self.result_ready.emit(tag, "")
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403:
+                self.result_ready.emit(
+                    "", "GitHub API rate limit reached. Please try again in a few minutes."
+                )
+            elif exc.code == 404:
+                self.result_ready.emit(
+                    "", "Release information not found on GitHub (HTTP 404)."
+                )
+            else:
+                self.result_ready.emit("", f"HTTP error {exc.code}: {exc.reason}")
+            return
+        except urllib.error.URLError as exc:
+            self.result_ready.emit("", f"Network error: {exc.reason}")
+            return
+        except OSError as exc:
+            self.result_ready.emit("", f"Connection error: {exc}")
+            return
         except Exception as exc:
             self.result_ready.emit("", str(exc))
+            return
+
+        # ── Parse response ───────────────────────────────────────────────────
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.result_ready.emit("", f"Unexpected response from GitHub: {exc}")
+            return
+
+        if not isinstance(data, dict):
+            self.result_ready.emit("", "Unexpected response format from GitHub.")
+            return
+
+        # GitHub returns {"message": "..."} on API errors (e.g. rate-limited
+        # via an auth header) even with a 200 status code.
+        api_message = data.get("message", "")
+        if api_message and not data.get("tag_name"):
+            self.result_ready.emit("", f"GitHub API error: {api_message}")
+            return
+
+        tag_name = data.get("tag_name", "")
+        if not isinstance(tag_name, str) or not tag_name:
+            self.result_ready.emit("", "No release tag found in GitHub response.")
+            return
+
+        # Strip a single leading 'v' prefix (e.g. "v2026.045" → "2026.045").
+        tag = tag_name[1:] if tag_name.startswith("v") else tag_name
+        if not tag:
+            self.result_ready.emit("", "Could not parse release version from GitHub.")
+            return
+
+        self.result_ready.emit(tag, "")
 
 
 # ---------------------
@@ -2268,6 +2333,7 @@ class Notepad(QMainWindow):
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
+        self.check_updates_act = QAction("Check for Updates...", self)
         self.solveli_act = QAction("Writer (சொல்வெளி) Mode", self)
         self.solveli_act.setToolTip(
             "Configures a set of preferred settings for professional Tamil writers: "
@@ -2280,12 +2346,12 @@ class Notepad(QMainWindow):
             "gutter line numbers, single spacing, zero margins, a compact monospace-friendly "
             "Tamil sans font, auto-save every 2 minutes, and full session restore."
         )
-        self.save_as_solveli_preset_act = QAction("Save as Writer Mode Preset\u2026", self)
+        self.save_as_solveli_preset_act = QAction("Writer Mode Preset", self)
         self.save_as_solveli_preset_act.setToolTip(
             "Save your current settings as the Writer Mode preset in your Documents folder. "
             "Next time you choose Writer Mode, this preset will be loaded instead of the built-in defaults."
         )
-        self.save_as_engineer_preset_act = QAction("Save as Techie Mode Preset\u2026", self)
+        self.save_as_engineer_preset_act = QAction("Techie Mode Preset", self)
         self.save_as_engineer_preset_act.setToolTip(
             "Save your current settings as the Techie Mode preset in your Documents folder. "
             "Next time you choose Techie Mode, this preset will be loaded instead of the built-in defaults."
@@ -2372,13 +2438,16 @@ class Notepad(QMainWindow):
 
         format_menu = menubar.addMenu("F&ormat")
         format_menu.addAction(self.font_act)
-        line_spacing_menu = format_menu.addMenu("Line Spacing")
+        format_menu.addAction(self.wrap_act)
+
+        view_menu = menubar.addMenu("&View")
+        line_spacing_menu = view_menu.addMenu("Line Spacing")
         line_spacing_menu.addAction(self.line_spacing_condensed_act)
         line_spacing_menu.addAction(self.line_spacing_single_act)
         line_spacing_menu.addAction(self.line_spacing_one_half_act)
         line_spacing_menu.addAction(self.line_spacing_double_act)
         line_spacing_menu.addAction(self.line_spacing_triple_act)
-        margins_menu = format_menu.addMenu("Margins")
+        margins_menu = view_menu.addMenu("Margins")
         margins_menu.addAction(self.margin_5_act)
         margins_menu.addAction(self.margin_10_act)
         margins_menu.addAction(self.margin_15_act)
@@ -2386,13 +2455,12 @@ class Notepad(QMainWindow):
         margins_menu.addAction(self.margin_25_act)
         margins_menu.addSeparator()
         margins_menu.addAction(self.margin_reset_act)
-        format_menu.addAction(self.wrap_act)
-
-        view_menu = menubar.addMenu("&View")
+        view_menu.addSeparator()
         view_menu.addAction(self.line_numbers_act)
         view_menu.addAction(self.word_index_act)
-        view_menu.addAction(self.unicode_substring_highlight_act)
         view_menu.addAction(self.auto_hide_scrollbar_act)
+        view_menu.addSeparator()
+        view_menu.addAction(self.unicode_substring_highlight_act)
         view_menu.addSeparator()
         self._status_bar_menu = view_menu.addMenu("Status Bar")
         self._status_bar_menu.addAction(self.status_words_act)
@@ -2419,13 +2487,16 @@ class Notepad(QMainWindow):
         settings_menu.addSeparator()
         settings_menu.addAction(self.appearance_act)
         settings_menu.addAction(self.keyboards_act)
+        settings_menu.addSeparator()
+        save_preset_menu = settings_menu.addMenu("Save current settings to")
+        save_preset_menu.addAction(self.save_as_solveli_preset_act)
+        save_preset_menu.addAction(self.save_as_engineer_preset_act)
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction(self.solveli_act)
         help_menu.addAction(self.engineer_act)
         help_menu.addSeparator()
-        help_menu.addAction(self.save_as_solveli_preset_act)
-        help_menu.addAction(self.save_as_engineer_preset_act)
+        help_menu.addAction(self.check_updates_act)
         help_menu.addSeparator()
         help_menu.addAction(self.about_act)
         help_menu.addSeparator()
@@ -2585,8 +2656,7 @@ class Notepad(QMainWindow):
         # non-intrusively. No dialog, no interruption.
         self._pending_update_version = latest
         menubar = self.menuBar()
-        for i in range(menubar.actions().__len__()):
-            act = menubar.actions()[i]
+        for act in menubar.actions():
             if act.text() in ("&Help", "Help"):
                 act.setText("&Help  ●")
                 break
@@ -3134,12 +3204,14 @@ class Notepad(QMainWindow):
     def _ensure_find_dialog(self) -> FindReplaceDialog:
         if self._find_dialog is None:
             self._find_dialog = FindReplaceDialog(self, replace_enabled=False)
+            self._find_dialog.setStyleSheet(self._make_dialog_stylesheet())
             self._find_dialog.find_next.connect(self._on_find_request)
         return self._find_dialog
 
     def _ensure_replace_dialog(self) -> FindReplaceDialog:
         if self._replace_dialog is None:
             self._replace_dialog = FindReplaceDialog(self, replace_enabled=True)
+            self._replace_dialog.setStyleSheet(self._make_dialog_stylesheet())
             self._replace_dialog.find_next.connect(self._on_find_request)
             self._replace_dialog.replace.connect(self._on_replace_request)
             self._replace_dialog.replace_all.connect(self._on_replace_all_request)
@@ -3719,7 +3791,8 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Insert Image")
         dialog.setMinimumWidth(500)
-        
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
+
         layout = QVBoxLayout()
         
         # URL input
@@ -3801,7 +3874,8 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Insert Hyperlink")
         dialog.setMinimumWidth(500)
-        
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
+
         layout = QVBoxLayout()
         
         # Text input
@@ -3977,6 +4051,7 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Export Successful")
         dialog.setMinimumWidth(560)
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
 
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel(f"{export_label} exported to:"))
@@ -4345,6 +4420,7 @@ class Notepad(QMainWindow):
         dialog.setWindowTitle("Debug Info")
         dialog.setMinimumSize(600, 460)
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
 
         layout = QVBoxLayout(dialog)
 
@@ -4373,10 +4449,20 @@ class Notepad(QMainWindow):
             dialog
         )
         warning_label.setWordWrap(True)
-        warning_label.setStyleSheet(
-            "color: #8B4513; background: #FFF8DC; "
-            "border: 1px solid #DEB887; border-radius: 4px; padding: 6px;"
-        )
+        # Use palette-aware colors so the warning is readable in both light and dark mode.
+        _warn_is_dark = self._is_os_dark_mode() if self._appearance_theme_mode == "follow_os" \
+            else (self._appearance_theme_mode == "dark")
+        if _warn_is_dark:
+            _warn_style = (
+                "color: #f0b860; background: #3a3000; "
+                "border: 1px solid #7a6000; border-radius: 4px; padding: 6px;"
+            )
+        else:
+            _warn_style = (
+                "color: #8B4513; background: #FFF8DC; "
+                "border: 1px solid #DEB887; border-radius: 4px; padding: 6px;"
+            )
+        warning_label.setStyleSheet(_warn_style)
         layout.addWidget(warning_label)
 
         def _path_row(label_text: str, file_path: Path) -> QWidget:
@@ -4531,6 +4617,7 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Language Switch")
         dialog.setMinimumWidth(520)
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
 
         outer = QVBoxLayout(dialog)
         outer.setSpacing(10)
@@ -4683,6 +4770,7 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Reading Time")
         dialog.setMinimumWidth(560)
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
 
         outer = QVBoxLayout(dialog)
         outer.setSpacing(10)
@@ -4754,6 +4842,7 @@ class Notepad(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Appearance")
         dialog.setMinimumWidth(520)
+        dialog.setStyleSheet(self._make_dialog_stylesheet())
 
         outer = QVBoxLayout(dialog)
         outer.setSpacing(8)
@@ -5059,10 +5148,191 @@ class Notepad(QMainWindow):
             self._apply_word_index_preferences()
             self._save_preferences()
 
+    def _make_dialog_stylesheet(self) -> str:
+        """Return a comprehensive CSS stylesheet to apply to every custom QDialog.
+
+        On macOS the native QMacStyle uses AppKit to draw widgets and mostly ignores
+        QPalette.  Setting an explicit stylesheet forces Qt to use its own cross-
+        platform renderer for every widget inside the dialog, giving us full control
+        over colors in both dark and light modes.
+
+        Widget-level stylesheets set directly on individual widgets (e.g. the ⓘ info
+        button, separator lines, or special warning labels) take precedence over this
+        dialog-level stylesheet for those specific widgets, so they are unaffected.
+        """
+        # Determine current visual mode from the app palette.
+        # By the time any dialog is opened, _apply_theme_preferences() has already
+        # set the palette correctly, so the Window color is a reliable proxy.
+        app = QApplication.instance()
+        # On macOS, AppKit draws the dialog WINDOW BACKGROUND based on the OS
+        # dark/light setting and completely ignores the Qt stylesheet rule
+        # `QDialog { background-color: ... }`.  If we derive dark/light from our
+        # forced/custom app palette instead of the OS setting, we end up with
+        # e.g. white label text on a white AppKit window (user has "Force Dark"
+        # on a light-mode Mac) — invisible text.  Using the actual OS dark/light
+        # state ensures label and control text colors contrast against whatever
+        # AppKit draws for the window background.
+        # On Windows, Qt owns the window background, so CSS and app palette both
+        # work and we correctly honour the forced preference.
+        if sys.platform == "darwin":
+            dark = self._is_os_dark_mode()
+        else:
+            dark = app is not None and app.palette().window().color().lightness() < 128
+
+        if dark:
+            bg       = "#1e1f22"
+            bg_input = "#2b2d30"
+            bg_alt   = "#26282b"
+            bg_btn   = "#2d2f33"
+            bg_hov   = "#3a3d42"
+            border   = "#555759"
+            text     = "#f1f3f4"
+            sel_bg   = "#3574f0"
+            sel_fg   = "#ffffff"
+            scroll_h = "#5a5d62"
+        else:
+            bg       = "#f5f5f5"
+            bg_input = "#ffffff"
+            bg_alt   = "#ebebeb"
+            bg_btn   = "#e0e0e0"
+            bg_hov   = "#d0d0d0"
+            border   = "#c0c0c0"
+            text     = "#1f1f1f"
+            sel_bg   = "#0078d4"
+            sel_fg   = "#ffffff"
+            scroll_h = "#a0a0a0"
+
+        return (
+            # ── Dialog & container backgrounds ───────────────────────────────
+            f"QDialog {{ background-color: {bg}; color: {text}; }}"
+            # Container QWidgets (HBoxLayout/VBoxLayout holders) are transparent
+            # so the dialog background shows through.
+            f"QWidget {{ background-color: transparent; color: {text}; }}"
+            # ── Labels ───────────────────────────────────────────────────────
+            f"QLabel {{ color: {text}; background-color: transparent; }}"
+            # ── Buttons ──────────────────────────────────────────────────────
+            f"QPushButton {{"
+            f"  background-color: {bg_btn}; color: {text};"
+            f"  border: 1px solid {border}; border-radius: 4px;"
+            f"  padding: 4px 12px; min-height: 20px;"
+            f"}}"
+            f"QPushButton:hover {{ background-color: {bg_hov}; }}"
+            f"QPushButton:pressed {{ background-color: {border}; }}"
+            # Flat buttons (ⓘ info buttons) keep their own widget stylesheet.
+            f"QPushButton:flat {{ background-color: transparent; border: none; }}"
+            f"QPushButton:flat:hover {{ background-color: {bg_hov}; }}"
+            # ── Text inputs ───────────────────────────────────────────────────
+            f"QLineEdit {{"
+            f"  background-color: {bg_input}; color: {text};"
+            f"  border: 1px solid {border}; border-radius: 3px; padding: 2px 4px;"
+            f"}}"
+            f"QLineEdit:read-only {{ background-color: {bg_alt}; }}"
+            f"QTextEdit, QPlainTextEdit {{"
+            f"  background-color: {bg_input}; color: {text};"
+            f"  border: 1px solid {border}; border-radius: 3px;"
+            f"}}"
+            # ── SpinBox ───────────────────────────────────────────────────────
+            f"QSpinBox {{"
+            f"  background-color: {bg_input}; color: {text};"
+            f"  border: 1px solid {border}; border-radius: 3px; padding: 1px 20px 1px 3px;"
+            f"}}"
+            f"QSpinBox::up-button {{"
+            f"  subcontrol-origin: border; subcontrol-position: top right;"
+            f"  width: 18px; background-color: {bg_btn};"
+            f"  border-left: 1px solid {border}; border-bottom: 1px solid {border};"
+            f"  border-top-right-radius: 3px;"
+            f"}}"
+            f"QSpinBox::down-button {{"
+            f"  subcontrol-origin: border; subcontrol-position: bottom right;"
+            f"  width: 18px; background-color: {bg_btn};"
+            f"  border-left: 1px solid {border}; border-bottom-right-radius: 3px;"
+            f"}}"
+            f"QSpinBox::up-arrow {{"
+            f"  width: 0; height: 0;"
+            f"  border-left: 4px solid transparent; border-right: 4px solid transparent;"
+            f"  border-bottom: 5px solid {text};"
+            f"}}"
+            f"QSpinBox::down-arrow {{"
+            f"  width: 0; height: 0;"
+            f"  border-left: 4px solid transparent; border-right: 4px solid transparent;"
+            f"  border-top: 5px solid {text};"
+            f"}}"
+            # ── ComboBox ──────────────────────────────────────────────────────
+            f"QComboBox {{"
+            f"  background-color: {bg_btn}; color: {text};"
+            f"  border: 1px solid {border}; border-radius: 3px; padding: 1px 20px 1px 6px;"
+            f"}}"
+            f"QComboBox::drop-down {{"
+            f"  subcontrol-origin: padding; subcontrol-position: top right;"
+            f"  width: 18px; border-left: 1px solid {border};"
+            f"}}"
+            f"QComboBox::down-arrow {{"
+            f"  width: 0; height: 0;"
+            f"  border-left: 4px solid transparent; border-right: 4px solid transparent;"
+            f"  border-top: 5px solid {text};"
+            f"}}"
+            f"QComboBox QAbstractItemView {{"
+            f"  background-color: {bg}; color: {text};"
+            f"  selection-background-color: {sel_bg}; selection-color: {sel_fg};"
+            f"  border: 1px solid {border};"
+            f"}}"
+            # ── CheckBox ──────────────────────────────────────────────────────
+            # Only style text; let Qt's built-in renderer draw the indicator using
+            # the app palette (Button / ButtonText roles) so the checkmark shows.
+            f"QCheckBox {{ color: {text}; background-color: transparent; }}"
+            # ── RadioButton ───────────────────────────────────────────────────
+            f"QRadioButton {{ color: {text}; background-color: transparent; }}"
+            # ── GroupBox ─────────────────────────────────────────────────────
+            f"QGroupBox {{"
+            f"  color: {text}; border: 1px solid {border}; border-radius: 4px;"
+            f"  margin-top: 8px; padding-top: 8px;"
+            f"}}"
+            f"QGroupBox::title {{ color: {text}; subcontrol-origin: margin; left: 8px; }}"
+            # ── ScrollBar ────────────────────────────────────────────────────
+            f"QScrollBar:vertical {{"
+            f"  background: {bg_alt}; width: 10px; border-radius: 5px; margin: 0;"
+            f"}}"
+            f"QScrollBar::handle:vertical {{"
+            f"  background: {scroll_h}; border-radius: 5px; min-height: 20px;"
+            f"}}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}"
+            # ── Slider ───────────────────────────────────────────────────────
+            f"QSlider::groove:horizontal {{"
+            f"  background: {border}; height: 4px; border-radius: 2px;"
+            f"}}"
+            f"QSlider::handle:horizontal {{"
+            f"  background: {sel_bg}; width: 14px; height: 14px;"
+            f"  border-radius: 7px; margin: -5px 0;"
+            f"}}"
+            # ── DialogButtonBox ───────────────────────────────────────────────
+            f"QDialogButtonBox QPushButton {{ min-width: 72px; }}"
+        )
+
     def _is_os_dark_mode(self) -> bool:
+        """Return True when the OS is currently in dark mode.
+
+        Tries methods in order of reliability:
+        1. QStyleHints.colorScheme() — Qt 6.5+, reads directly from the OS/platform
+           plugin and is completely unaffected by any app.setPalette() calls we made.
+        2. The OS-palette snapshot stored before the first theme change (see main()).
+        3. The current app palette as a last resort (unreliable if already modified).
+        """
         app = QApplication.instance()
         if app is None:
             return False
+        # Method 1: Qt 6.5+ styleHints — most reliable, OS-level signal.
+        try:
+            from PySide6.QtCore import Qt as _Qt
+            if hasattr(_Qt, "ColorScheme"):
+                cs = app.styleHints().colorScheme()
+                return cs == _Qt.ColorScheme.Dark
+        except Exception:
+            pass
+        # Method 2: pre-theme OS palette snapshot captured in main().
+        native = getattr(app, "_neight_os_palette", None)
+        if native is not None:
+            return native.window().color().lightness() < 128
+        # Method 3: current palette (may already be our custom dark palette).
         return app.palette().window().color().lightness() < 128
 
     def _apply_theme_preferences(self):
@@ -5074,20 +5344,55 @@ class Notepad(QMainWindow):
         if app is None:
             return
 
-        if mode == "dark":
+        dark = mode == "dark"
+
+        if dark:
             bg = QColor("#1e1f22")
             fg = QColor("#f1f3f4")
+            btn_bg    = QColor("#2d2f33")  # button face — slightly lighter than Window
+            highlight = QColor("#3574f0")  # selection / active item
+            tip_bg    = QColor("#3c3f41")
+            tip_fg    = QColor("#e8eaed")
+            link_col  = QColor("#589df6")
+            mid_col   = QColor("#555759")
+            midlight  = QColor("#4a4c4e")
+            light_col = QColor("#545659")
+            dark_col  = QColor("#2b2d2f")
+            shadow    = QColor("#0d0d0d")
+            ph_col    = QColor("#888888")  # placeholder text
         elif mode == "light":
             bg = QColor("#ffffff")
             fg = QColor("#1f1f1f")
-        else:
+            btn_bg    = QColor("#e0e0e0")
+            highlight = QColor("#0078d4")
+            tip_bg    = QColor("#fffdd0")
+            tip_fg    = QColor("#1f1f1f")
+            link_col  = QColor("#0066cc")
+            mid_col   = QColor("#a0a0a0")
+            midlight  = QColor("#d0d0d0")
+            light_col = QColor("#f8f8f8")
+            dark_col  = QColor("#989898")
+            shadow    = QColor("#696969")
+            ph_col    = QColor("#888888")
+        else:  # custom
             bg = QColor(self._normalize_hex_color(getattr(self, "_appearance_custom_bg", "#202124"), "#202124"))
             fg = QColor(self._normalize_hex_color(getattr(self, "_appearance_custom_fg", "#f1f3f4"), "#f1f3f4"))
+            is_dark_custom = bg.lightness() < 128
+            btn_bg    = bg.lighter(130) if is_dark_custom else bg.darker(110)
+            highlight = QColor("#3574f0") if is_dark_custom else QColor("#0078d4")
+            tip_bg    = bg.lighter(140) if is_dark_custom else bg.darker(108)
+            tip_fg    = fg
+            link_col  = QColor("#589df6") if is_dark_custom else QColor("#0066cc")
+            mid_col   = bg.lighter(160) if is_dark_custom else bg.darker(125)
+            midlight  = bg.lighter(145) if is_dark_custom else bg.darker(112)
+            light_col = bg.lighter(155) if is_dark_custom else bg.lighter(110)
+            dark_col  = bg.lighter(120) if is_dark_custom else bg.darker(115)
+            shadow    = bg.darker(180)  if is_dark_custom else bg.darker(150)
+            ph_col    = QColor("#888888")
 
-        palette = app.palette()
+        palette = QPalette()  # Start fresh — avoids inheriting stale platform roles.
 
         # Qt6 (PySide6) uses scoped enums: QPalette.ColorRole.Window, etc.
-        # Qt5 also exposes flat aliases, so support both forms safely.
         color_role_enum = getattr(type(palette), "ColorRole", None)
 
         def _role(name: str):
@@ -5095,16 +5400,38 @@ class Notepad(QMainWindow):
                 return getattr(color_role_enum, name)
             return getattr(type(palette), name)
 
-        palette.setColor(_role("Window"), bg)
-        palette.setColor(_role("Base"), bg)
         if bg.lightness() < 128:
             alt_base = bg.lighter(118)
         else:
             alt_base = bg.darker(104)
+
+        # ── Core content roles ───────────────────────────────────────────
+        palette.setColor(_role("Window"),        bg)
+        palette.setColor(_role("WindowText"),    fg)
+        palette.setColor(_role("Base"),          bg)
         palette.setColor(_role("AlternateBase"), alt_base)
-        palette.setColor(_role("Text"), fg)
-        palette.setColor(_role("WindowText"), fg)
-        palette.setColor(_role("ButtonText"), fg)
+        palette.setColor(_role("Text"),          fg)
+        palette.setColor(_role("BrightText"),    fg)
+        palette.setColor(_role("PlaceholderText"), ph_col)
+        # ── Button roles ─────────────────────────────────────────────────
+        palette.setColor(_role("Button"),        btn_bg)
+        palette.setColor(_role("ButtonText"),    fg)
+        # ── Selection roles ──────────────────────────────────────────────
+        palette.setColor(_role("Highlight"),         highlight)
+        palette.setColor(_role("HighlightedText"),   QColor("#ffffff"))
+        # ── Tooltip roles ────────────────────────────────────────────────
+        palette.setColor(_role("ToolTipBase"), tip_bg)
+        palette.setColor(_role("ToolTipText"), tip_fg)
+        # ── Link ─────────────────────────────────────────────────────────
+        palette.setColor(_role("Link"),        link_col)
+        palette.setColor(_role("LinkVisited"), link_col.darker(120))
+        # ── Border / 3-D shading roles ───────────────────────────────────
+        palette.setColor(_role("Mid"),      mid_col)
+        palette.setColor(_role("Midlight"), midlight)
+        palette.setColor(_role("Light"),    light_col)
+        palette.setColor(_role("Dark"),     dark_col)
+        palette.setColor(_role("Shadow"),   shadow)
+
         app.setPalette(palette)
         self.editor.viewport().update()
         self.editor.lineNumberArea.update()
@@ -5602,10 +5929,6 @@ class Notepad(QMainWindow):
             pass  # read-only or unusual FS — callers handle write failures
         return docs
 
-    def change_font(self):
-        current_font = self.editor.font()
-        ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
-
     def _apply_solveli_preset(self):
         """Apply the சொல்வெளி (Writer) Mode professional-writer preset.
 
@@ -5627,39 +5950,65 @@ class Notepad(QMainWindow):
         single JSON write so the file is never left in a partial/corrupt state.
         """
         # ── 0. Check for a saved user preset ─────────────────────────────────
+        # Preset files are small JSON objects; anything larger than 512 KB is
+        # treated as corrupt / malicious and silently ignored.
+        _PRESET_MAX_BYTES = 512 * 1024
         preset_path = self._get_user_documents_dir() / "writer_mode.json"
+        _writer_preset_bad = False   # set True when the file must be rewritten
+        _writer_preset_bad_reason = ""  # human-readable reason for the status bar
         if preset_path.exists():
             try:
-                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
-            except Exception:
-                preset_data = None
-            if isinstance(preset_data, dict):
-                # Preserve machine-local keys so applying a preset from another
-                # machine never opens a stale file path or resizes the window.
-                _MACHINE_LOCAL = {
-                    "last_opened_file", "default_directory",
-                    "window_size", "window_maximized",
-                }
-                merged = {**preset_data}
-                for k in _MACHINE_LOCAL:
-                    if k in self._settings_cache:
-                        merged[k] = self._settings_cache[k]
-                self._apply_settings_dict(merged)
-                self._settings_cache = merged
-                _interval = self._autosave_interval_minutes
-                if _interval > 0 and self.current_path:
-                    self.autosave_timer.start(_interval * 60 * 1000)
-                    self.autosave_enabled = True
-                else:
-                    self.autosave_timer.stop()
-                    self.autosave_enabled = False
-                self._save_preferences()
-                self._update_status_bar()
-                self.status.showMessage(
-                    "Writer (\u0b9a\u0bca\u0bb2\u0bcd\u0bb5\u0bc6\u0bb3\u0bbf) Mode applied from your saved preset", 3000
-                )
-                return
-            # Preset file exists but is invalid/corrupt \u2014 fall through to built-in defaults.
+                file_size = preset_path.stat().st_size
+            except OSError:
+                file_size = 0
+            if file_size > _PRESET_MAX_BYTES:
+                _writer_preset_bad = True
+                _writer_preset_bad_reason = "Writer Mode preset was too large — reset to factory defaults"
+            else:
+                try:
+                    preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+                except Exception:
+                    preset_data = None
+                    _writer_preset_bad = True
+                    _writer_preset_bad_reason = "Writer Mode preset was corrupt — reset to factory defaults"
+                if not _writer_preset_bad:
+                    if isinstance(preset_data, dict):
+                        try:
+                            # Preserve machine-local keys so applying a preset from
+                            # another machine never opens a stale file path or
+                            # resizes the window.
+                            _MACHINE_LOCAL = {
+                                "last_opened_file", "default_directory",
+                                "window_size", "window_maximized",
+                            }
+                            merged = {**preset_data}
+                            for k in _MACHINE_LOCAL:
+                                if k in self._settings_cache:
+                                    merged[k] = self._settings_cache[k]
+                            self._apply_settings_dict(merged)
+                            self._settings_cache = merged
+                            _interval = self._autosave_interval_minutes
+                            if _interval > 0 and self.current_path:
+                                self.autosave_timer.start(_interval * 60 * 1000)
+                                self.autosave_enabled = True
+                            else:
+                                self.autosave_timer.stop()
+                                self.autosave_enabled = False
+                            self._save_preferences()
+                            self._update_status_bar()
+                            self.status.showMessage(
+                                "Writer (\u0b9a\u0bca\u0bb2\u0bcd\u0bb5\u0bc6\u0bb3\u0bbf) Mode applied from your saved preset", 3000
+                            )
+                            return
+                        except Exception:
+                            # Preset could not be applied — fall through to factory defaults
+                            # and rewrite the file so the next invocation is clean.
+                            _writer_preset_bad = True
+                            _writer_preset_bad_reason = "Writer Mode preset failed to apply — reset to factory defaults"
+                    else:
+                        _writer_preset_bad = True
+                        _writer_preset_bad_reason = "Writer Mode preset was invalid — reset to factory defaults"
+        # File missing, corrupt, oversized, or unapplyable — use factory defaults.
 
         # ── 1. Margins ──────────────────────────────────────────────────────
         self.editor.setTextMarginPercent(25)
@@ -5676,39 +6025,6 @@ class Notepad(QMainWindow):
         self._line_spacing_preset = "double"
         self._apply_line_spacing_to_document(self._line_spacing_percent_for_preset("double"))
         self._update_line_spacing_menu("double")
-
-        # ── 3. Font ─────────────────────────────────────────────────────────
-        # macOS: use the first Tamil-script font the OS advertises.
-        # Windows: use Nirmala UI if present; otherwise set size only.
-        # The entire block is guarded so a font-lookup failure never aborts
-        # the rest of the preset.
-        try:
-            if sys.platform == "darwin":
-                try:
-                    tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
-                    found_family = tamil_families[0] if tamil_families else None
-                except Exception:
-                    found_family = None
-                if found_family:
-                    new_font = QFont(found_family, 24)
-                else:
-                    new_font = QFont()
-                    new_font.setPointSize(24)
-            else:
-                all_families = QFontDatabase.families()
-                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
-                if nirmala:
-                    new_font = QFont(nirmala, 24)
-                else:
-                    new_font = QFont()
-                    new_font.setPointSize(24)
-            new_font.setWeight(QFont.Weight.Normal)
-            self.editor.setFont(new_font)
-        except Exception:
-            # Last-resort fallback: apply size only, never crash the preset.
-            _fb = QFont()
-            _fb.setPointSize(24)
-            self.editor.setFont(_fb)
 
         # ── 4. Status bar ────────────────────────────────────────────────────
         # Words: ON
@@ -5797,8 +6113,50 @@ class Notepad(QMainWindow):
         self._appearance_theme_mode = "follow_os"
         self._apply_theme_preferences()
 
+        # ── 11b. Font — applied AFTER _apply_theme_preferences() so the palette
+        #         repolish from app.setPalette() cannot reset the widget font.
+        # macOS: try "Tamil MN" at 24 pt; fall back to size-only if absent.
+        # Windows: try Nirmala UI at 24 pt; fall back to size-only.
+        try:
+            if sys.platform == "darwin":
+                if QFontDatabase.hasFamily("Tamil MN"):
+                    new_font = QFont("Tamil MN", 24)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(24)
+            else:
+                all_families = QFontDatabase.families()
+                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
+                if nirmala:
+                    new_font = QFont(nirmala, 24)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(24)
+            new_font.setWeight(QFont.Weight.Normal)
+            self.editor.setFont(new_font)
+        except Exception:
+            _fb = QFont()
+            _fb.setPointSize(24)
+            self.editor.setFont(_fb)
+
         # ── 12. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
+
+        # ── 12a. Rewrite a bad preset file with the fresh factory defaults ────
+        # Done silently — no dialog, no interruption.
+        if _writer_preset_bad and _writer_preset_bad_reason:
+            _tmp = preset_path.with_suffix(".tmp")
+            try:
+                _tmp.write_text(
+                    json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                os.replace(str(_tmp), str(preset_path))
+            except OSError:
+                try:
+                    _tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
         # ── 13. Tamil Anjal typing layout ────────────────────────────────────
         # Done after the save so a layout-switch failure cannot corrupt JSON.
@@ -5811,7 +6169,10 @@ class Notepad(QMainWindow):
 
         # Refresh word count display immediately.
         self._update_status_bar()
-        self.status.showMessage("Writer (சொல்வெளி) Mode applied", 3000)
+        if _writer_preset_bad and _writer_preset_bad_reason:
+            self.status.showMessage(_writer_preset_bad_reason, 4000)
+        else:
+            self.status.showMessage("Writer (சொல்வெளி) Mode applied", 3000)
 
     def _apply_engineer_preset(self):
         """Apply the நுட்பர் (Techie) Mode preset.
@@ -5833,39 +6194,65 @@ class Notepad(QMainWindow):
         single atomic JSON write so the file is never left in a partial state.
         """
         # ── 0. Check for a saved user preset ─────────────────────────────────
+        # Preset files are small JSON objects; anything larger than 512 KB is
+        # treated as corrupt / malicious and silently ignored.
+        _PRESET_MAX_BYTES = 512 * 1024
         preset_path = self._get_user_documents_dir() / "techie_mode.json"
+        _techie_preset_bad = False   # set True when the file must be rewritten
+        _techie_preset_bad_reason = ""  # human-readable reason for the status bar
         if preset_path.exists():
             try:
-                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
-            except Exception:
-                preset_data = None
-            if isinstance(preset_data, dict):
-                # Preserve machine-local keys so applying a preset from another
-                # machine never opens a stale file path or resizes the window.
-                _MACHINE_LOCAL = {
-                    "last_opened_file", "default_directory",
-                    "window_size", "window_maximized",
-                }
-                merged = {**preset_data}
-                for k in _MACHINE_LOCAL:
-                    if k in self._settings_cache:
-                        merged[k] = self._settings_cache[k]
-                self._apply_settings_dict(merged)
-                self._settings_cache = merged
-                _interval = self._autosave_interval_minutes
-                if _interval > 0 and self.current_path:
-                    self.autosave_timer.start(_interval * 60 * 1000)
-                    self.autosave_enabled = True
-                else:
-                    self.autosave_timer.stop()
-                    self.autosave_enabled = False
-                self._save_preferences()
-                self._update_status_bar()
-                self.status.showMessage(
-                    "Techie (\u0ba8\u0bc1\u0b9f\u0bcd\u0baa\u0bb0\u0bcd) Mode applied from your saved preset", 3000
-                )
-                return
-            # Preset file exists but is invalid/corrupt \u2014 fall through to built-in defaults.
+                file_size = preset_path.stat().st_size
+            except OSError:
+                file_size = 0
+            if file_size > _PRESET_MAX_BYTES:
+                _techie_preset_bad = True
+                _techie_preset_bad_reason = "Techie Mode preset was too large — reset to factory defaults"
+            else:
+                try:
+                    preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+                except Exception:
+                    preset_data = None
+                    _techie_preset_bad = True
+                    _techie_preset_bad_reason = "Techie Mode preset was corrupt — reset to factory defaults"
+                if not _techie_preset_bad:
+                    if isinstance(preset_data, dict):
+                        try:
+                            # Preserve machine-local keys so applying a preset from
+                            # another machine never opens a stale file path or
+                            # resizes the window.
+                            _MACHINE_LOCAL = {
+                                "last_opened_file", "default_directory",
+                                "window_size", "window_maximized",
+                            }
+                            merged = {**preset_data}
+                            for k in _MACHINE_LOCAL:
+                                if k in self._settings_cache:
+                                    merged[k] = self._settings_cache[k]
+                            self._apply_settings_dict(merged)
+                            self._settings_cache = merged
+                            _interval = self._autosave_interval_minutes
+                            if _interval > 0 and self.current_path:
+                                self.autosave_timer.start(_interval * 60 * 1000)
+                                self.autosave_enabled = True
+                            else:
+                                self.autosave_timer.stop()
+                                self.autosave_enabled = False
+                            self._save_preferences()
+                            self._update_status_bar()
+                            self.status.showMessage(
+                                "Techie (\u0ba8\u0bc1\u0b9f\u0bcd\u0baa\u0bb0\u0bcd) Mode applied from your saved preset", 3000
+                            )
+                            return
+                        except Exception:
+                            # Preset could not be applied — fall through to factory defaults
+                            # and rewrite the file so the next invocation is clean.
+                            _techie_preset_bad = True
+                            _techie_preset_bad_reason = "Techie Mode preset failed to apply — reset to factory defaults"
+                    else:
+                        _techie_preset_bad = True
+                        _techie_preset_bad_reason = "Techie Mode preset was invalid — reset to factory defaults"
+        # File missing, corrupt, oversized, or unapplyable — use factory defaults.
 
         # ── 1. Margins ──────────────────────────────────────────────────────
         self._set_text_margin_percent(0, save=False, show_status=False)
@@ -5876,39 +6263,6 @@ class Notepad(QMainWindow):
             self._line_spacing_percent_for_preset("single_line")
         )
         self._update_line_spacing_menu("single_line")
-
-        # ── 3. Font ─────────────────────────────────────────────────────────
-        # macOS: use the first Tamil-script font the OS advertises.
-        # Windows: use Nirmala UI if present; otherwise set size only.
-        # The entire block is guarded so a font-lookup failure never aborts
-        # the rest of the preset.
-        try:
-            if sys.platform == "darwin":
-                try:
-                    tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
-                    found_family = tamil_families[0] if tamil_families else None
-                except Exception:
-                    found_family = None
-                if found_family:
-                    new_font = QFont(found_family, 14)
-                else:
-                    new_font = QFont()
-                    new_font.setPointSize(14)
-            else:
-                all_families = QFontDatabase.families()
-                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
-                if nirmala:
-                    new_font = QFont(nirmala, 14)
-                else:
-                    new_font = QFont()
-                    new_font.setPointSize(14)
-            new_font.setWeight(QFont.Weight.Normal)
-            self.editor.setFont(new_font)
-        except Exception:
-            # Last-resort fallback: apply size only, never crash the preset.
-            _fb = QFont()
-            _fb.setPointSize(14)
-            self.editor.setFont(_fb)
 
         # ── 4. Status bar — all counters ON ──────────────────────────────────
         # Words
@@ -5992,20 +6346,83 @@ class Notepad(QMainWindow):
         self._appearance_theme_mode = "follow_os"
         self._apply_theme_preferences()
 
+        # ── 11b. Font — applied AFTER _apply_theme_preferences() so the palette
+        #         repolish from app.setPalette() cannot reset the widget font.
+        # macOS: try "Tamil Sangam MN" at 14 pt; fall back to size-only if absent.
+        # Windows: try Nirmala UI at 14 pt; fall back to size-only.
+        try:
+            if sys.platform == "darwin":
+                if QFontDatabase.hasFamily("Tamil Sangam MN"):
+                    new_font = QFont("Tamil Sangam MN", 14)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(14)
+            else:
+                all_families = QFontDatabase.families()
+                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
+                if nirmala:
+                    new_font = QFont(nirmala, 14)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(14)
+            new_font.setWeight(QFont.Weight.Normal)
+            self.editor.setFont(new_font)
+        except Exception:
+            _fb = QFont()
+            _fb.setPointSize(14)
+            self.editor.setFont(_fb)
+
         # ── 12. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
 
+        # ── 12a. Rewrite a bad preset file with the fresh factory defaults ────
+        # Done silently — no dialog, no interruption.
+        if _techie_preset_bad and _techie_preset_bad_reason:
+            _tmp = preset_path.with_suffix(".tmp")
+            try:
+                _tmp.write_text(
+                    json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                os.replace(str(_tmp), str(preset_path))
+            except OSError:
+                try:
+                    _tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
         # Refresh status bar display immediately.
         self._update_status_bar()
-        self.status.showMessage("Techie (நுட்பர்) Mode applied", 3000)
+        if _techie_preset_bad and _techie_preset_bad_reason:
+            self.status.showMessage(_techie_preset_bad_reason, 4000)
+        else:
+            self.status.showMessage("Techie (நுட்பர்) Mode applied", 3000)
 
     def change_font(self):
         current_font = self.editor.font()
-        ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
-        if ok:
+        # Use a QFontDialog instance instead of the static getFont() so we can:
+        #   1. Force Qt's own cross-platform dialog on macOS (DontUseNativeDialog)
+        #      — the native NSFontPanel does not reliably pre-select the font we pass.
+        #   2. Apply our theme stylesheet so the dialog is readable in dark mode.
+        dlg = QFontDialog(current_font, self)
+        dlg.setWindowTitle("Choose Font")
+        if sys.platform == "darwin":
+            dlg.setOptions(QFontDialog.FontDialogOption.DontUseNativeDialog)
+        dlg.setStyleSheet(self._make_dialog_stylesheet())
+        if dlg.exec():
+            font = dlg.selectedFont()
             self.editor.setFont(font)
             self._save_preferences()
             self.status.showMessage(f"Font: {font.family()} {font.pointSize()}pt", 1500)
+
+    # Keys that are machine-local and must not be stored in portable preset files.
+    # reopen_last_file_on_launch is intentionally kept — it is a per-mode preference.
+    _PRESET_MACHINE_LOCAL_KEYS: frozenset = frozenset({
+        "default_directory",
+        "window_size",
+        "window_maximized",
+        "last_opened_file",
+    })
 
     def _save_as_solveli_preset(self):
         """Save the current configuration to ~/Documents/neight/writer_mode.json.
@@ -6029,15 +6446,23 @@ class Notepad(QMainWindow):
             return
         # Flush the latest in-memory state to disk and update _settings_cache.
         self._save_preferences()
+        preset_data = {k: v for k, v in self._settings_cache.items()
+                       if k not in self._PRESET_MACHINE_LOCAL_KEYS}
+        tmp_path = preset_path.with_suffix(".tmp")
         try:
-            preset_path.write_text(
-                json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+            tmp_path.write_text(
+                json.dumps(preset_data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            os.replace(str(tmp_path), str(preset_path))
             self.status.showMessage(
                 f"Writer Mode preset saved \u2192 {preset_path}", 4000
             )
         except OSError as exc:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             QMessageBox.critical(
                 self,
                 "Save Failed",
@@ -6065,15 +6490,23 @@ class Notepad(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         self._save_preferences()
+        preset_data = {k: v for k, v in self._settings_cache.items()
+                       if k not in self._PRESET_MACHINE_LOCAL_KEYS}
+        tmp_path = preset_path.with_suffix(".tmp")
         try:
-            preset_path.write_text(
-                json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+            tmp_path.write_text(
+                json.dumps(preset_data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            os.replace(str(tmp_path), str(preset_path))
             self.status.showMessage(
                 f"Techie Mode preset saved \u2192 {preset_path}", 4000
             )
         except OSError as exc:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             QMessageBox.critical(
                 self,
                 "Save Failed",
@@ -6405,11 +6838,14 @@ class Notepad(QMainWindow):
         count = self._apply_word_highlights(selected)
         self._update_word_match_status(selected, count)
 
+    _HIGHLIGHT_MATCH_LIMIT = 1000
+
     def _apply_word_highlights(self, word: str) -> int:
         doc = self.editor.document()
         search_cursor = QTextCursor(doc)
         matches = []
         flags = QTextDocument.FindFlags() if getattr(self, '_unicode_substring_highlight', False) else QTextDocument.FindWholeWords
+        capped = False
 
         while True:
             match_cursor = doc.find(word, search_cursor, flags)
@@ -6423,6 +6859,10 @@ class Notepad(QMainWindow):
             selection.format = fmt
             matches.append(selection)
 
+            if len(matches) >= self._HIGHLIGHT_MATCH_LIMIT:
+                capped = True
+                break
+
             search_cursor = QTextCursor(match_cursor)
             search_cursor.setPosition(match_cursor.selectionEnd())
 
@@ -6433,6 +6873,7 @@ class Notepad(QMainWindow):
         self._base_extra_selections = base_extras
         self._word_highlight_selections = matches
         self._current_highlight_word = word
+        self._word_highlight_capped = capped
         return len(matches)
 
     def _clear_word_highlights(self):
@@ -6447,7 +6888,11 @@ class Notepad(QMainWindow):
         if active_word is None:
             self.word_match_label.setText("")
             return
-        self.word_match_label.setText(f"Matches: {count}")
+        if getattr(self, '_word_highlight_capped', False):
+            self.word_match_label.setText(f"Matches: {count}+")
+            self.status.showMessage(f"Only first {count:,} matches are shown", 4000)
+        else:
+            self.word_match_label.setText(f"Matches: {count}")
 
     @staticmethod
     def _classify_word_script(word: str) -> str:
@@ -6673,6 +7118,12 @@ def main():
     if not initial_file and app._pending_file_open:
         initial_file = app._pending_file_open
         app._pending_file_open = None
+    # Snapshot the unmodified OS palette before any app.setPalette() calls.
+    # Used by _is_os_dark_mode() as a fallback on Qt < 6.5 to ensure the
+    # follow-OS detection is not confused by a palette we have already applied.
+    if not hasattr(app, "_neight_os_palette"):
+        app._neight_os_palette = QPalette(app.palette())
+
     window = Notepad(initial_file=initial_file, restore_last_session=not force_empty_window)
     if getattr(window, "_startup_cancelled", False):
         window.deleteLater()

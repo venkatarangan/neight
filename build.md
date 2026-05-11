@@ -218,16 +218,6 @@ Run them with `python design/<script>.py` when regenerating assets.
 
 ---
 
-## Checking Settings File Location
-
-```bash
-python check_settings_location.py
-```
-
-Prints where `settings.json` will be read from and written to on the current machine, based on whether the app folder is writable. Useful when debugging settings issues.
-
----
-
 ## Repository Layout (developer view)
 
 ```
@@ -242,7 +232,6 @@ release_install_notes.md   Release body text shown on every GitHub Release
 increment_version.py       Version bump utility
 requirements.txt           Python dependencies
 settings.json              Default / dev settings file
-check_settings_location.py Settings path diagnostic
 dist/
   Neight.exe               Windows distributable (committed)
   Neight-mac-arm64-unsigned.app.zip   Unsigned macOS build (committed, for test distribution)
