@@ -2241,17 +2241,27 @@ class Notepad(QMainWindow):
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
-        self.solveli_act = QAction("சொல்வெளி (Writer) Mode", self)
+        self.solveli_act = QAction("Writer (சொல்வெளி) Mode", self)
         self.solveli_act.setToolTip(
             "Configures a set of preferred settings for professional Tamil writers: "
             "generous margins, double spacing, a large Tamil serif font, clean status bar, "
             "auto-save, word wrap, and Tamil Anjal typing layout."
         )
-        self.engineer_act = QAction("நுட்பர் (Techie) Mode", self)
+        self.engineer_act = QAction("Techie (நுட்பர்) Mode", self)
         self.engineer_act.setToolTip(
             "Applies a preset optimised for software engineers: all status bar counters on, "
             "gutter line numbers, single spacing, zero margins, a compact monospace-friendly "
             "Tamil sans font, auto-save every 2 minutes, and full session restore."
+        )
+        self.save_as_solveli_preset_act = QAction("Save as Writer Mode Preset\u2026", self)
+        self.save_as_solveli_preset_act.setToolTip(
+            "Save your current settings as the Writer Mode preset in your Documents folder. "
+            "Next time you choose Writer Mode, this preset will be loaded instead of the built-in defaults."
+        )
+        self.save_as_engineer_preset_act = QAction("Save as Techie Mode Preset\u2026", self)
+        self.save_as_engineer_preset_act.setToolTip(
+            "Save your current settings as the Techie Mode preset in your Documents folder. "
+            "Next time you choose Techie Mode, this preset will be loaded instead of the built-in defaults."
         )
 
     def _create_menus(self):
@@ -2387,6 +2397,9 @@ class Notepad(QMainWindow):
         help_menu.addAction(self.solveli_act)
         help_menu.addAction(self.engineer_act)
         help_menu.addSeparator()
+        help_menu.addAction(self.save_as_solveli_preset_act)
+        help_menu.addAction(self.save_as_engineer_preset_act)
+        help_menu.addSeparator()
         help_menu.addAction(self.about_act)
         help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
@@ -2507,6 +2520,8 @@ class Notepad(QMainWindow):
         self.debug_info_act.triggered.connect(self._show_debug_info)
         self.solveli_act.triggered.connect(self._apply_solveli_preset)
         self.engineer_act.triggered.connect(self._apply_engineer_preset)
+        self.save_as_solveli_preset_act.triggered.connect(self._save_as_solveli_preset)
+        self.save_as_engineer_preset_act.triggered.connect(self._save_as_engineer_preset)
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
@@ -5005,6 +5020,154 @@ class Notepad(QMainWindow):
         self.editor.setWordIndexAdaptiveDensity(self._word_index_adaptive_density)
         self.editor.setWordIndexTopMargin(self._word_index_top_margin)
 
+    def _apply_settings_dict(self, data: dict) -> None:
+        """Apply a settings dict to the live UI without any disk I/O.
+
+        Shared by _load_preferences() (startup / full reload) and the user-preset
+        loader so neither code path duplicates widget-sync logic.
+
+        Deliberately excluded \u2014 handled by the caller:
+          \u2022 default_directory  (machine-local path)
+          \u2022 window_size / window_maximized  (startup-only resize)
+          \u2022 last_opened_file  (startup-only side-effect)
+          \u2022 _settings_cache  (set by the caller after this returns)
+        """
+        # Auto-save interval \u2014 clamp to known valid values
+        _VALID_AUTOSAVE = {0, 2, 5, 15, 30}
+        try:
+            autosave_interval = int(data.get("autosave_interval", 5))
+        except (TypeError, ValueError):
+            autosave_interval = 5
+        if autosave_interval not in _VALID_AUTOSAVE:
+            autosave_interval = 5
+        self._autosave_interval_minutes = autosave_interval
+        self._update_autosave_menu(autosave_interval)
+
+        # Word wrap
+        wrap = data.get("word_wrap", True)
+        self.wrap_act.setChecked(bool(wrap))
+        self.editor.setWordWrap(bool(wrap))
+
+        # Line numbers
+        line_numbers_visible = data.get("line_numbers_visible", True)
+        self.line_numbers_act.setChecked(bool(line_numbers_visible))
+        self.editor.setLineNumbersVisible(bool(line_numbers_visible))
+
+        # Auto-hide scrollbar
+        auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
+        self._auto_hide_scrollbar = auto_hide_scrollbar
+        self.auto_hide_scrollbar_act.blockSignals(True)
+        self.auto_hide_scrollbar_act.setChecked(auto_hide_scrollbar)
+        self.auto_hide_scrollbar_act.blockSignals(False)
+        self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
+
+        # Status bar item visibility
+        self._status_show_words = bool(data.get("status_show_words", True))
+        self._status_show_sentences = bool(data.get("status_show_sentences", True))
+        self._status_show_chars = bool(data.get("status_show_chars", True))
+        self._status_show_line = bool(data.get("status_show_line", True))
+        self._status_show_col = bool(data.get("status_show_col", True))
+        self.status_words_act.setChecked(self._status_show_words)
+        self.status_sentences_act.setChecked(self._status_show_sentences)
+        self.status_chars_act.setChecked(self._status_show_chars)
+        self.status_line_act.setChecked(self._status_show_line)
+        self.status_col_act.setChecked(self._status_show_col)
+        self.words_label.setVisible(self._status_show_words)
+        self.sentences_label.setVisible(self._status_show_sentences)
+        self.chars_label.setVisible(self._status_show_chars)
+        self.line_label.setVisible(self._status_show_line)
+        self.col_label.setVisible(self._status_show_col)
+
+        # Text margins
+        margin_percent = data.get("text_margin_percent", 0)
+        self._set_text_margin_percent(margin_percent, save=False, show_status=False)
+
+        # Line spacing
+        line_spacing_preset = data.get("line_spacing_preset", "single_line")
+        self._set_line_spacing_preset(line_spacing_preset, save=False, show_status=False)
+
+        # Keyboard quick switch settings
+        try:
+            self._installed_imes = get_installed_ime_list()
+        except Exception:
+            self._installed_imes = []
+        _init_keyboard_choices(self._installed_imes)
+        ime_count = len(self._installed_imes)
+        if ime_count < 2:
+            self._quick_switch_enabled = False
+        else:
+            self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
+        self._force_anjal_english = bool(data.get("force_anjal_english", True))
+
+        # Appearance
+        raw_theme_mode = data.get("appearance_theme_mode", "follow_os")
+        raw_custom_bg = data.get("appearance_custom_bg", "#202124")
+        raw_custom_fg = data.get("appearance_custom_fg", "#f1f3f4")
+        self._appearance_theme_mode = self._normalize_theme_mode(raw_theme_mode)
+        self._appearance_custom_bg = self._normalize_hex_color(raw_custom_bg, "#202124")
+        self._appearance_custom_fg = self._normalize_hex_color(raw_custom_fg, "#f1f3f4")
+        self._apply_theme_preferences()
+
+        # Experimental features
+        self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
+        self.unicode_substring_highlight_act.setChecked(self._unicode_substring_highlight)
+        self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
+        self.reading_time_label.setVisible(self._reading_time_enabled)
+        self._word_index_enabled = bool(data.get("word_index_enabled", False))
+        self._word_index_adaptive_density = bool(data.get("word_index_adaptive_density", True))
+        raw_word_index_color = data.get("word_index_color", "white")
+        overlay_defaults = self._word_index_visual_preset_for_color(raw_word_index_color)
+        raw_backdrop_dark = data.get("word_index_backdrop_opacity_dark", overlay_defaults["backdrop_dark"])
+        raw_backdrop_light = data.get("word_index_backdrop_opacity_light", overlay_defaults["backdrop_light"])
+        raw_text_opacity = data.get("word_index_text_opacity", overlay_defaults["text"])
+        raw_halo_dark = data.get("word_index_halo_opacity_dark", overlay_defaults["halo_dark"])
+        raw_halo_light = data.get("word_index_halo_opacity_light", overlay_defaults["halo_light"])
+        raw_word_index_alignment = data.get("word_index_alignment", "right")
+        raw_word_index_top_margin = data.get("word_index_top_margin", 20)
+        self._word_index_backdrop_opacity_dark = self._normalize_opacity(raw_backdrop_dark, 72)
+        self._word_index_backdrop_opacity_light = self._normalize_opacity(raw_backdrop_light, 64)
+        self._word_index_text_opacity = self._normalize_opacity(raw_text_opacity, 255)
+        self._word_index_halo_opacity_dark = self._normalize_opacity(raw_halo_dark, 220)
+        self._word_index_halo_opacity_light = self._normalize_opacity(raw_halo_light, 230)
+        self._word_index_color = self._normalize_word_index_color(raw_word_index_color)
+        self._word_index_alignment = self._normalize_word_index_alignment(raw_word_index_alignment)
+        self._word_index_top_margin = max(0, min(60, int(raw_word_index_top_margin) if str(raw_word_index_top_margin).lstrip('-').isdigit() else 20))
+        self._tamil_reading_wpm = self._normalize_reading_speed(data.get("tamil_reading_wpm", 150), 150)
+        self._english_reading_wpm = self._normalize_reading_speed(data.get("english_reading_wpm", 250), 250)
+        raw_google_prefix = data.get("google_search_url_prefix")
+        raw_sorkuvai_prefix = data.get("sorkuvai_search_url_prefix")
+        self._google_search_url_prefix = self._normalize_search_url_prefix(
+            raw_google_prefix, DEFAULT_GOOGLE_SEARCH_URL_PREFIX
+        )
+        self._sorkuvai_search_url_prefix = self._normalize_search_url_prefix(
+            raw_sorkuvai_prefix, DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
+        )
+        self._apply_word_index_preferences()
+        self.word_index_act.setChecked(self._word_index_enabled)
+
+        # Font \u2014 applied last so _apply_theme_preferences() cannot reset widget font
+        family = data.get("font_family")
+        size = data.get("font_size")
+        if family and isinstance(family, str) and isinstance(size, int) and 4 <= size <= 256:
+            try:
+                font = QFont(family, size)
+                raw_weight = data.get("font_weight")
+                if raw_weight is not None:
+                    try:
+                        font.setWeight(QFont.Weight(int(raw_weight)))
+                    except Exception:
+                        pass
+                self.editor.setFont(font)
+            except Exception:
+                pass
+
+        # Startup behaviour flag (checkbox only; actual file-open is the caller's job)
+        reopen = data.get("reopen_last_file_on_launch", True)
+        self._restore_last_session = bool(reopen)
+        self.reopen_last_act.blockSignals(True)
+        self.reopen_last_act.setChecked(self._restore_last_session)
+        self.reopen_last_act.blockSignals(False)
+
     # --- Preferences ---
     def _load_preferences(self):
         data = self.settings.load()
@@ -5081,187 +5244,32 @@ class Notepad(QMainWindow):
                 self.resize(width, height)
 
         self._restore_maximized = bool(data.get("window_maximized", False))
-        
-        # Auto-save interval — clamp to known valid values; reject any non-int
-        # to prevent TypeError in _start_autosave (interval * 60 * 1000).
-        _VALID_AUTOSAVE = {0, 2, 5, 15, 30}
-        try:
-            autosave_interval = int(data.get("autosave_interval", 5))
-        except (TypeError, ValueError):
-            autosave_interval = 5
-        if autosave_interval not in _VALID_AUTOSAVE:
-            autosave_interval = 5
-        self._autosave_interval_minutes = autosave_interval
-        self._update_autosave_menu(autosave_interval)
-        
-        # Word wrap
-        wrap = data.get("word_wrap", True)
-        self.wrap_act.setChecked(bool(wrap))
-        self.editor.setWordWrap(bool(wrap))
 
-        # Line numbers
-        line_numbers_visible = data.get("line_numbers_visible", True)
-        self.line_numbers_act.setChecked(bool(line_numbers_visible))
-        self.editor.setLineNumbersVisible(bool(line_numbers_visible))
+        self._apply_settings_dict(data)
 
-        # Auto-hide scrollbar
-        auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
-        self._auto_hide_scrollbar = auto_hide_scrollbar
-        self.auto_hide_scrollbar_act.blockSignals(True)
-        self.auto_hide_scrollbar_act.setChecked(auto_hide_scrollbar)
-        self.auto_hide_scrollbar_act.blockSignals(False)
-        self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
-
-        # Status bar item visibility
-        self._status_show_words = bool(data.get("status_show_words", True))
-        self._status_show_sentences = bool(data.get("status_show_sentences", True))
-        self._status_show_chars = bool(data.get("status_show_chars", True))
-        self._status_show_line = bool(data.get("status_show_line", True))
-        self._status_show_col = bool(data.get("status_show_col", True))
-        self.status_words_act.setChecked(self._status_show_words)
-        self.status_sentences_act.setChecked(self._status_show_sentences)
-        self.status_chars_act.setChecked(self._status_show_chars)
-        self.status_line_act.setChecked(self._status_show_line)
-        self.status_col_act.setChecked(self._status_show_col)
-        self.words_label.setVisible(self._status_show_words)
-        self.sentences_label.setVisible(self._status_show_sentences)
-        self.chars_label.setVisible(self._status_show_chars)
-        self.line_label.setVisible(self._status_show_line)
-        self.col_label.setVisible(self._status_show_col)
-
-        # Text margins
-        margin_percent = data.get("text_margin_percent", 0)
-        self._set_text_margin_percent(margin_percent, save=False, show_status=False)
-
-        line_spacing_preset = data.get("line_spacing_preset", "single_line")
-        self._set_line_spacing_preset(line_spacing_preset, save=False, show_status=False)
-
-        # Keyboard quick switch settings
-        try:
-            self._installed_imes = get_installed_ime_list()
-        except Exception:
-            self._installed_imes = []
-        # Detect first Tamil and first English from installed layouts
-        _init_keyboard_choices(self._installed_imes)
-        ime_count = len(self._installed_imes)
-        # If fewer than two layouts are installed, quick switch is impossible
-        if ime_count < 2:
-            self._quick_switch_enabled = False
-        else:
-            self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
-        self._force_anjal_english = bool(data.get("force_anjal_english", True))
-
-        # Appearance
-        raw_theme_mode = data.get("appearance_theme_mode", "follow_os")
-        raw_custom_bg = data.get("appearance_custom_bg", "#202124")
-        raw_custom_fg = data.get("appearance_custom_fg", "#f1f3f4")
-        self._appearance_theme_mode = self._normalize_theme_mode(raw_theme_mode)
-        self._appearance_custom_bg = self._normalize_hex_color(raw_custom_bg, "#202124")
-        self._appearance_custom_fg = self._normalize_hex_color(raw_custom_fg, "#f1f3f4")
-        self._apply_theme_preferences()
-
-        # Experimental features
-        self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
-        self.unicode_substring_highlight_act.setChecked(self._unicode_substring_highlight)
-        self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
-        self._word_index_enabled = bool(data.get("word_index_enabled", False))
-        self._word_index_adaptive_density = bool(data.get("word_index_adaptive_density", True))
-        raw_word_index_color = data.get("word_index_color", "white")
-        overlay_defaults = self._word_index_visual_preset_for_color(raw_word_index_color)
-        raw_backdrop_dark = data.get("word_index_backdrop_opacity_dark", overlay_defaults["backdrop_dark"])
-        raw_backdrop_light = data.get("word_index_backdrop_opacity_light", overlay_defaults["backdrop_light"])
-        raw_text_opacity = data.get("word_index_text_opacity", overlay_defaults["text"])
-        raw_halo_dark = data.get("word_index_halo_opacity_dark", overlay_defaults["halo_dark"])
-        raw_halo_light = data.get("word_index_halo_opacity_light", overlay_defaults["halo_light"])
-        raw_word_index_alignment = data.get("word_index_alignment", "right")
-        raw_word_index_top_margin = data.get("word_index_top_margin", 20)
-        self._word_index_backdrop_opacity_dark = self._normalize_opacity(
-            raw_backdrop_dark, 72
-        )
-        self._word_index_backdrop_opacity_light = self._normalize_opacity(
-            raw_backdrop_light, 64
-        )
-        self._word_index_text_opacity = self._normalize_opacity(
-            raw_text_opacity, 255
-        )
-        self._word_index_halo_opacity_dark = self._normalize_opacity(
-            raw_halo_dark, 220
-        )
-        self._word_index_halo_opacity_light = self._normalize_opacity(
-            raw_halo_light, 230
-        )
-        self._word_index_color = self._normalize_word_index_color(raw_word_index_color)
-        self._word_index_alignment = self._normalize_word_index_alignment(raw_word_index_alignment)
-        self._word_index_top_margin = max(0, min(60, int(raw_word_index_top_margin) if str(raw_word_index_top_margin).lstrip('-').isdigit() else 20))
-        self._tamil_reading_wpm = self._normalize_reading_speed(data.get("tamil_reading_wpm", 150), 150)
-        self._english_reading_wpm = self._normalize_reading_speed(data.get("english_reading_wpm", 250), 250)
-        raw_google_prefix = data.get("google_search_url_prefix")
-        raw_sorkuvai_prefix = data.get("sorkuvai_search_url_prefix")
-        self._google_search_url_prefix = self._normalize_search_url_prefix(
-            raw_google_prefix, DEFAULT_GOOGLE_SEARCH_URL_PREFIX
-        )
-        self._sorkuvai_search_url_prefix = self._normalize_search_url_prefix(
-            raw_sorkuvai_prefix, DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
-        )
-        self._apply_word_index_preferences()
-        self.word_index_act.setChecked(self._word_index_enabled)
-
-        # Seed defaults into settings on first run (or repair invalid/empty values)
-        # so URL patterns can be changed later without rebuilding the app.
-        if (
-            raw_google_prefix != self._google_search_url_prefix
-            or raw_sorkuvai_prefix != self._sorkuvai_search_url_prefix
-            or raw_backdrop_dark != self._word_index_backdrop_opacity_dark
-            or raw_backdrop_light != self._word_index_backdrop_opacity_light
-            or raw_text_opacity != self._word_index_text_opacity
-            or raw_halo_dark != self._word_index_halo_opacity_dark
-            or raw_halo_light != self._word_index_halo_opacity_light
-            or raw_word_index_color != self._word_index_color
-            or raw_word_index_alignment != self._word_index_alignment
-            or raw_theme_mode != self._appearance_theme_mode
-            or raw_custom_bg != self._appearance_custom_bg
-            or raw_custom_fg != self._appearance_custom_fg
-        ):
+        # Seed defaults: on first run or after a partial settings file, persist
+        # any values that were normalised to canonical form so they survive the
+        # next load without re-normalising.
+        _seed = {
+            "google_search_url_prefix":           self._google_search_url_prefix,
+            "sorkuvai_search_url_prefix":         self._sorkuvai_search_url_prefix,
+            "word_index_backdrop_opacity_dark":   self._word_index_backdrop_opacity_dark,
+            "word_index_backdrop_opacity_light":  self._word_index_backdrop_opacity_light,
+            "word_index_text_opacity":            self._word_index_text_opacity,
+            "word_index_halo_opacity_dark":       self._word_index_halo_opacity_dark,
+            "word_index_halo_opacity_light":      self._word_index_halo_opacity_light,
+            "word_index_color":                   self._word_index_color,
+            "word_index_alignment":               self._word_index_alignment,
+            "appearance_theme_mode":              self._appearance_theme_mode,
+            "appearance_custom_bg":               self._appearance_custom_bg,
+            "appearance_custom_fg":               self._appearance_custom_fg,
+        }
+        if any(data.get(k) != v for k, v in _seed.items()):
             try:
-                data["google_search_url_prefix"] = self._google_search_url_prefix
-                data["sorkuvai_search_url_prefix"] = self._sorkuvai_search_url_prefix
-                data["word_index_backdrop_opacity_dark"] = self._word_index_backdrop_opacity_dark
-                data["word_index_backdrop_opacity_light"] = self._word_index_backdrop_opacity_light
-                data["word_index_text_opacity"] = self._word_index_text_opacity
-                data["word_index_halo_opacity_dark"] = self._word_index_halo_opacity_dark
-                data["word_index_halo_opacity_light"] = self._word_index_halo_opacity_light
-                data["word_index_color"] = self._word_index_color
-                data["word_index_alignment"] = self._word_index_alignment
-                data["appearance_theme_mode"] = self._appearance_theme_mode
-                data["appearance_custom_bg"] = self._appearance_custom_bg
-                data["appearance_custom_fg"] = self._appearance_custom_fg
+                data.update(_seed)
                 self.settings.save(data)
             except Exception:
                 pass
-
-        # Font — applied last so that _apply_theme_preferences() / app.setPalette() cannot
-        # reset the widget font before the user starts typing.
-        family = data.get("font_family")
-        size = data.get("font_size")
-        if family and isinstance(family, str) and isinstance(size, int) and 4 <= size <= 256:
-            try:
-                font = QFont(family, size)
-                raw_weight = data.get("font_weight")
-                if raw_weight is not None:
-                    try:
-                        font.setWeight(QFont.Weight(int(raw_weight)))
-                    except Exception:
-                        pass
-                self.editor.setFont(font)
-            except Exception:
-                pass
-
-        # Startup behaviour: reopen last file vs. new empty file
-        reopen = data.get("reopen_last_file_on_launch", True)
-        self._restore_last_session = bool(reopen)
-        self.reopen_last_act.blockSignals(True)
-        self.reopen_last_act.setChecked(self._restore_last_session)
-        self.reopen_last_act.blockSignals(False)
 
         # Last opened file
         last_file = data.get("last_opened_file")
@@ -5477,6 +5485,21 @@ class Notepad(QMainWindow):
         key = Notepad._normalize_line_spacing_preset(preset)
         return mapping.get(key, 100)
 
+    @staticmethod
+    def _get_user_documents_dir() -> Path:
+        """Return ~/Documents/neight/, creating it if needed.
+
+        Keeping presets in a named subfolder makes them easy for end-users
+        to find while avoiding clutter in the top-level Documents folder.
+        Works on macOS, Linux, and modern Windows.
+        """
+        docs = Path.home() / "Documents" / "neight"
+        try:
+            docs.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # read-only or unusual FS — callers handle write failures
+        return docs
+
     def change_font(self):
         current_font = self.editor.font()
         ok, font = QFontDialog.getFont(current_font, self, "Choose Font")
@@ -5501,6 +5524,41 @@ class Notepad(QMainWindow):
         Everything is applied to the live UI immediately and persisted with a
         single JSON write so the file is never left in a partial/corrupt state.
         """
+        # ── 0. Check for a saved user preset ─────────────────────────────────
+        preset_path = self._get_user_documents_dir() / "writer_mode.json"
+        if preset_path.exists():
+            try:
+                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+            except Exception:
+                preset_data = None
+            if isinstance(preset_data, dict):
+                # Preserve machine-local keys so applying a preset from another
+                # machine never opens a stale file path or resizes the window.
+                _MACHINE_LOCAL = {
+                    "last_opened_file", "default_directory",
+                    "window_size", "window_maximized",
+                }
+                merged = {**preset_data}
+                for k in _MACHINE_LOCAL:
+                    if k in self._settings_cache:
+                        merged[k] = self._settings_cache[k]
+                self._apply_settings_dict(merged)
+                self._settings_cache = merged
+                _interval = self._autosave_interval_minutes
+                if _interval > 0 and self.current_path:
+                    self.autosave_timer.start(_interval * 60 * 1000)
+                    self.autosave_enabled = True
+                else:
+                    self.autosave_timer.stop()
+                    self.autosave_enabled = False
+                self._save_preferences()
+                self._update_status_bar()
+                self.status.showMessage(
+                    "Writer (\u0b9a\u0bca\u0bb2\u0bcd\u0bb5\u0bc6\u0bb3\u0bbf) Mode applied from your saved preset", 3000
+                )
+                return
+            # Preset file exists but is invalid/corrupt \u2014 fall through to built-in defaults.
+
         # ── 1. Margins ──────────────────────────────────────────────────────
         self.editor.setTextMarginPercent(25)
         for act, val in [
@@ -5643,7 +5701,7 @@ class Notepad(QMainWindow):
 
         # Refresh word count display immediately.
         self._update_status_bar()
-        self.status.showMessage("சொல்வெளி (Writer) Mode applied", 3000)
+        self.status.showMessage("Writer (சொல்வெளி) Mode applied", 3000)
 
     def _apply_engineer_preset(self):
         """Apply the நுட்பர் (Techie) Mode preset.
@@ -5664,6 +5722,41 @@ class Notepad(QMainWindow):
         Everything is applied to the live UI immediately and persisted with a
         single atomic JSON write so the file is never left in a partial state.
         """
+        # ── 0. Check for a saved user preset ─────────────────────────────────
+        preset_path = self._get_user_documents_dir() / "techie_mode.json"
+        if preset_path.exists():
+            try:
+                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+            except Exception:
+                preset_data = None
+            if isinstance(preset_data, dict):
+                # Preserve machine-local keys so applying a preset from another
+                # machine never opens a stale file path or resizes the window.
+                _MACHINE_LOCAL = {
+                    "last_opened_file", "default_directory",
+                    "window_size", "window_maximized",
+                }
+                merged = {**preset_data}
+                for k in _MACHINE_LOCAL:
+                    if k in self._settings_cache:
+                        merged[k] = self._settings_cache[k]
+                self._apply_settings_dict(merged)
+                self._settings_cache = merged
+                _interval = self._autosave_interval_minutes
+                if _interval > 0 and self.current_path:
+                    self.autosave_timer.start(_interval * 60 * 1000)
+                    self.autosave_enabled = True
+                else:
+                    self.autosave_timer.stop()
+                    self.autosave_enabled = False
+                self._save_preferences()
+                self._update_status_bar()
+                self.status.showMessage(
+                    "Techie (\u0ba8\u0bc1\u0b9f\u0bcd\u0baa\u0bb0\u0bcd) Mode applied from your saved preset", 3000
+                )
+                return
+            # Preset file exists but is invalid/corrupt \u2014 fall through to built-in defaults.
+
         # ── 1. Margins ──────────────────────────────────────────────────────
         self._set_text_margin_percent(0, save=False, show_status=False)
 
@@ -5778,7 +5871,7 @@ class Notepad(QMainWindow):
 
         # Refresh status bar display immediately.
         self._update_status_bar()
-        self.status.showMessage("நுட்பர் (Techie) Mode applied", 3000)
+        self.status.showMessage("Techie (நுட்பர்) Mode applied", 3000)
 
     def change_font(self):
         current_font = self.editor.font()
@@ -5787,6 +5880,79 @@ class Notepad(QMainWindow):
             self.editor.setFont(font)
             self._save_preferences()
             self.status.showMessage(f"Font: {font.family()} {font.pointSize()}pt", 1500)
+
+    def _save_as_solveli_preset(self):
+        """Save the current configuration to ~/Documents/neight/writer_mode.json.
+
+        The file survives app deletion and is loaded automatically the next
+        time the user selects Help \u2192 Writer Mode, replacing the built-in defaults.
+        """
+        docs = self._get_user_documents_dir()
+        preset_path = docs / "writer_mode.json"
+        reply = QMessageBox.question(
+            self,
+            "Save Writer Mode Preset",
+            "This will overwrite the Writer Mode preset in your Documents folder "
+            "with your current settings.\n\n"
+            f"{preset_path}\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        # Flush the latest in-memory state to disk and update _settings_cache.
+        self._save_preferences()
+        try:
+            preset_path.write_text(
+                json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self.status.showMessage(
+                f"Writer Mode preset saved \u2192 {preset_path}", 4000
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Could not write the preset file.\n\n{preset_path}\n\nError: {exc}",
+            )
+
+    def _save_as_engineer_preset(self):
+        """Save the current configuration to ~/Documents/neight/techie_mode.json.
+
+        The file survives app deletion and is loaded automatically the next
+        time the user selects Help \u2192 Techie Mode, replacing the built-in defaults.
+        """
+        docs = self._get_user_documents_dir()
+        preset_path = docs / "techie_mode.json"
+        reply = QMessageBox.question(
+            self,
+            "Save Techie Mode Preset",
+            "This will overwrite the Techie Mode preset in your Documents folder "
+            "with your current settings.\n\n"
+            f"{preset_path}\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._save_preferences()
+        try:
+            preset_path.write_text(
+                json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self.status.showMessage(
+                f"Techie Mode preset saved \u2192 {preset_path}", 4000
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Could not write the preset file.\n\n{preset_path}\n\nError: {exc}",
+            )
 
     def _toggle_unicode_substring_highlight(self, enabled: bool):
         self._unicode_substring_highlight = bool(enabled)
