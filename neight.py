@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.043"
+VERSION = "2026.045"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QThread
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -1882,6 +1882,32 @@ class FindReplaceDialog(QDialog):
 
 
 # ---------------------
+# Update checker
+# ---------------------
+_RELEASES_API_URL = "https://api.github.com/repos/venkatarangan/neight/releases/latest"
+
+class _UpdateCheckWorker(QThread):
+    """Fetches the latest published release tag from GitHub in a background thread."""
+    result_ready = Signal(str, str)  # (latest_version, error_message)
+
+    def run(self):
+        try:
+            req = urllib.request.Request(
+                _RELEASES_API_URL,
+                headers={
+                    "User-Agent": "Neight-UpdateChecker/1.0",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            tag = data.get("tag_name", "").lstrip("v")
+            self.result_ready.emit(tag, "")
+        except Exception as exc:
+            self.result_ready.emit("", str(exc))
+
+
+# ---------------------
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
@@ -1957,6 +1983,7 @@ class Notepad(QMainWindow):
         self._word_highlight_selections = []
         self._current_highlight_word = None
         self._base_extra_selections = []
+        self._pending_update_version = None
 
         self.current_path = None
         self.autosave_timer = QTimer(self)
@@ -2518,6 +2545,7 @@ class Notepad(QMainWindow):
         # Help
         self.about_act.triggered.connect(self.show_about)
         self.debug_info_act.triggered.connect(self._show_debug_info)
+        self.check_updates_act.triggered.connect(self._check_for_updates)
         self.solveli_act.triggered.connect(self._apply_solveli_preset)
         self.engineer_act.triggered.connect(self._apply_engineer_preset)
         self.save_as_solveli_preset_act.triggered.connect(self._save_as_solveli_preset)
@@ -2537,6 +2565,36 @@ class Notepad(QMainWindow):
         if getattr(self, "_restore_maximized", False):
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
             self._restore_maximized = False
+        # Schedule a silent background update check 5 s after first show,
+        # so startup is never delayed.
+        if not getattr(self, "_startup_update_check_scheduled", False):
+            self._startup_update_check_scheduled = True
+            QTimer.singleShot(5000, self._run_startup_update_check)
+
+    def _run_startup_update_check(self):
+        """Silent background check on startup — no UI feedback unless an update is found."""
+        self._startup_update_worker = _UpdateCheckWorker(self)
+        self._startup_update_worker.result_ready.connect(self._on_startup_update_result)
+        self._startup_update_worker.start()
+
+    def _on_startup_update_result(self, latest: str, error: str):
+        """Called on the UI thread when the startup update check finishes."""
+        if error or not latest or latest <= VERSION:
+            return
+        # An update is available — annotate the Help menu title and menu item
+        # non-intrusively. No dialog, no interruption.
+        self._pending_update_version = latest
+        menubar = self.menuBar()
+        for i in range(menubar.actions().__len__()):
+            act = menubar.actions()[i]
+            if act.text() in ("&Help", "Help"):
+                act.setText("&Help  ●")
+                break
+        self.check_updates_act.setText(f"Check for Updates...  ({latest} available)")
+        # One brief status bar message that disappears as soon as the user types
+        self.status.showMessage(
+            f"Update available: {latest} — see Help menu", 8000
+        )
 
     def keyReleaseEvent(self, event):
         """Detect double Ctrl press to toggle keyboard layout."""
@@ -4175,6 +4233,50 @@ class Notepad(QMainWindow):
             msg.setIconPixmap(icon.pixmap(64, 64))
         msg.exec()
 
+    def _check_for_updates(self):
+        """Start a background check for a newer published version on GitHub."""
+        self.check_updates_act.setEnabled(False)
+        self._update_worker = _UpdateCheckWorker(self)
+        self._update_worker.result_ready.connect(self._on_update_check_result)
+        self._update_worker.start()
+
+    def _on_update_check_result(self, latest: str, error: str):
+        self.check_updates_act.setEnabled(True)
+        # Clear any badge set by the startup check
+        self._clear_update_badge()
+        if error:
+            QMessageBox.warning(
+                self, "Check for Updates",
+                f"Could not check for updates.\n\n{error}"
+            )
+            return
+        if not latest or latest <= VERSION:
+            QMessageBox.information(
+                self, "Check for Updates",
+                f"You are running the latest version ({VERSION})."
+            )
+        else:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Update Available")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText(
+                f"A new version is available: <b>{latest}</b><br><br>"
+                f"You are running: {VERSION}<br><br>"
+                "<a href='https://github.com/venkatarangan/neight/releases'>"
+                "Download from GitHub Releases</a>"
+            )
+            msg.exec()
+
+    def _clear_update_badge(self):
+        """Remove the update badge from the Help menu title and menu item text."""
+        self._pending_update_version = None
+        menubar = self.menuBar()
+        for act in menubar.actions():
+            if "Help" in act.text():
+                act.setText("&Help")
+                break
+        self.check_updates_act.setText("Check for Updates...")
+
     def _show_debug_info(self):
         """Show a dialog with diagnostic information useful for bug reports."""
         lines = []
@@ -5510,8 +5612,8 @@ class Notepad(QMainWindow):
         Settings applied:
           - Margins: 25 %
           - Line spacing: Double
-          - Font: Noto Serif Tamil Regular 24 pt
-                  (falls back to the first available Tamil-script font at 24 pt)
+          - Font: macOS — default Tamil script font at 24 pt
+                  Windows — Nirmala UI at 24 pt (if available), else size only
           - Status bar: Words ON; Sentences/Chars/Reading Time/Line/Col OFF
           - Auto-save: 2 minutes
           - Word wrap: ON
@@ -5576,29 +5678,37 @@ class Notepad(QMainWindow):
         self._update_line_spacing_menu("double")
 
         # ── 3. Font ─────────────────────────────────────────────────────────
-        # Priority: Noto Serif Tamil  →  any Tamil-script font  →  system default.
-        # QFontDatabase.WritingSystem.Tamil works on macOS and Windows (Qt6).
-        target_family = "Noto Serif Tamil"
-        all_families = QFontDatabase.families()
-        found_family = next(
-            (f for f in all_families if f.lower() == target_family.lower()), None
-        )
-        if found_family is None:
-            # Fall back to the first font the OS advertises for the Tamil script.
-            try:
-                tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
-                found_family = tamil_families[0] if tamil_families else None
-            except Exception:
-                found_family = None
-
-        if found_family:
-            new_font = QFont(found_family, 24)
-        else:
-            # No Tamil font found at all — use the application default at 24 pt.
-            new_font = QFont()
-            new_font.setPointSize(24)
-        new_font.setWeight(QFont.Weight.Normal)              # Regular (400)
-        self.editor.setFont(new_font)
+        # macOS: use the first Tamil-script font the OS advertises.
+        # Windows: use Nirmala UI if present; otherwise set size only.
+        # The entire block is guarded so a font-lookup failure never aborts
+        # the rest of the preset.
+        try:
+            if sys.platform == "darwin":
+                try:
+                    tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
+                    found_family = tamil_families[0] if tamil_families else None
+                except Exception:
+                    found_family = None
+                if found_family:
+                    new_font = QFont(found_family, 24)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(24)
+            else:
+                all_families = QFontDatabase.families()
+                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
+                if nirmala:
+                    new_font = QFont(nirmala, 24)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(24)
+            new_font.setWeight(QFont.Weight.Normal)
+            self.editor.setFont(new_font)
+        except Exception:
+            # Last-resort fallback: apply size only, never crash the preset.
+            _fb = QFont()
+            _fb.setPointSize(24)
+            self.editor.setFont(_fb)
 
         # ── 4. Status bar ────────────────────────────────────────────────────
         # Words: ON
@@ -5709,8 +5819,8 @@ class Notepad(QMainWindow):
         Settings applied:
           - Margins: 0 %
           - Line spacing: Single Line
-          - Font: Noto Sans Tamil Thin 14 pt
-                  (falls back to system default at 14 pt if unavailable)
+          - Font: macOS — default Tamil script font at 14 pt
+                  Windows — Nirmala UI at 14 pt (if available), else size only
           - Status bar: Words, Sentences, Chars, Reading Time, Line, Col — all ON
           - Auto-save: 2 minutes
           - Word wrap: ON
@@ -5768,21 +5878,37 @@ class Notepad(QMainWindow):
         self._update_line_spacing_menu("single_line")
 
         # ── 3. Font ─────────────────────────────────────────────────────────
-        # Target: Noto Sans Tamil Thin 14 pt.
-        # Fallback: system default at 14 pt (no Tamil-specific fallback — this
-        # preset is not Tamil-exclusive, so a generic default is appropriate).
-        target_family = "Noto Sans Tamil"
-        all_families = QFontDatabase.families()
-        found_family = next(
-            (f for f in all_families if f.lower() == target_family.lower()), None
-        )
-        if found_family:
-            new_font = QFont(found_family, 14)
-            new_font.setWeight(QFont.Weight.Thin)   # 100 — lightest available
-        else:
-            new_font = QFont()
-            new_font.setPointSize(14)
-        self.editor.setFont(new_font)
+        # macOS: use the first Tamil-script font the OS advertises.
+        # Windows: use Nirmala UI if present; otherwise set size only.
+        # The entire block is guarded so a font-lookup failure never aborts
+        # the rest of the preset.
+        try:
+            if sys.platform == "darwin":
+                try:
+                    tamil_families = QFontDatabase.families(QFontDatabase.WritingSystem.Tamil)
+                    found_family = tamil_families[0] if tamil_families else None
+                except Exception:
+                    found_family = None
+                if found_family:
+                    new_font = QFont(found_family, 14)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(14)
+            else:
+                all_families = QFontDatabase.families()
+                nirmala = next((f for f in all_families if f.lower() == "nirmala ui"), None)
+                if nirmala:
+                    new_font = QFont(nirmala, 14)
+                else:
+                    new_font = QFont()
+                    new_font.setPointSize(14)
+            new_font.setWeight(QFont.Weight.Normal)
+            self.editor.setFont(new_font)
+        except Exception:
+            # Last-resort fallback: apply size only, never crash the preset.
+            _fb = QFont()
+            _fb.setPointSize(14)
+            self.editor.setFont(_fb)
 
         # ── 4. Status bar — all counters ON ──────────────────────────────────
         # Words

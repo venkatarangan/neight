@@ -29,4 +29,9 @@ echo.
 echo ========================================
 echo Build completed successfully!
 echo ========================================
+echo.
+echo To release this build to GitHub and end users, run:
+echo.
+echo   powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
+echo.
 pause

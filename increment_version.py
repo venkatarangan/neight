@@ -82,15 +82,14 @@ def update_version_in_file(file_path: Path) -> tuple[str, str]:
 def main():
     script_dir = Path(__file__).parent
     neight_file = script_dir / "neight.py"
-    
+
     print("Incrementing version number...")
     print(f"File: {neight_file}")
     print()
-    
+
     try:
         old_version, new_version = update_version_in_file(neight_file)
         print(f"✓ Version updated: {old_version} → {new_version}")
-        print()
         return 0
     except Exception as e:
         print(f"Error: {e}")
