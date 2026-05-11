@@ -30,6 +30,7 @@
 > The signed macOS build carries an Apple Developer signature contributed by a well-wisher to make installation smoother. The macOS build targets **Apple Silicon (arm64)** only.
 
 For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
+For build instructions, release workflow, and developer notes see [DEVELOPER.md](DEVELOPER.md).
 
 ---
 
@@ -38,10 +39,6 @@ For advanced configuration, power-user features, and update instructions see [AD
 Language Switch settings:
 
 ![Neight language switch settings on macOS](screenshots/macos/2026-May-06-mac-language-screenshot.jpg)
-
-Debug information panel:
-
-![Neight debug info on macOS](screenshots/macos/2026-May-06-mac-debuginfo-screenshot.jpg)
 
 Additional screenshots are in the [screenshots](screenshots) folder.
 
