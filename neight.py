@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.049"
+VERSION = "2026.050"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -1908,6 +1908,19 @@ class FindReplaceDialog(QDialog):
 # ---------------------
 _RELEASES_API_URL = "https://api.github.com/repos/venkatarangan/neight/releases/latest"
 
+def _parse_version(v: str):
+    """Parse a YYYY.NNN version string into a comparable (year, day) int tuple.
+
+    Falls back to (0, 0) for any malformed input so comparisons remain safe.
+    """
+    try:
+        parts = v.split(".")
+        if len(parts) == 2:
+            return (int(parts[0]), int(parts[1]))
+    except (ValueError, AttributeError):
+        pass
+    return (0, 0)
+
 class _UpdateCheckWorker(QThread):
     """Fetches the latest published release tag from GitHub in a background thread."""
     result_ready = Signal(str, str)  # (latest_version, error_message)
@@ -2677,7 +2690,7 @@ class Notepad(QMainWindow):
 
     def _on_startup_update_result(self, latest: str, error: str):
         """Called on the UI thread when the startup update check finishes."""
-        if error or not latest or latest <= VERSION:
+        if error or not latest or _parse_version(latest) <= _parse_version(VERSION):
             return
         # An update is available — annotate the Help menu title and menu item
         # non-intrusively. No dialog, no interruption.
@@ -4615,15 +4628,17 @@ class Notepad(QMainWindow):
 
     def _on_update_check_result(self, latest: str, error: str):
         self.check_updates_act.setEnabled(True)
-        # Clear any badge set by the startup check
-        self._clear_update_badge()
         if error:
+            # Clear badge on error — the check is inconclusive
+            self._clear_update_badge()
             QMessageBox.warning(
                 self, "Check for Updates",
                 f"Could not check for updates.\n\n{error}"
             )
             return
-        if not latest or latest <= VERSION:
+        if not latest or _parse_version(latest) <= _parse_version(VERSION):
+            # Up to date — clear any lingering badge
+            self._clear_update_badge()
             QMessageBox.information(
                 self, "Check for Updates",
                 f"You are running the latest version ({VERSION})."
@@ -7415,6 +7430,12 @@ class Notepad(QMainWindow):
             self._clear_recovery_file()
             if not getattr(self, '_settings_reset_pending', False):
                 self._save_preferences()
+            # Stop any in-flight update-check threads so the process exits cleanly.
+            for _worker_attr in ("_startup_update_worker", "_update_worker"):
+                _worker = getattr(self, _worker_attr, None)
+                if _worker is not None and _worker.isRunning():
+                    _worker.quit()
+                    _worker.wait(2000)
             event.accept()
         else:
             event.ignore()
