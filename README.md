@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.043** | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.045** | [Privacy Policy](PRIVACY.md)
 
 **Neight** (pronounced N8) is a lightweight text editor for writers who work in Tamil and English on Windows and macOS. It handles mixed-language drafting, Markdown, and distraction-free writing without the weight of a full IDE or word processor.
 
@@ -77,6 +77,7 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Adjustable margins and line spacing** — five spacing presets (Condensed through Triple); viewport padding is added automatically so lines never clip at the window edge
 - **Auto-save** at configurable intervals (2, 5, 15, or 30 minutes) — writes are atomic, run on a background thread, and never cause a visible pause
 - **Continue where you left off** — reopens your last file at startup (toggleable under Settings)
+- **Automatic update check** — on every launch Neight silently checks GitHub for a newer version in the background. If one is found, a small **●** badge appears on the **Help** menu and a brief status bar message is shown — no pop-up, no interruption. Use **Help → Check for Updates…** at any time to check manually.
 - **Auto-Hide Scrollbar** — scrollbar flashes briefly when you scroll, then disappears to keep the writing area clean
 - **Plain-text paste** (`Shift+Ctrl+V`) — strips formatting on paste
 - **New Window** — open a second instance for side-by-side writing
@@ -126,13 +127,13 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 
 | Menu | What you find there |
 |---|---|
-| **File** | New, Open, Save, Save As, PDF Export, Exit |
-| **Edit** | Undo/Redo, clipboard, Find/Replace, Go To, Time/Date, Search with Google, blank-line tools, Normalize Unicode |
+| **File** | New, New Window, Open, Save, Save As, Export Text to PDF, Export Markdown to PDF, Exit |
+| **Edit** | Undo/Redo, clipboard, Find, Find Next, Replace, Replace All, Go To, Time/Date, Search with Google, Select All, blank-line tools, Normalize Unicode |
 | **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
-| **Format** | Font, Line Spacing, Margins, Word Wrap |
-| **View** | Gutter Line Numbers, Word Index, Partial Word Highlighting, Auto-Hide Scrollbar, Status Bar controls |
-| **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch |
-| **Help** | About, Debug Info, Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Save as Writer Mode Preset, Save as Techie Mode Preset |
+| **Format** | Font, Word Wrap |
+| **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
+| **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch, Save current settings to (Writer Mode Preset / Techie Mode Preset) |
+| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Check for Updates, About, Debug Info |
 
 ---
 

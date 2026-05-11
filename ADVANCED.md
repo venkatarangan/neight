@@ -64,13 +64,13 @@ All settings are applied to the live UI immediately and written atomically — t
 
 The built-in Writer and Techie modes are starting points. If you have invested time crafting your own exact settings — a specific font, particular margin widths, a custom color scheme — Save Presets let you make those settings the new baseline for whichever mode you prefer.
 
-**Help → Save as Writer Mode Preset…** saves your current Neight settings to:
+**Settings → Save current settings to → Writer Mode Preset** saves your current Neight settings to:
 
 ```
 ~/Documents/neight/writer_mode.json
 ```
 
-**Help → Save as Techie Mode Preset…** saves your current settings to:
+**Settings → Save current settings to → Techie Mode Preset** saves your current settings to:
 
 ```
 ~/Documents/neight/techie_mode.json
@@ -79,8 +79,6 @@ The built-in Writer and Techie modes are starting points. If you have invested t
 The next time you select **Writer (சொல்வெளி) Mode** or **Techie (நுட்பர்) Mode**, Neight silently loads your saved preset instead of the built-in defaults. If the file is missing or unreadable for any reason, Neight falls back to its built-in defaults automatically — nothing breaks.
 
 Both files survive app deletion and reinstallation. They are plain JSON and can be inspected, edited by hand, or copied between machines.
-
----
 
 ## Reading Time
 
@@ -257,3 +255,63 @@ These files are plain JSON, survive app reinstallation, and can be copied betwee
 Tamil text navigation in Qt-based editors has a segmentation quirk for some consonant + pulli + consonant combinations. The caret or selection can jump across a whole cluster instead of stepping through individual logical letters.
 
 This is a Qt-level behavior, not specific to Neight. Detailed notes and reproduction examples are in [knownbugs/Bug in QT for Tamil text handling.md](knownbugs/Bug%20in%20QT%20for%20Tamil%20text%20handling.md).
+
+---
+
+## Updating Neight
+
+### Automatic update notification
+
+Five seconds after the window appears, Neight silently checks GitHub for a newer version in the background. If a new version is found:
+
+- A small **●** badge appears on the **Help** menu title.
+- The **Help → Check for Updates…** item is annotated with the available version number.
+- A brief message is shown in the status bar for a few seconds, then disappears as soon as you start typing.
+
+There is no pop-up dialog and no interruption to your work. Use **Help → Check for Updates…** at any time to trigger a manual check.
+
+### Installing an update
+
+#### Windows
+
+1. Download the new `Neight.exe` from [GitHub Releases](https://github.com/venkatarangan/neight/releases).
+2. Close the running Neight instance.
+3. Replace the old `Neight.exe` with the downloaded file in the same folder.
+4. Your settings are stored separately in `%LOCALAPPDATA%\Neight\settings.json` and are not affected.
+
+#### macOS
+
+1. Download `Neight-mac-arm64-signed.zip` from [GitHub Releases](https://github.com/venkatarangan/neight/releases).
+2. Unzip the archive.
+3. Drag the new `Neight.app` to `/Applications`, replacing the old one when prompted.
+4. If macOS blocks the app after the update, run once in Terminal:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Neight.app
+   ```
+
+### What happens to your settings when you delete Neight on macOS?
+
+On macOS, Neight stores its settings at:
+
+```
+~/.config/Neight/settings.json
+```
+
+Deleting `Neight.app` from `/Applications` **does not** delete this file. If you reinstall Neight, it will pick up your previous settings automatically the next time it launches.
+
+However, `settings.json` contains a few machine-specific values (last-opened file path, window size). If you move to a new machine, those values will not apply, but all other preferences — font, theme, line spacing, autosave interval, and so on — will carry over cleanly.
+
+### Protecting your settings with Save Presets
+
+The safest way to preserve your carefully tuned settings across updates, reinstalls, or new machines is to save them as a named preset *before* making any changes.
+
+Use **Settings → Save current settings to → Writer Mode Preset** or **Techie Mode Preset** to export your current configuration to:
+
+```
+~/Documents/neight/writer_mode.json
+~/Documents/neight/techie_mode.json
+```
+
+These files live in your `Documents` folder — completely separate from the app and from `settings.json`. They survive app deletion, reinstallation, and a factory reset of `settings.json`. They are plain JSON and can be backed up, copied between machines, or opened in any text editor.
+
+The next time you select **Help → Writer (சொல்வெளி) Mode** or **Help → Techie (நுட்பர்) Mode**, Neight loads your saved preset and restores all your preferences in one click.
