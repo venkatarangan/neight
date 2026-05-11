@@ -185,6 +185,10 @@ cython_debug/
 #  Local Claude AI agent configuration and session files
 .claude/
 
+# VS Code
+#  Local editor settings and debug configurations
+.vscode/
+
 # Neight editor settings
 # User-specific configuration file with personal preferences, paths, and window state
 settings.json
