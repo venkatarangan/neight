@@ -23,7 +23,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.041"
+VERSION = "2026.042"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2247,7 +2247,7 @@ class Notepad(QMainWindow):
             "generous margins, double spacing, a large Tamil serif font, clean status bar, "
             "auto-save, word wrap, and Tamil Anjal typing layout."
         )
-        self.engineer_act = QAction("பொறியாளர் (Engineer) Mode", self)
+        self.engineer_act = QAction("நுட்பர் (Techie) Mode", self)
         self.engineer_act.setToolTip(
             "Applies a preset optimised for software engineers: all status bar counters on, "
             "gutter line numbers, single spacing, zero margins, a compact monospace-friendly "
@@ -5624,10 +5624,14 @@ class Notepad(QMainWindow):
         self.unicode_substring_highlight_act.setChecked(False)
         self.unicode_substring_highlight_act.blockSignals(False)
 
-        # ── 11. One atomic JSON write ─────────────────────────────────────────
+        # ── 11. Appearance theme — Follow OS ────────────────────────────────────
+        self._appearance_theme_mode = "follow_os"
+        self._apply_theme_preferences()
+
+        # ── 12. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
 
-        # ── 12. Tamil Anjal typing layout ────────────────────────────────────
+        # ── 13. Tamil Anjal typing layout ────────────────────────────────────
         # Done after the save so a layout-switch failure cannot corrupt JSON.
         if TAMIL_CHOICE:
             try:
@@ -5641,7 +5645,7 @@ class Notepad(QMainWindow):
         self.status.showMessage("சொல்வெளி (Writer) Mode applied", 3000)
 
     def _apply_engineer_preset(self):
-        """Apply the பொறியாளர் (Engineer) Mode preset.
+        """Apply the நுட்பர் (Techie) Mode preset.
 
         Settings applied:
           - Margins: 0 %
@@ -5764,12 +5768,16 @@ class Notepad(QMainWindow):
         self.unicode_substring_highlight_act.setChecked(True)
         self.unicode_substring_highlight_act.blockSignals(False)
 
-        # ── 11. One atomic JSON write ─────────────────────────────────────────
+        # ── 11. Appearance theme — Follow OS ────────────────────────────────────
+        self._appearance_theme_mode = "follow_os"
+        self._apply_theme_preferences()
+
+        # ── 12. One atomic JSON write ─────────────────────────────────────────
         self._save_preferences()
 
         # Refresh status bar display immediately.
         self._update_status_bar()
-        self.status.showMessage("பொறியாளர் (Engineer) Mode applied", 3000)
+        self.status.showMessage("நுட்பர் (Techie) Mode applied", 3000)
 
     def change_font(self):
         current_font = self.editor.font()
