@@ -16,9 +16,10 @@ It started as a tool for my own daily workflow — and continues to grow as a pr
 
 ### Download a pre-built app
 
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe) (~51 MB)
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/blob/main/stable/Neight-mac-arm64-signed.zip) (~40 MB, recommended)
-- **Latest unsigned macOS development build:** [Download from dist](https://github.com/venkatarangan/neight/blob/main/dist/Neight-mac-arm64-unsigned.app.zip) (~40 MB)
+Download the latest release from **[GitHub Releases](https://github.com/venkatarangan/neight/releases/latest)**.
+
+- **Windows:** download `Neight.exe`
+- **macOS Apple Silicon (arm64):** download `Neight-mac-arm64-signed.zip` (signed build, recommended)
 
 ### Install on Windows
 
@@ -163,7 +164,7 @@ Neight's macOS app bundle declares support for `.txt` and `.text` files via its 
 
 | Setting | Value applied |
 |---|---|
-| Font | Noto Serif Tamil Regular 24 pt (falls back to any Tamil-script font, then the system default, always at 24 pt) |
+| Font | macOS: default Tamil script font at 24 pt; Windows: Nirmala UI at 24 pt (if available), otherwise system default at 24 pt |
 | Line spacing | Double |
 | Text margins | 25% |
 | Word wrap | On |
@@ -187,7 +188,7 @@ The preset applies to the live UI immediately. All settings are written in a sin
 
 | Setting | Value applied |
 |---|---|
-| Font | Noto Sans Tamil Thin 14 pt (falls back to system default at 14 pt if unavailable) |
+| Font | macOS: default Tamil script font at 14 pt; Windows: Nirmala UI at 14 pt (if available), otherwise system default at 14 pt |
 | Line spacing | Single Line |
 | Text margins | 0% |
 | Word wrap | On |
@@ -498,67 +499,9 @@ Update either prefix in `settings.json` if the service URLs change without needi
 
 ---
 
-## Running from Source
+## Running from Source and Building
 
-```bash
-git clone https://github.com/venkatarangan/neight.git
-cd neight
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python neight.py
-```
-
-### Requirements
-
-- Python 3.10+
-- PySide6 6.x (Qt 6)
-- markdown
-- pillow (for design helpers only)
-- pyinstaller (only if building distributables)
-
-See [requirements.txt](requirements.txt) for the current dependency list.
-
-> Neight uses **PySide6 exclusively**. All PyQt5 references have been removed. There is no Qt5 fallback.
-
----
-
-## Building Distributables
-
-### Windows
-
-```bat
-buildme.bat
-```
-
-Or manually:
-
-```bat
-python -m pip install pyinstaller
-pyinstaller --name Neight --onefile --windowed --icon neight.ico neight.py
-```
-
-The executable is written to `dist\Neight.exe`.
-
-### macOS app bundle
-
-```bash
-chmod +x buildme_mac_app.sh
-./buildme_mac_app.sh
-```
-
-This produces:
-
-- `dist/Neight.app`
-- `dist/Neight-mac-arm64-unsigned.app.zip`
-
-### Manual macOS build
-
-```bash
-pip3 install pyinstaller
-pyinstaller --name Neight --windowed --icon neight.icns neight.py
-```
-
-> Tested on Apple Silicon. An Intel build would need to be produced on appropriate hardware.
+See [build.md](build.md) for full instructions on running from source, building distributables for Windows and macOS, managing releases, and the in-app update checker workflow.
 
 ---
 
