@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.045** | [Privacy Policy](PRIVACY.md)
+**Current Version: 2026.046** | [Privacy Policy](PRIVACY.md)
 
 **Neight** (pronounced N8) is a lightweight text editor for writers who work in Tamil and English on Windows and macOS. It handles mixed-language drafting, Markdown, and distraction-free writing without the weight of a full IDE or word processor.
 
@@ -16,7 +16,6 @@
 
 - **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe) (~51 MB)
 - **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/blob/main/stable/Neight-mac-arm64-signed.zip) (~40 MB, recommended)
-- **macOS unsigned build:** [Download from dist](https://github.com/venkatarangan/neight/blob/main/dist/Neight-mac-arm64-unsigned.app.zip) (~40 MB)
 
 ### Install on Windows
 
@@ -28,13 +27,9 @@
 1. Download and unzip the signed zip.
 2. Drag `Neight.app` to `/Applications` and launch it normally.
 
-If macOS blocks the app, run this once in Terminal:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Neight.app
-```
-
 > The signed macOS build carries an Apple Developer signature contributed by a well-wisher to make installation smoother. The macOS build targets **Apple Silicon (arm64)** only.
+
+For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
 
 ---
 
@@ -173,7 +168,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 - **Writer (சொல்வெளி) Mode** and **Techie (நுட்பர்) Mode** — full settings tables
 - **Save Presets** — save your own settings as the baseline for a mode, stored in `~/Documents/neight/`
 - **Reading Time** — configurable Tamil and English reading speeds with per-script calculation
-- **Word Index Overlay** — number every word in your document; fully customizable appearance
+- **Word Index Overlay** — number every word in your document; fully customizable appearance. The semi-transparent overlay is lovingly called the **butter paper effect** (like laying a translucent sheet over your manuscript to annotate word positions). See [ADVANCED.md](ADVANCED.md) for details.
 - **Language Switch configuration** — choose which two layouts to switch between
 - **Appearance settings** — theme options, custom colors, overlay opacity and color controls
 - **Unicode tools** — NFC normalization and partial word highlighting details

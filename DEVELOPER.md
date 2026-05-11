@@ -33,41 +33,107 @@ See [requirements.txt](requirements.txt) for the current pinned list.
 
 ## Building Distributables
 
-### Windows
+### Windows build
+
+The standard build script increments the version number automatically and then runs PyInstaller.
 
 ```bat
 buildme.bat
 ```
 
-Or manually:
+What it does:
+1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
+2. Runs PyInstaller: `pyinstaller --name Neight --onefile --windowed --icon neight.ico --add-data "neight.ico;." neight.py`
+3. Produces `dist\Neight.exe`
 
-```bat
-python -m pip install pyinstaller
-pyinstaller --name Neight --onefile --windowed --icon neight.ico neight.py
+After a successful build the script prints a reminder:
+
+```
+To release this build to GitHub, run:
+  powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
 ```
 
-Output: `dist\Neight.exe`
+### macOS build
 
-### macOS app bundle
+The build script targets Apple Silicon (arm64). Run it on an Apple Silicon Mac.
 
 ```bash
 chmod +x buildme_mac_app.sh
 ./buildme_mac_app.sh
 ```
 
-This produces:
+What it does:
+1. Runs `python3 increment_version.py` to bump `VERSION` in `neight.py`
+2. Cleans `build/`, `dist/Neight.app`, and `__pycache__`
+3. Runs `pyinstaller Neight.spec` (the checked-in spec preserves `info_plist`, `argv_emulation`, and file-type associations)
+4. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
+5. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
 
-- `dist/Neight.app`
-- `dist/Neight-mac-arm64-unsigned.app.zip`
-
-### Manual macOS build
-
-```bash
-pip3 install pyinstaller
-pyinstaller --name Neight --windowed --icon neight.icns neight.py
-```
+After a successful build the script prints the next steps for creating a signed release.
 
 > Tested on Apple Silicon. An Intel build would need to be produced on appropriate hardware.
+
+---
+
+## Releasing to GitHub
+
+Releases are published using the [GitHub CLI (`gh`)](https://cli.github.com). Install it once and authenticate:
+
+```bash
+gh auth login
+```
+
+### Windows release
+
+After `buildme.bat` completes and `dist\Neight.exe` exists:
+
+```powershell
+powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
+```
+
+The script reads `VERSION` from `neight.py`, creates a GitHub release tagged `v{VERSION}`, and uploads `dist\Neight.exe`. If a release with that tag already exists it uploads the executable to the existing release instead.
+
+### macOS release — unsigned build
+
+The unsigned zip (`dist/Neight-mac-arm64-unsigned.app.zip`) is for developer testing or sharing with technical users. End users should always use the signed build.
+
+To distribute an unsigned build, share the zip directly — do not publish it as the primary GitHub release asset.
+
+### macOS release — signed build
+
+The recommended workflow:
+
+```
+Step 1 — Build:
+  ./buildme_mac_app.sh
+  → dist/Neight-mac-arm64-unsigned.app.zip and dist/Neight.app
+
+Step 2 — Sign externally (Apple Developer account required):
+  Notarize/sign dist/Neight.app through Xcode or notarytool
+
+Step 3 — Re-zip the signed app into stable/:
+  ditto -c -k --sequesterRsrc --keepParent dist/Neight.app \
+        stable/Neight-mac-arm64-signed.zip
+
+Step 4 — Publish to GitHub:
+  ./release_macos.sh
+```
+
+`release_macos.sh` reads `VERSION` from `neight.py`, creates a tagged release, and uploads `stable/Neight-mac-arm64-signed.zip`. If a release with that tag already exists, it uploads the zip to the existing release.
+
+> The signed macOS build is contributed by a well-wisher with an Apple Developer account. Without notarization, macOS Gatekeeper may block launch. See the **Installing an unsigned macOS build** section below for the developer workaround.
+
+---
+
+## Installing an Unsigned macOS Build
+
+Unsigned builds are intended for developers and testers only. If macOS Gatekeeper blocks the app, run this once in Terminal after copying the app to `/Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Neight.app
+```
+
+Alternatively, right-click `Neight.app` in Finder → **Open** → **Open** to bypass Gatekeeper for a one-time launch.
 
 ---
 
