@@ -2,7 +2,9 @@
 
 **Current Version: 2026.034** | [Privacy Policy](PRIVACY.md)
 
-**Neight** is a lightweight text editor for Windows and macOS, built for real writing: Tamil, English, mixed-language drafting, quick notes, Markdown, and distraction-free composition.
+**Neight** (pronounced N8) is a text editor made for writers who write in Tamil and English on Windows and macOS — built for real writing: mixed-language drafting, quick notes, Markdown, and distraction-free composition.
+
+![Neight social preview](social-preview-neight.png)
 
 It started as a tool for my own daily workflow — and continues to grow as a practical project, vibe-coded with AI assistance, brewed at [venkatarangan.com](https://venkatarangan.com).
 
