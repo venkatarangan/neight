@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.053"
+VERSION = "2026.054"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2022,6 +2022,19 @@ class Notepad(QMainWindow):
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
+        # Set a Tamil-capable UI font on the status bar so Tamil text in
+        # showMessage() calls renders consistently with the system UI font.
+        _sb_tamil_font_name = (
+            "Nirmala UI" if sys.platform == "win32"
+            else "Tamil Sangam MN" if sys.platform == "darwin"
+            else None
+        )
+        if _sb_tamil_font_name:
+            _sb_font = QFont(_sb_tamil_font_name)
+            _sb_ui_pt = QGuiApplication.font().pointSize()
+            if _sb_ui_pt > 0:
+                _sb_font.setPointSize(_sb_ui_pt)
+            self.status.setFont(_sb_font)
 
         # Status widgets — each has a fixed minimumWidth so toggling one never
         # shifts the others sideways.  Visibility is controlled by the Format ▸
@@ -2674,6 +2687,17 @@ class Notepad(QMainWindow):
         self.engineer_act.triggered.connect(self._apply_engineer_preset)
         self.save_as_solveli_preset_act.triggered.connect(self._save_as_solveli_preset)
         self.save_as_engineer_preset_act.triggered.connect(self._save_as_engineer_preset)
+
+        # OS color-scheme change (Qt 6.5+) — re-apply theme when OS switches
+        # light↔dark while Follow OS is active.  try/except is a no-op on Qt < 6.5.
+        try:
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.styleHints().colorSchemeChanged.connect(
+                    self._on_os_color_scheme_changed
+                )
+        except Exception:
+            pass
 
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
@@ -5617,10 +5641,15 @@ class Notepad(QMainWindow):
 
         return (
             # ── Dialog & container backgrounds ───────────────────────────────
-            f"QDialog {{ background-color: {bg}; color: {text}; }}"
+            # QWidget rule comes FIRST. QDialog rule comes AFTER so it wins
+            # (equal-specificity type selectors: last rule in the string wins).
+            # On Windows, Qt owns the window background and respects this ordering.
+            # On macOS, AppKit draws the dialog background and ignores QDialog's
+            # background-color entirely — so this ordering has no macOS side-effect.
             # Container QWidgets (HBoxLayout/VBoxLayout holders) are transparent
             # so the dialog background shows through.
             f"QWidget {{ background-color: transparent; color: {text}; }}"
+            f"QDialog {{ background-color: {bg}; color: {text}; }}"
             # ── Labels ───────────────────────────────────────────────────────
             f"QLabel {{ color: {text}; background-color: transparent; }}"
             # ── Buttons ──────────────────────────────────────────────────────
@@ -5846,8 +5875,69 @@ class Notepad(QMainWindow):
         palette.setColor(_role("Shadow"),   shadow)
 
         app.setPalette(palette)
+
+        # On Windows, the native menu renderer (Win32) ignores app.setPalette()
+        # and draws menus using the OS system theme.  When the user has chosen
+        # "Force Dark" on a Light-mode OS (or vice versa), menus become unreadable.
+        # An explicit app-level stylesheet overrides Win32 rendering so menus
+        # follow the chosen Neight theme.  On macOS, AppKit owns the native menu
+        # bar and ignores this stylesheet entirely — no side-effect there.
+        if sys.platform == "win32":
+            app.setStyleSheet(self._make_menu_stylesheet(
+                bg.name(),          # window background
+                btn_bg.name(),      # menu item hover background
+                mid_col.name(),     # border / separator color
+                fg.name(),          # text color
+                highlight.name(),   # selected item background
+                "#ffffff",          # selected item text (always white against highlight)
+            ))
+
         self.editor.viewport().update()
         self.editor.lineNumberArea.update()
+
+    def _make_menu_stylesheet(
+        self, bg: str, bg_hov: str, border: str,
+        text: str, sel_bg: str, sel_fg: str
+    ) -> str:
+        """Return an app-level stylesheet that forces Qt to render QMenuBar and
+        QMenu widgets using the Neight theme colors instead of the Win32 system
+        theme.  Only applied on Windows; harmless but ignored on macOS."""
+        return (
+            f"QMenuBar {{"
+            f"  background-color: {bg}; color: {text};"
+            f"  border-bottom: 1px solid {border};"
+            f"}}"
+            f"QMenuBar::item {{"
+            f"  background-color: transparent; color: {text};"
+            f"  padding: 4px 8px;"
+            f"}}"
+            f"QMenuBar::item:selected {{"
+            f"  background-color: {bg_hov}; color: {text};"
+            f"}}"
+            f"QMenuBar::item:pressed {{"
+            f"  background-color: {sel_bg}; color: {sel_fg};"
+            f"}}"
+            f"QMenu {{"
+            f"  background-color: {bg}; color: {text};"
+            f"  border: 1px solid {border};"
+            f"}}"
+            f"QMenu::item {{"
+            f"  background-color: transparent; color: {text};"
+            f"  padding: 4px 24px 4px 24px;"
+            f"}}"
+            f"QMenu::item:selected {{"
+            f"  background-color: {sel_bg}; color: {sel_fg};"
+            f"}}"
+            f"QMenu::item:disabled {{"
+            f"  color: {border};"
+            f"}}"
+            f"QMenu::separator {{"
+            f"  height: 1px; background: {border}; margin: 3px 6px;"
+            f"}}"
+            f"QMenu::indicator {{"
+            f"  width: 14px; height: 14px; margin-left: 4px;"
+            f"}}"
+        )
 
     def _apply_word_index_preferences(self):
         self.editor.setWordIndexVisualOpacities(
@@ -6292,6 +6382,19 @@ class Notepad(QMainWindow):
             if normalized in allowed:
                 return normalized
         return "follow_os"
+
+    def _on_os_color_scheme_changed(self) -> None:
+        """Called when the OS switches between light and dark mode (Qt 6.5+).
+
+        Only acts when the user has chosen 'Follow OS' — forced modes are
+        intentional overrides and should not be overridden by an OS switch.
+        On macOS this signal fires too, but _apply_theme_preferences() already
+        reads the OS state correctly via _is_os_dark_mode(), so it is safe.
+        """
+        if self._normalize_theme_mode(
+            getattr(self, "_appearance_theme_mode", "follow_os")
+        ) == "follow_os":
+            self._apply_theme_preferences()
 
     @staticmethod
     def _normalize_hex_color(value, default: str) -> str:
