@@ -68,7 +68,7 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Gutter line numbers** (`Ctrl+Shift+L`) — paragraph-level line numbers like a code editor
 - **Adjustable margins and line spacing** — five spacing presets (Condensed through Triple); viewport padding is added automatically so lines never clip at the window edge
 - **Auto-save** at configurable intervals (2, 5, 15, or 30 minutes) — writes are atomic, run on a background thread, and never cause a visible pause
-- **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **Help → Empty Recovery Folder** to delete old copies.
+- **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **File → Empty Recovery Folder** to delete old copies.
 - **Smart suggested filename** — when you press `Ctrl+S` on an unsaved document, the save dialog opens pre-filled with a name derived from the first words of your text (up to 4 words, max 100 characters). Accept it, edit it, or choose a different location — the dialog behaves exactly as usual.
 - **Continue where you left off** — reopens your last file at startup (toggleable under Settings)
 - **Automatic update check** — on every launch Neight silently checks GitHub for a newer version in the background. If one is found, a small **●** badge appears on the **Help** menu and a brief status bar message is shown — no pop-up, no interruption. Use **Help → Check for Updates…** at any time to check manually.
@@ -121,13 +121,13 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 
 | Menu | What you find there |
 |---|---|
-| **File** | New, New Window, Open, Save, Save As, View Recovery Folder, Export Text to PDF, Export Markdown to PDF, Exit |
+| **File** | New, New Window, Open, Save, Save As, Export Text to PDF, Export Markdown to PDF, View Recovery Folder, Empty Recovery Folder, Exit |
 | **Edit** | Undo/Redo, clipboard, Find, Find Next, Replace, Replace All, Go To, Time/Date, Search with Google, Select All, blank-line tools, Normalize Unicode |
 | **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Word Wrap |
 | **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
-| **Settings** | Auto-save, Continue where you left off, Appearance, Language Switch, Save current settings to (Writer Mode Preset / Techie Mode Preset) |
-| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Check for Updates, About, Debug Info, Empty Recovery Folder |
+| **Settings** | Continue where you left off, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
+| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Check for Updates, About, Debug Info |
 
 ---
 

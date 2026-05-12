@@ -64,13 +64,13 @@ All settings are applied to the live UI immediately and written atomically — t
 
 The built-in Writer and Techie modes are starting points. If you have invested time crafting your own exact settings — a specific font, particular margin widths, a custom color scheme — Save Presets let you make those settings the new baseline for whichever mode you prefer.
 
-**Settings → Save current settings to → Writer Mode Preset** saves your current Neight settings to:
+**Settings → Save Current Settings to → Writer Mode Preset** saves your current Neight settings to:
 
 ```
 ~/Documents/neight/writer_mode.json
 ```
 
-**Settings → Save current settings to → Techie Mode Preset** saves your current settings to:
+**Settings → Save Current Settings to → Techie Mode Preset** saves your current settings to:
 
 ```
 ~/Documents/neight/techie_mode.json
@@ -244,7 +244,7 @@ When you have typed content but have not yet named or saved the file, Neight sil
 
 **File → View Recovery Folder** opens `~/Documents/Neight/` in Finder (macOS) or Explorer (Windows). The folder is created automatically if it does not yet exist.
 
-**Help → Empty Recovery Folder** permanently deletes all `recovery-*.txt` and `recovery-*.md` files in the folder. A confirmation dialog warns before proceeding, and the file belonging to the current window (if any) is always skipped. Use this periodically to keep the folder tidy.
+**File → Empty Recovery Folder** permanently deletes all `recovery-*.txt` and `recovery-*.md` files in the folder. A confirmation dialog warns before proceeding, and the file belonging to the current window (if any) is always skipped. Use this periodically to keep the folder tidy.
 
 ### When autosave is disabled
 
@@ -311,7 +311,7 @@ Recovery copies of unsaved documents (see [Recovery Copies for Unsaved Documents
 
 - `~/Documents/Neight/recovery-<PID>-<random>.txt`
 
-This folder is separate from the settings and preset folders. Files here are cleaned up automatically during normal use. Use **Help → Empty Recovery Folder** to delete any leftovers.
+This folder is separate from the settings and preset folders. Files here are cleaned up automatically during normal use. Use **File → Empty Recovery Folder** to delete any leftovers.
 
 ---
 
