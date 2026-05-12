@@ -12,8 +12,7 @@
 <meta property="og:image" content="https://raw.githubusercontent.com/venkatarangan/neight/main/social-preview-neight.png" />
 <meta property="og:image:width" content="1280" />
 <meta property="og:image:height" content="640" />
-<meta property="og:url" content="https://neight.app/" />
-<link rel="canonical" href="https://neight.app/" />
+<meta property="og:url" content="https://venkatarangan.github.io/neight/" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Neight — Write into the night." />
@@ -23,7 +22,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
 <style>
   /* ---------- tokens ---------- */
@@ -40,8 +39,8 @@
     --hairline: #DCE5DF;
     --hairline-soft: #E9EFEB;
 
-    --serif: "Instrument Serif", "Iowan Old Style", "Apple Garamond", Georgia, serif;
-    --sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --serif: "Bricolage Grotesque", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
     --r-sm: 8px;
@@ -60,11 +59,24 @@
     font-family: var(--sans);
     color: var(--ink);
     background: var(--bg);
-    font-size: 17px;
-    line-height: 1.55;
+    font-size: 16.5px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     text-wrap: pretty;
+  }
+  /* Display headings — wide, modern grotesque */
+  h1, h2, h3, h4, .display {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 96, "wdth" 100;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+  /* `em` is used semantically through the design as the accent color word */
+  em {
+    font-style: normal;
+    color: var(--green-1);
+    font-weight: inherit;
   }
 
   a { color: var(--green-2); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--green-2) 25%, transparent); transition: border-color .15s ease, color .15s ease; }
@@ -93,8 +105,8 @@
   .brand { display: flex; align-items: center; gap: 12px; border: 0; }
   .brand:hover { border: 0; }
   .brand-mark { width: 30px; height: 30px; border-radius: 7px; display: block; }
-  .brand-text { font-family: var(--serif); font-size: 22px; color: var(--green-ink); letter-spacing: .2px; }
-  .brand-text em { font-style: italic; color: var(--green-1); font-size: 16px; margin-left: 6px; }
+  .brand-text { font-family: var(--serif); font-weight: 600; font-size: 20px; color: var(--green-ink); letter-spacing: -0.015em; font-variation-settings: "opsz" 24; }
+  .brand-text em { color: var(--green-1); font-size: 15px; margin-left: 6px; font-weight: 500; }
   .nav-links { display: flex; gap: 28px; align-items: center; }
   .nav-links a {
     border: 0; color: var(--ink-soft); font-size: 14.5px; font-weight: 500;
@@ -121,21 +133,22 @@
   .hero-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-1); }
   .hero h1 {
     font-family: var(--serif);
-    font-weight: 400;
-    font-size: clamp(48px, 8.5vw, 112px);
+    font-weight: 600;
+    font-size: clamp(44px, 8vw, 104px);
     line-height: 0.98;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.035em;
     color: var(--green-ink);
     margin: 28px 0 0;
+    font-variation-settings: "opsz" 96, "wdth" 100;
   }
-  .hero h1 em { font-style: italic; color: var(--green-1); }
+  .hero h1 em { color: var(--green-1); font-weight: 500; }
   .hero-tamil {
     font-family: var(--serif);
-    font-style: italic;
-    font-size: clamp(28px, 4vw, 44px);
+    font-weight: 500;
+    font-size: clamp(24px, 3.4vw, 36px);
     color: var(--green-1);
-    margin-top: 10px;
-    letter-spacing: -0.01em;
+    margin-top: 12px;
+    letter-spacing: -0.015em;
   }
   .hero-lede {
     margin-top: 28px;
@@ -193,16 +206,17 @@
     max-width: 720px;
   }
   .free-banner-price {
-    font-family: var(--serif);
-    font-size: clamp(48px, 7vw, 72px);
+    font-family: var(--serif); font-weight: 700;
+    font-size: clamp(44px, 6.2vw, 64px);
     line-height: 1; color: var(--green-2);
-    letter-spacing: -0.03em;
+    letter-spacing: -0.04em;
     flex-shrink: 0;
+    font-variation-settings: "opsz" 96, "wdth" 100;
   }
   .free-banner-title {
-    font-family: var(--serif); font-size: clamp(22px, 2.2vw, 28px);
-    line-height: 1.1; color: var(--green-ink);
-    letter-spacing: -0.01em;
+    font-family: var(--serif); font-weight: 600; font-size: clamp(20px, 2vw, 26px);
+    line-height: 1.15; color: var(--green-ink);
+    letter-spacing: -0.02em;
   }
   .free-banner-sub {
     margin-top: 6px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.5;
@@ -243,13 +257,14 @@
     color: var(--green-1); margin-bottom: 16px;
   }
   .sec-title {
-    font-family: var(--serif); font-weight: 400;
-    font-size: clamp(34px, 5vw, 56px);
-    line-height: 1.05; letter-spacing: -0.015em;
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(32px, 4.6vw, 52px);
+    line-height: 1.05; letter-spacing: -0.03em;
     color: var(--green-ink);
     margin: 0;
+    font-variation-settings: "opsz" 72, "wdth" 100;
   }
-  .sec-title em { font-style: italic; color: var(--green-1); }
+  .sec-title em { color: var(--green-1); font-weight: 500; }
   .sec-sub {
     margin-top: 18px; font-size: clamp(16px, 1.4vw, 19px); color: var(--ink-soft); line-height: 1.55;
   }
@@ -320,7 +335,7 @@
   }
   .install-card.win .install-glyph { background: var(--green-1); }
   .install-name {
-    font-family: var(--serif); font-size: 28px; color: var(--green-ink); line-height: 1;
+    font-family: var(--serif); font-weight: 600; font-size: 26px; color: var(--green-ink); line-height: 1; letter-spacing: -0.02em;
   }
   .install-sub { color: var(--ink-mute); font-size: 14px; margin-top: 4px; }
   .install-steps { padding: 0; margin: 24px 0 0; list-style: none; counter-reset: step; }
@@ -389,10 +404,10 @@
     margin-bottom: 18px;
   }
   .feat h3 {
-    font-family: var(--serif); font-weight: 400;
-    font-size: 24px; line-height: 1.15;
+    font-family: var(--serif); font-weight: 600;
+    font-size: 22px; line-height: 1.2;
     color: var(--green-ink); margin: 0 0 10px;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
   }
   .feat p { font-size: 14.5px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
   .feat .kbd { margin-top: 14px; align-self: flex-start; }
@@ -442,8 +457,8 @@
     border-top: 0;
   }
   .menu-table tbody th {
-    font-family: var(--serif); font-size: 19px; font-weight: 400; color: var(--green-ink);
-    width: 160px; white-space: nowrap;
+    font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--green-ink);
+    width: 160px; white-space: nowrap; letter-spacing: -0.01em;
   }
   .menu-table tbody td { color: var(--ink-soft); line-height: 1.6; }
   @media (max-width: 720px) {
@@ -484,8 +499,10 @@
     margin: 0 0 18px; font-weight: 500;
   }
   .pronounce-word {
-    font-family: var(--serif); font-size: clamp(48px, 7vw, 84px);
-    line-height: 1; color: white; letter-spacing: -0.02em;
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(44px, 6.4vw, 76px);
+    line-height: 1; color: white; letter-spacing: -0.04em;
+    font-variation-settings: "opsz" 96, "wdth" 100;
   }
   .pronounce-ipa {
     font-family: var(--mono); font-size: 18px;
@@ -510,9 +527,9 @@
 
   /* ---------- why / vibe ---------- */
   .why-quote {
-    font-family: var(--serif);
-    font-size: clamp(28px, 3.6vw, 44px);
-    line-height: 1.2; letter-spacing: -0.01em;
+    font-family: var(--serif); font-weight: 500;
+    font-size: clamp(24px, 3.2vw, 38px);
+    line-height: 1.25; letter-spacing: -0.025em;
     color: var(--green-ink);
     max-width: 880px;
     margin: 0;
@@ -537,7 +554,7 @@
     background: var(--bg);
   }
   .ack-name {
-    font-family: var(--serif); font-size: 24px; color: var(--green-ink); margin: 0 0 8px;
+    font-family: var(--serif); font-weight: 600; font-size: 22px; color: var(--green-ink); margin: 0 0 8px; letter-spacing: -0.02em;
   }
   .ack-role { font-size: 13.5px; color: var(--green-1); margin: 0 0 14px; font-family: var(--mono); letter-spacing: .04em; }
   .ack-text { font-size: 15px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
@@ -560,7 +577,7 @@
   }
   .read:hover { border-color: var(--green-1); transform: translateY(-2px); }
   .read-kicker { font-family: var(--mono); font-size: 11px; color: var(--green-1); letter-spacing: .1em; text-transform: uppercase; }
-  .read-title { font-family: var(--serif); font-size: 26px; color: var(--green-ink); margin: 10px 0 8px; line-height: 1.1; }
+  .read-title { font-family: var(--serif); font-weight: 600; font-size: 24px; color: var(--green-ink); margin: 10px 0 8px; line-height: 1.15; letter-spacing: -0.02em; }
   .read-desc { font-size: 14.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; flex: 1; }
   .read-arrow { margin-top: 18px; color: var(--green-2); font-family: var(--mono); font-size: 13px; }
 
@@ -580,8 +597,8 @@
   .legal-card p { margin: 0 0 12px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.6; }
   .legal-card p:last-child { margin-bottom: 0; }
   .legal-card .mit {
-    font-family: var(--serif); font-size: 36px; color: var(--green-ink); line-height: 1;
-    margin: 0 0 14px;
+    font-family: var(--serif); font-weight: 600; font-size: 36px; color: var(--green-ink); line-height: 1;
+    margin: 0 0 14px; letter-spacing: -0.03em;
   }
 
   /* ---------- footer ---------- */
@@ -595,7 +612,7 @@
   }
   .foot-brand { display: flex; align-items: center; gap: 12px; }
   .foot-brand img { width: 32px; height: 32px; border-radius: 7px; }
-  .foot-brand-name { font-family: var(--serif); font-size: 22px; color: var(--green-ink); }
+  .foot-brand-name { font-family: var(--serif); font-weight: 600; font-size: 20px; color: var(--green-ink); letter-spacing: -0.02em; }
   .foot-brand-tag { font-size: 13px; color: var(--ink-mute); margin-top: 2px; }
   .foot-links { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px; }
   .foot-links a { color: var(--ink-soft); border: 0; }
@@ -656,9 +673,9 @@
   }
   .privacy-strip-items span { display: inline-flex; align-items: baseline; gap: 6px; }
   .privacy-strip-items b {
-    font-family: var(--serif); font-weight: 400;
+    font-family: var(--serif); font-weight: 700;
     font-size: 22px; color: var(--green-2);
-    line-height: 1;
+    line-height: 1; letter-spacing: -0.02em;
   }
   .privacy-strip-more {
     display: inline-block; margin-top: 16px;
@@ -682,8 +699,8 @@
     text-transform: uppercase; color: var(--green-1); margin-bottom: 10px;
   }
   .news-card-title {
-    font-family: var(--serif); font-size: clamp(22px, 2.4vw, 30px);
-    color: var(--green-ink); line-height: 1.15; letter-spacing: -0.01em;
+    font-family: var(--serif); font-weight: 600; font-size: clamp(20px, 2.2vw, 28px);
+    color: var(--green-ink); line-height: 1.2; letter-spacing: -0.025em;
   }
   .news-card-desc {
     margin-top: 8px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.5;
@@ -702,8 +719,8 @@
   .faq-item { border-bottom: 1px solid var(--hairline); padding: 4px 0; }
   .faq-item summary {
     list-style: none; cursor: pointer;
-    font-family: var(--serif); font-size: clamp(20px, 2vw, 24px);
-    color: var(--green-ink); letter-spacing: -0.01em;
+    font-family: var(--serif); font-weight: 600; font-size: clamp(18px, 1.8vw, 22px);
+    color: var(--green-ink); letter-spacing: -0.02em;
     padding: 22px 40px 22px 0; position: relative;
     transition: color .15s ease;
   }
@@ -742,13 +759,13 @@
     background: var(--bg-soft);
     border: 1px solid var(--hairline);
     display: flex; align-items: center; justify-content: center;
-    font-family: var(--serif); font-size: 22px; color: var(--green-2);
+    font-family: var(--serif); font-weight: 600; font-size: 22px; color: var(--green-2);
     line-height: 1;
   }
   .contribute-text { flex: 1; }
   .contribute-title {
-    font-family: var(--serif); font-size: 19px; color: var(--green-ink);
-    line-height: 1.15;
+    font-family: var(--serif); font-weight: 600; font-size: 18px; color: var(--green-ink);
+    line-height: 1.2; letter-spacing: -0.02em;
   }
   .contribute-desc {
     margin-top: 4px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.4;
@@ -757,6 +774,10 @@
     font-family: var(--mono); color: var(--green-1); font-size: 18px;
   }
 </style>
+<!-- 
+⚠️ TAMIL: Do NOT retype or autocomplete. Copy byte-for-byte only.
+  Correct: சொல்வெளி (short 'o' = ொ)
+  Wrong:   சோல்வெளி (long 'ō' = ோ) — this is NOT a real word -->
 </head>
 <body>
 
