@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.051"
+VERSION = "2026.052"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2532,11 +2532,10 @@ class Notepad(QMainWindow):
         help_menu.addAction(self.solveli_act)
         help_menu.addAction(self.engineer_act)
         help_menu.addSeparator()
-        help_menu.addAction(self.check_updates_act)
-        help_menu.addSeparator()
-        help_menu.addAction(self.about_act)
-        help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
+        help_menu.addSeparator()
+        help_menu.addAction(self.check_updates_act)
+        help_menu.addAction(self.about_act)
 
     def _connect_signals(self):
         # File
