@@ -263,31 +263,13 @@ Tamil text in this project is vulnerable to silent corruption by LLMs (including
 
 The corrupted form is never correct. It is not a spelling variant — it is a non-word. No developer, tool, or automated system should ever write or commit it.
 
-### How to use Tamil strings
-
-**Always import from `constants/tamil.py`. Never write Tamil text inline in any `.py` or `.html` file.**
-
-```python
-from constants.tamil import SOL_VELI
-
-# Correct usage:
-label.setText(SOL_VELI)
-
-# Wrong — do not do this:
-label.setText("சொல்வெளி")   # even if visually correct, inline strings are unsafe
-```
-
-`constants/tamil.py` is the single source of truth. All Tamil string literals live there and nowhere else. This makes it possible to audit and verify the strings in one place, and it prevents tools from silently retyping them during autocomplete or code generation.
-
 ### Safeguards in place
 
 Three layers of protection have been added to this project:
 
-1. **`constants/tamil.py`** — canonical module containing all Tamil strings as named constants. Never duplicate Tamil text outside this file.
+1. **Pre-commit hook** (`.pre-commit-config.yaml`) — a `pygrep`-based hook scans `.py` and `.html` files for the corrupted form before every commit and aborts with an error if it is found. It also enforces UTF-8 encoding and LF line endings.
 
-2. **Pre-commit hook** (`.pre-commit-config.yaml`) — a `pygrep`-based hook scans `.py` and `.html` files for the corrupted form before every commit and aborts with an error if it is found. It also enforces UTF-8 encoding and LF line endings.
-
-3. **GitHub Actions workflow** (`.github/workflows/tamil-guard.yml`) — runs on every push and pull request. Uses `grep -P` (PCRE) to check all `.py` and `.html` files. If the corrupted form is found, the build fails with an explicit error message.
+2. **GitHub Actions workflow** (`.github/workflows/tamil-guard.yml`) — runs on every push and pull request. Uses `grep -P` (PCRE) to check all `.py` and `.html` files. If the corrupted form is found, the build fails with an explicit error message.
 
 ### Setup after cloning
 
