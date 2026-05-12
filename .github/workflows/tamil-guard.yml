@@ -1,0 +1,14 @@
+name: Tamil Spelling Guard
+on: [push, pull_request]
+jobs:
+  check-tamil:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check for incorrect Tamil spelling
+        run: |
+          if grep -rP "சோல்வெளி" --include="*.py" --include="*.html" .; then
+            echo "❌ Wrong Tamil found: சோல்வெளி — use சொல்வெளி"
+            exit 1
+          fi
+          echo "✅ Tamil spelling check passed."

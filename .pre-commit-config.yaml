@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-byte-order-marker
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: local
+    hooks:
+      - id: tamil-spelling-guard
+        name: Tamil Spelling Guard
+        language: pygrep
+        entry: "சோல்வெளி"
+        args: [--multiline]
+        types_or: [python, html]
+        exclude: '^constants/tamil\.py$'
