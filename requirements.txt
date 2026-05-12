@@ -14,3 +14,7 @@ pillow>=9.0.0
 
 # Optional: for building standalone executables
 pyinstaller>=5.0.0
+
+# Git pre-commit hooks (run: pre-commit install)
+pre-commit>=3.0.0
+
