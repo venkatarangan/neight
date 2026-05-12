@@ -135,6 +135,18 @@
     color: var(--ink-soft);
     line-height: 1.5;
   }
+  .hero-aside {
+    margin-top: 16px;
+    max-width: 620px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 15.5px;
+    color: var(--ink-mute);
+    line-height: 1.5;
+    padding-left: 18px;
+    border-left: 2px solid color-mix(in srgb, var(--green-1) 35%, transparent);
+  }
+  .hero-aside-mark { color: var(--green-1); font-style: normal; margin-right: 2px; }
   .hero-cta {
     margin-top: 36px;
     display: flex; flex-wrap: wrap; gap: 12px;
@@ -766,7 +778,10 @@
     <h1>Write into <em>the night.</em></h1>
     <div class="hero-tamil">சொல்வெளி &mdash; the open field of words.</div>
     <p class="hero-lede">
-      Neight is a small, calm text editor for writers and social-media authors who just want a blank page that gets out of the way. Built for Tamil and English on macOS and Windows. <span style="color: var(--ink-mute);">(Other Indian and non-English languages paired with English should work too &mdash; only Tamil + English has been tested.)</span> No accounts, no telemetry, no AI looking over your shoulder.
+      Neight is a small, calm text editor for writers and social-media authors who just want a blank page that gets out of the way. Built for Tamil and English on macOS and Windows. No accounts, no telemetry, no AI looking over your shoulder.
+    </p>
+    <p class="hero-aside">
+      <span class="hero-aside-mark">*</span> Other Indian and non-English scripts paired with English should work too &mdash; only Tamil + English has been tested end-to-end.
     </p>
     <div class="hero-cta">
       <a href="#install-mac" class="btn btn-primary">
@@ -969,23 +984,23 @@
 
     <div class="shot-strip">
       <div class="shot">
-        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/neight-2.png" alt="Neight editor showing Markdown content" />
-        <div class="shot-cap"><span>Writing in Markdown &mdash; headings, lists, links.</span><span class="platform">Windows</span></div>
+        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/mac/mac-os-writer-mode-sample.png" alt="Neight Writer Mode on macOS" />
+        <div class="shot-cap"><span>Writer Mode &mdash; large Tamil serif, generous spacing, minimal chrome. Made for prose.</span><span class="platform">macOS</span></div>
       </div>
       <div class="shot">
-        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/macos/2026-May-06-mac-language-screenshot.jpg" alt="Neight language switch settings on macOS" />
-        <div class="shot-cap"><span>Double-press <b>⌃ Control</b> to flip between Tamil and English.</span><span class="platform">macOS</span></div>
+        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/neight-2.png" alt="Neight editor showing Markdown content" />
+        <div class="shot-cap"><span>Auto-save runs in the background &mdash; pick 2, 5, 15 or 30 minutes.</span><span class="platform">Windows</span></div>
       </div>
     </div>
 
     <div class="shot-strip">
       <div class="shot">
         <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/neight-3.png" alt="Neight with line numbers and gutter" />
-        <div class="shot-cap"><span>Turn on the gutter for paragraph-level line numbers.</span><span class="platform">Windows</span></div>
+        <div class="shot-cap"><span>Keyboard Settings &mdash; pick which two layouts the double-Ctrl flip toggles between.</span><span class="platform">Windows</span></div>
       </div>
       <div class="shot">
-        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/neight-5.png" alt="Neight in writer mode" />
-        <div class="shot-cap"><span>Writer Mode &mdash; large Tamil serif, generous margins.</span><span class="platform">Windows</span></div>
+        <img src="https://raw.githubusercontent.com/venkatarangan/neight/main/screenshots/mac/mac-os-writer-mode-help-menu.png" alt="Help menu showing Writer and Techie modes on macOS" />
+        <div class="shot-cap"><span>One click in the Help menu flips between Writer Mode and Techie Mode.</span><span class="platform">macOS</span></div>
       </div>
     </div>
   </div>
