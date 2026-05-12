@@ -84,5 +84,17 @@ else
     echo "✓ Release $TAG created with macOS build"
 fi
 
+# ── Also upload Windows artifact if present ──────────────────────────────────
+
+WIN_EXE="dist/Neight.exe"
+if [ -f "$WIN_EXE" ]; then
+    echo "Windows artifact found — uploading to same release..."
+    gh release upload "$TAG" "$WIN_EXE" --clobber
+    echo "✓ Neight.exe uploaded to release $TAG"
+else
+    echo "Note: Windows artifact not found ($WIN_EXE) — skipping."
+    echo "      Run release_windows.ps1 on Windows to add it to this release."
+fi
+
 echo ""
 echo "Release URL: https://github.com/venkatarangan/neight/releases/tag/$TAG"

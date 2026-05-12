@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.052"
+VERSION = "2026.053"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2378,6 +2378,20 @@ class Notepad(QMainWindow):
             "gutter line numbers, single spacing, zero margins, a compact monospace-friendly "
             "Tamil sans font, auto-save every 2 minutes, and full session restore."
         )
+        # Fix Tamil text rendering in menu items so Tamil glyphs match the system UI font
+        # instead of falling back to a visually inconsistent font automatically chosen by Qt.
+        _ui_pt = QGuiApplication.font().pointSize()
+        if sys.platform == "win32":
+            _tamil_menu_font = QFont("Nirmala UI")
+        elif sys.platform == "darwin":
+            _tamil_menu_font = QFont("Tamil Sangam MN")
+        else:
+            _tamil_menu_font = None
+        if _tamil_menu_font is not None:
+            if _ui_pt > 0:
+                _tamil_menu_font.setPointSize(_ui_pt)
+            self.solveli_act.setFont(_tamil_menu_font)
+            self.engineer_act.setFont(_tamil_menu_font)
         self.save_as_solveli_preset_act = QAction("Writer Mode Preset", self)
         self.save_as_solveli_preset_act.setToolTip(
             "Save your current settings as the Writer Mode preset in your Documents folder. "
@@ -4638,10 +4652,15 @@ class Notepad(QMainWindow):
         if not latest or _parse_version(latest) <= _parse_version(VERSION):
             # Up to date — clear any lingering badge
             self._clear_update_badge()
-            QMessageBox.information(
-                self, "Check for Updates",
-                f"You are running the latest version ({VERSION})."
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Check for Updates")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText(
+                f"You are running the latest version: <b>{VERSION}</b><br><br>"
+                f"<a href='https://github.com/venkatarangan/neight/releases/tag/v{VERSION}'>"
+                "View release page</a>"
             )
+            msg.exec()
         else:
             msg = QMessageBox(self)
             msg.setWindowTitle("Update Available")
@@ -4649,7 +4668,7 @@ class Notepad(QMainWindow):
             msg.setText(
                 f"A new version is available: <b>{latest}</b><br><br>"
                 f"You are running: {VERSION}<br><br>"
-                "<a href='https://github.com/venkatarangan/neight/releases'>"
+                f"<a href='https://github.com/venkatarangan/neight/releases/tag/v{latest}'>"
                 "Download from GitHub Releases</a>"
             )
             msg.exec()

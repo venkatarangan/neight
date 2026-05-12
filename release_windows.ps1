@@ -73,5 +73,17 @@ if ($releaseExists) {
     Write-Host "Done: Release $Tag created with Neight.exe"
 }
 
+# ── Also upload macOS artifact if present ────────────────────────────────────
+
+$MacZip = "stable\Neight-mac-arm64-signed.zip"
+if (Test-Path $MacZip) {
+    Write-Host "macOS artifact found - uploading to same release..."
+    gh release upload $Tag $MacZip --clobber
+    Write-Host "Done: Neight-mac-arm64-signed.zip uploaded to release $Tag"
+} else {
+    Write-Host "Note: macOS artifact not found ($MacZip) - skipping."
+    Write-Host "      Run release_macos.sh on macOS to add it to this release."
+}
+
 Write-Host ""
 Write-Host "Release URL: https://github.com/venkatarangan/neight/releases/tag/$Tag"
