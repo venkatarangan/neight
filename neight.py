@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.050"
+VERSION = "2026.051"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2404,6 +2404,7 @@ class Notepad(QMainWindow):
         file_menu.addAction(self.export_md_pdf_act)
         file_menu.addSeparator()
         file_menu.addAction(self.view_recovery_folder_act)
+        file_menu.addAction(self.empty_recovery_act)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_act)
         
@@ -2511,20 +2512,21 @@ class Notepad(QMainWindow):
         self.status.mousePressEvent = _status_bar_clicked
 
         settings_menu = menubar.addMenu("&Settings")
-        autosave_menu = settings_menu.addMenu("Auto-save")
+        settings_menu.addAction(self.reopen_last_act)
+        settings_menu.addSeparator()
+        settings_menu.addAction(self.appearance_act)
+        save_preset_menu = settings_menu.addMenu("Save Current Settings to")
+        save_preset_menu.addAction(self.save_as_solveli_preset_act)
+        save_preset_menu.addAction(self.save_as_engineer_preset_act)
+        settings_menu.addSeparator()
+        settings_menu.addAction(self.keyboards_act)
+        settings_menu.addSeparator()
+        autosave_menu = settings_menu.addMenu("Auto-Save Interval")
         autosave_menu.addAction(self.autosave_disabled_act)
         autosave_menu.addAction(self.autosave_2min_act)
         autosave_menu.addAction(self.autosave_5min_act)
         autosave_menu.addAction(self.autosave_15min_act)
         autosave_menu.addAction(self.autosave_30min_act)
-        settings_menu.addAction(self.reopen_last_act)
-        settings_menu.addSeparator()
-        settings_menu.addAction(self.appearance_act)
-        settings_menu.addAction(self.keyboards_act)
-        settings_menu.addSeparator()
-        save_preset_menu = settings_menu.addMenu("Save current settings to")
-        save_preset_menu.addAction(self.save_as_solveli_preset_act)
-        save_preset_menu.addAction(self.save_as_engineer_preset_act)
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction(self.solveli_act)
@@ -2535,8 +2537,6 @@ class Notepad(QMainWindow):
         help_menu.addAction(self.about_act)
         help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
-        help_menu.addSeparator()
-        help_menu.addAction(self.empty_recovery_act)
 
     def _connect_signals(self):
         # File
