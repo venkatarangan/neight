@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Neight — A calm writing app for Tamil &amp; English. சொல்வெளி.</title>
+<meta name="description" content="Neight (N8) is a free, open-source, distraction-free text editor for writers and social-media authors. Tamil and English friendly. Mac and Windows. MIT licensed." />
+<link rel="icon" type="image/png" href="assets/favicon.png" />
+<link rel="apple-touch-icon" href="assets/neight-icon.png" />
+<meta property="og:title" content="Neight — Write into the night." />
+<meta property="og:description" content="A distraction-free text editor for writers. Free, open source, MIT. Mac &amp; Windows." />
+<meta property="og:image" content="assets/neight-icon.png" />
+<meta name="theme-color" content="#0E4D33" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  /* ---------- tokens ---------- */
+  :root {
+    --green-1: #1F6E47;     /* medium green from icon */
+    --green-2: #0E4D33;     /* deep green from icon */
+    --green-ink: #08361F;   /* darkest, for text on white */
+    --bg: #FFFFFF;
+    --bg-soft: #F4F8F5;     /* barely-tinted off-white */
+    --bg-deep: #0E4D33;     /* deep green panel */
+    --ink: #0B1A12;
+    --ink-soft: #4B5C53;
+    --ink-mute: #7A8B82;
+    --hairline: #DCE5DF;
+    --hairline-soft: #E9EFEB;
+
+    --serif: "Instrument Serif", "Iowan Old Style", "Apple Garamond", Georgia, serif;
+    --sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --r-sm: 8px;
+    --r-md: 14px;
+    --r-lg: 22px;
+    --r-xl: 32px;
+
+    --pad-x: clamp(20px, 5vw, 56px);
+    --maxw: 1120px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    text-wrap: pretty;
+  }
+
+  a { color: var(--green-2); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--green-2) 25%, transparent); transition: border-color .15s ease, color .15s ease; }
+  a:hover { color: var(--green-1); border-bottom-color: var(--green-1); }
+
+  ::selection { background: color-mix(in srgb, var(--green-1) 30%, white); color: var(--green-ink); }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding-left: var(--pad-x); padding-right: var(--pad-x); }
+
+  section { padding: clamp(56px, 9vw, 112px) 0; }
+  section + section { border-top: 1px solid var(--hairline-soft); }
+
+  /* ---------- nav ---------- */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,.85);
+    backdrop-filter: saturate(180%) blur(12px);
+    -webkit-backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; border: 0; }
+  .brand:hover { border: 0; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 7px; display: block; }
+  .brand-text { font-family: var(--serif); font-size: 22px; color: var(--green-ink); letter-spacing: .2px; }
+  .brand-text em { font-style: italic; color: var(--green-1); font-size: 16px; margin-left: 6px; }
+  .nav-links { display: flex; gap: 28px; align-items: center; }
+  .nav-links a {
+    border: 0; color: var(--ink-soft); font-size: 14.5px; font-weight: 500;
+  }
+  .nav-links a:hover { color: var(--green-2); }
+  .nav-cta {
+    background: var(--green-2); color: white !important; padding: 8px 16px; border-radius: 999px;
+    font-size: 14px; font-weight: 500; border: 0;
+  }
+  .nav-cta:hover { background: var(--green-1); border: 0; }
+  @media (max-width: 720px) {
+    .nav-links a:not(.nav-cta) { display: none; }
+  }
+
+  /* ---------- hero ---------- */
+  .hero { padding-top: clamp(56px, 11vw, 120px); padding-bottom: clamp(40px, 7vw, 80px); position: relative; overflow: hidden; }
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 13px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--green-1); font-weight: 500;
+    padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--green-1) 30%, transparent);
+    border-radius: 999px;
+  }
+  .hero-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-1); }
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(48px, 8.5vw, 112px);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+    color: var(--green-ink);
+    margin: 28px 0 0;
+  }
+  .hero h1 em { font-style: italic; color: var(--green-1); }
+  .hero-tamil {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(28px, 4vw, 44px);
+    color: var(--green-1);
+    margin-top: 10px;
+    letter-spacing: -0.01em;
+  }
+  .hero-lede {
+    margin-top: 28px;
+    max-width: 640px;
+    font-size: clamp(17px, 1.7vw, 21px);
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .hero-cta {
+    margin-top: 36px;
+    display: flex; flex-wrap: wrap; gap: 12px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 22px; border-radius: 999px;
+    font-size: 15px; font-weight: 500;
+    border: 1px solid transparent;
+    cursor: pointer; transition: all .15s ease;
+  }
+  .btn-primary { background: var(--green-2); color: white; border: 0; }
+  .btn-primary:hover { background: var(--green-1); color: white; border: 0; transform: translateY(-1px); }
+  .btn-secondary { background: white; color: var(--green-ink); border: 1px solid var(--hairline); }
+  .btn-secondary:hover { border-color: var(--green-1); color: var(--green-2); transform: translateY(-1px); }
+  .btn svg { width: 16px; height: 16px; }
+  .btn-size { color: inherit; opacity: .55; font-size: 13px; font-weight: 400; }
+
+  .hero-meta {
+    margin-top: 28px;
+    display: flex; flex-wrap: wrap; gap: 22px 28px;
+    font-size: 13.5px; color: var(--ink-mute);
+  }
+  .hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
+  .hero-meta b { color: var(--green-2); font-weight: 600; }
+
+  /* free banner */
+  .free-banner {
+    margin-top: 32px;
+    display: flex; align-items: center; gap: 22px;
+    padding: 22px 28px;
+    border-radius: var(--r-lg);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--green-1) 8%, white) 0%, color-mix(in srgb, var(--green-1) 4%, white) 100%);
+    border: 1px solid color-mix(in srgb, var(--green-1) 25%, transparent);
+    max-width: 720px;
+  }
+  .free-banner-price {
+    font-family: var(--serif);
+    font-size: clamp(48px, 7vw, 72px);
+    line-height: 1; color: var(--green-2);
+    letter-spacing: -0.03em;
+    flex-shrink: 0;
+  }
+  .free-banner-title {
+    font-family: var(--serif); font-size: clamp(22px, 2.2vw, 28px);
+    line-height: 1.1; color: var(--green-ink);
+    letter-spacing: -0.01em;
+  }
+  .free-banner-sub {
+    margin-top: 6px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.5;
+  }
+  @media (max-width: 520px) {
+    .free-banner { gap: 16px; padding: 18px 20px; flex-direction: column; align-items: flex-start; }
+    .free-banner-price { font-size: 48px; }
+  }
+
+  /* hero screenshot */
+  .hero-shot-wrap {
+    margin-top: clamp(48px, 7vw, 80px);
+    position: relative;
+  }
+  .hero-shot-frame {
+    background: var(--bg-soft);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    padding: clamp(14px, 2vw, 28px);
+    position: relative;
+  }
+  .hero-shot {
+    width: 100%; display: block; border-radius: var(--r-md);
+    box-shadow: 0 20px 60px -30px rgba(14,77,51,.35), 0 2px 8px -2px rgba(14,77,51,.08);
+  }
+  .hero-shot-cap {
+    position: absolute; top: 18px; left: 22px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--green-2); letter-spacing: .08em;
+    background: rgba(255,255,255,.7); padding: 4px 8px; border-radius: 4px;
+    backdrop-filter: blur(4px);
+  }
+
+  /* ---------- section heads ---------- */
+  .sec-head { margin-bottom: 48px; max-width: 740px; }
+  .sec-kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--green-1); margin-bottom: 16px;
+  }
+  .sec-title {
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(34px, 5vw, 56px);
+    line-height: 1.05; letter-spacing: -0.015em;
+    color: var(--green-ink);
+    margin: 0;
+  }
+  .sec-title em { font-style: italic; color: var(--green-1); }
+  .sec-sub {
+    margin-top: 18px; font-size: clamp(16px, 1.4vw, 19px); color: var(--ink-soft); line-height: 1.55;
+  }
+
+  /* ---------- about / what is ---------- */
+  .about-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: clamp(40px, 6vw, 80px);
+    align-items: start;
+  }
+  @media (max-width: 820px) { .about-grid { grid-template-columns: 1fr; } }
+
+  .about-body p { font-size: clamp(17px, 1.4vw, 19px); color: var(--ink); line-height: 1.6; margin: 0 0 18px; }
+  .about-body p:last-child { margin-bottom: 0; }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; padding: 8px 14px; border-radius: 999px;
+    background: var(--bg-soft); color: var(--green-ink);
+    border: 1px solid var(--hairline);
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green-1); }
+
+  .stat-card {
+    background: var(--bg-soft);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    padding: 32px;
+  }
+  .stat-card h4 {
+    font-family: var(--mono); font-size: 11.5px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--green-1); margin: 0 0 22px; font-weight: 500;
+  }
+  .stat-list { list-style: none; padding: 0; margin: 0; }
+  .stat-list li {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 14px 0; border-top: 1px solid var(--hairline);
+    font-size: 15px;
+  }
+  .stat-list li:first-child { border-top: 0; padding-top: 0; }
+  .stat-list .k { color: var(--ink-soft); }
+  .stat-list .v { color: var(--green-ink); font-weight: 500; font-family: var(--mono); font-size: 13.5px; }
+
+  /* ---------- install ---------- */
+  .install-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 820px) { .install-grid { grid-template-columns: 1fr; } }
+  .install-card {
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    padding: clamp(28px, 3vw, 40px);
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    transition: border-color .2s ease;
+  }
+  .install-card:hover { border-color: color-mix(in srgb, var(--green-1) 40%, var(--hairline)); }
+  .install-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  .install-glyph {
+    width: 38px; height: 38px; border-radius: 10px;
+    background: var(--green-2); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 22px;
+  }
+  .install-card.win .install-glyph { background: var(--green-1); }
+  .install-name {
+    font-family: var(--serif); font-size: 28px; color: var(--green-ink); line-height: 1;
+  }
+  .install-sub { color: var(--ink-mute); font-size: 14px; margin-top: 4px; }
+  .install-steps { padding: 0; margin: 24px 0 0; list-style: none; counter-reset: step; }
+  .install-steps li {
+    counter-increment: step;
+    padding: 14px 0 14px 44px;
+    position: relative;
+    border-top: 1px dashed var(--hairline);
+    font-size: 15px; color: var(--ink); line-height: 1.5;
+  }
+  .install-steps li:first-child { border-top: 0; }
+  .install-steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 14px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--bg-soft); color: var(--green-2);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px; font-weight: 500;
+    border: 1px solid var(--hairline);
+  }
+  .install-steps code, .kbd {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--bg-soft); padding: 2px 7px; border-radius: 4px;
+    border: 1px solid var(--hairline);
+    color: var(--green-ink);
+  }
+  .install-note {
+    margin-top: 22px; padding: 14px 16px;
+    background: color-mix(in srgb, var(--green-1) 6%, white);
+    border-left: 3px solid var(--green-1);
+    border-radius: 0 8px 8px 0;
+    font-size: 13.5px; color: var(--green-ink);
+  }
+  .install-dl {
+    margin-top: 24px;
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 18px; border-radius: 999px;
+    background: var(--green-ink); color: white !important;
+    font-size: 14px; font-weight: 500; border: 0;
+    align-self: flex-start;
+  }
+  .install-dl:hover { background: var(--green-1); border: 0; }
+  .install-dl .sz { opacity: .55; font-weight: 400; font-size: 12.5px; }
+
+  /* ---------- features grid ---------- */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  @media (max-width: 900px) { .feat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .feat-grid { grid-template-columns: 1fr; } }
+  .feat {
+    background: var(--bg);
+    padding: 32px 28px;
+    display: flex; flex-direction: column;
+    min-height: 180px;
+  }
+  .feat-num {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--green-1); letter-spacing: .1em;
+    margin-bottom: 18px;
+  }
+  .feat h3 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 24px; line-height: 1.15;
+    color: var(--green-ink); margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .feat p { font-size: 14.5px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
+  .feat .kbd { margin-top: 14px; align-self: flex-start; }
+
+  /* ---------- screenshot showcase ---------- */
+  .shot-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 48px; }
+  @media (max-width: 820px) { .shot-strip { grid-template-columns: 1fr; } }
+  .shot {
+    background: var(--bg-soft);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    position: relative;
+  }
+  .shot img { width: 100%; display: block; }
+  .shot-cap {
+    padding: 14px 18px;
+    font-size: 13.5px; color: var(--ink-soft);
+    border-top: 1px solid var(--hairline);
+    background: white;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .shot-cap .platform {
+    font-family: var(--mono); font-size: 11px; color: var(--green-1);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+
+  /* ---------- menu table ---------- */
+  .menu-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .menu-table th, .menu-table td {
+    text-align: left; padding: 16px 20px;
+    border-top: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  .menu-table thead th {
+    background: var(--bg-soft);
+    font-family: var(--mono); font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .1em;
+    font-weight: 500; color: var(--green-1);
+    border-top: 0;
+  }
+  .menu-table tbody th {
+    font-family: var(--serif); font-size: 19px; font-weight: 400; color: var(--green-ink);
+    width: 160px; white-space: nowrap;
+  }
+  .menu-table tbody td { color: var(--ink-soft); line-height: 1.6; }
+  @media (max-width: 720px) {
+    .menu-table, .menu-table tbody, .menu-table tr, .menu-table th, .menu-table td { display: block; }
+    .menu-table thead { display: none; }
+    .menu-table tr { padding: 18px 20px; border-top: 1px solid var(--hairline); }
+    .menu-table tr:first-child { border-top: 0; }
+    .menu-table th, .menu-table td { padding: 0; border: 0; width: auto; white-space: normal; }
+    .menu-table tbody th { margin-bottom: 6px; font-size: 21px; }
+  }
+
+  /* ---------- name section / dark panel ---------- */
+  .panel-dark {
+    background: var(--bg-deep);
+    color: white;
+    border-radius: 0;
+  }
+  .panel-dark .sec-title,
+  .panel-dark .sec-title em { color: white; }
+  .panel-dark .sec-title em { color: color-mix(in srgb, var(--green-1) 70%, white); }
+  .panel-dark .sec-kicker { color: color-mix(in srgb, var(--green-1) 60%, white); }
+  .panel-dark .sec-sub { color: rgba(255,255,255,.7); }
+  .panel-dark a { color: white; border-bottom-color: rgba(255,255,255,.4); }
+  .panel-dark a:hover { color: white; border-bottom-color: white; }
+
+  .name-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: clamp(40px, 6vw, 80px); align-items: center; }
+  @media (max-width: 820px) { .name-grid { grid-template-columns: 1fr; } }
+
+  .pronounce {
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: var(--r-lg);
+    padding: 32px;
+  }
+  .pronounce h4 {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(255,255,255,.55);
+    margin: 0 0 18px; font-weight: 500;
+  }
+  .pronounce-word {
+    font-family: var(--serif); font-size: clamp(48px, 7vw, 84px);
+    line-height: 1; color: white; letter-spacing: -0.02em;
+  }
+  .pronounce-ipa {
+    font-family: var(--mono); font-size: 18px;
+    color: color-mix(in srgb, var(--green-1) 50%, white);
+    margin-top: 8px;
+  }
+  .pronounce-eq {
+    margin-top: 24px; font-size: 15px; color: rgba(255,255,255,.75); line-height: 1.6;
+  }
+  .pronounce-eq b { font-family: var(--serif); color: white; font-weight: 400; font-size: 19px; }
+  .formula {
+    margin-top: 22px;
+    font-family: var(--mono); font-size: 14px;
+    color: rgba(255,255,255,.85);
+    padding: 14px 16px;
+    background: rgba(0,0,0,.25);
+    border-radius: 8px;
+    line-height: 1.7;
+  }
+  .formula b { color: white; font-weight: 500; }
+  .formula .arrow { color: color-mix(in srgb, var(--green-1) 50%, white); margin: 0 8px; }
+
+  /* ---------- why / vibe ---------- */
+  .why-quote {
+    font-family: var(--serif);
+    font-size: clamp(28px, 3.6vw, 44px);
+    line-height: 1.2; letter-spacing: -0.01em;
+    color: var(--green-ink);
+    max-width: 880px;
+    margin: 0;
+  }
+  .why-quote::before { content: "“"; color: var(--green-1); font-size: 1.2em; line-height: 0; margin-right: 4px; }
+  .why-quote::after { content: "”"; color: var(--green-1); font-size: 1.2em; line-height: 0; margin-left: 2px; }
+  .why-body { margin-top: 40px; max-width: 720px; }
+  .why-body p { font-size: 17px; color: var(--ink); line-height: 1.65; margin: 0 0 16px; }
+
+  /* ---------- ack ---------- */
+  .ack-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+    margin-top: 20px;
+  }
+  @media (max-width: 720px) { .ack-grid { grid-template-columns: 1fr; } }
+  .ack {
+    padding: 28px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--bg);
+  }
+  .ack-name {
+    font-family: var(--serif); font-size: 24px; color: var(--green-ink); margin: 0 0 8px;
+  }
+  .ack-role { font-size: 13.5px; color: var(--green-1); margin: 0 0 14px; font-family: var(--mono); letter-spacing: .04em; }
+  .ack-text { font-size: 15px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
+
+  /* ---------- read more ---------- */
+  .read-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 820px) { .read-grid { grid-template-columns: 1fr; } }
+  .read {
+    display: flex; flex-direction: column;
+    padding: 28px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--bg);
+    color: var(--ink) !important;
+    transition: all .2s ease;
+  }
+  .read:hover { border-color: var(--green-1); transform: translateY(-2px); }
+  .read-kicker { font-family: var(--mono); font-size: 11px; color: var(--green-1); letter-spacing: .1em; text-transform: uppercase; }
+  .read-title { font-family: var(--serif); font-size: 26px; color: var(--green-ink); margin: 10px 0 8px; line-height: 1.1; }
+  .read-desc { font-size: 14.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; flex: 1; }
+  .read-arrow { margin-top: 18px; color: var(--green-2); font-family: var(--mono); font-size: 13px; }
+
+  /* ---------- license + disclaimer ---------- */
+  .legal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 820px) { .legal-grid { grid-template-columns: 1fr; } }
+  .legal-card {
+    padding: 32px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--bg-soft);
+  }
+  .legal-card h3 {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--green-1); margin: 0 0 16px; font-weight: 500;
+  }
+  .legal-card p { margin: 0 0 12px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.6; }
+  .legal-card p:last-child { margin-bottom: 0; }
+  .legal-card .mit {
+    font-family: var(--serif); font-size: 36px; color: var(--green-ink); line-height: 1;
+    margin: 0 0 14px;
+  }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--hairline-soft);
+    padding: 56px 0 72px;
+    background: var(--bg-soft);
+  }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 12px; }
+  .foot-brand img { width: 32px; height: 32px; border-radius: 7px; }
+  .foot-brand-name { font-family: var(--serif); font-size: 22px; color: var(--green-ink); }
+  .foot-brand-tag { font-size: 13px; color: var(--ink-mute); margin-top: 2px; }
+  .foot-links { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px; }
+  .foot-links a { color: var(--ink-soft); border: 0; }
+  .foot-links a:hover { color: var(--green-2); border: 0; }
+  .foot-copy {
+    margin-top: 40px;
+    font-size: 12.5px; color: var(--ink-mute);
+    font-family: var(--mono); letter-spacing: .04em;
+    border-top: 1px solid var(--hairline);
+    padding-top: 24px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  }
+
+  /* ---------- decorative ---------- */
+  .hero::before {
+    content: "";
+    position: absolute;
+    top: -120px; right: -120px;
+    width: 360px; height: 360px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--green-1) 15%, transparent) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero > .wrap { position: relative; z-index: 1; }
+
+  /* Tamil text */
+  .tamil { font-family: var(--serif); }
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a href="#top" class="brand">
+      <img class="brand-mark" src="assets/neight-icon.png" alt="" />
+      <span class="brand-text">Neight <em class="tamil">சொல்வெளி</em></span>
+    </a>
+    <div class="nav-links">
+      <a href="#install">Install</a>
+      <a href="#features">Features</a>
+      <a href="#name">The name</a>
+      <a href="#why">Why</a>
+      <a href="#install" class="nav-cta">Download</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <a class="hero-eyebrow" href="https://github.com/venkatarangan/neight/releases" style="border:1px solid color-mix(in srgb, var(--green-1) 30%, transparent); text-decoration: none;"><span class="dot"></span>Releases · what&rsquo;s new</a>
+    <h1>Write into <em>the night.</em></h1>
+    <div class="hero-tamil">சொல்வெளி &mdash; the open field of words.</div>
+    <p class="hero-lede">
+      Neight is a small, calm text editor for writers and social-media authors who just want a blank page that gets out of the way. Built for Tamil and English on macOS and Windows. <span style="color: var(--ink-mute);">(Other Indian and non-English languages paired with English should work too &mdash; only Tamil + English has been tested.)</span> No accounts, no telemetry, no AI looking over your shoulder.
+    </p>
+    <div class="hero-cta">
+      <a href="#install-mac" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.45c-.03-2.7 2.2-4 2.3-4.06-1.26-1.83-3.21-2.08-3.9-2.1-1.66-.17-3.24.97-4.09.97-.85 0-2.15-.95-3.54-.92-1.82.02-3.5 1.06-4.43 2.69-1.89 3.27-.48 8.11 1.36 10.77.9 1.3 1.97 2.76 3.37 2.71 1.35-.06 1.87-.87 3.5-.87 1.63 0 2.1.87 3.53.84 1.46-.02 2.38-1.32 3.27-2.62 1.04-1.5 1.46-2.95 1.48-3.03-.03-.01-2.84-1.09-2.87-4.34zM14.46 4.55c.75-.91 1.25-2.17 1.11-3.42-1.07.04-2.37.71-3.14 1.62-.69.8-1.3 2.09-1.13 3.31 1.19.09 2.4-.6 3.16-1.51z"/></svg>
+        Download for macOS
+        <span class="btn-size">arm64 · 40 MB</span>
+      </a>
+      <a href="#install-win" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5L10.5 4.4v7.1H3V5.5zm0 13l7.5 1.1v-7.1H3v6zm8.5 1.2L21 21V12.5h-9.5v7.2zm0-15.4V11.5H21V3l-9.5 1.3z"/></svg>
+        Download for Windows
+        <span class="btn-size">.exe · 51 MB</span>
+      </a>
+    </div>
+    <div class="free-banner">
+      <div class="free-banner-price">$0</div>
+      <div class="free-banner-body">
+        <div class="free-banner-title">Totally free. Forever.</div>
+        <div class="free-banner-sub">No tiers, no upgrades, no &ldquo;Pro&rdquo; version, no subscription, no ads. MIT licensed &mdash; yours to use, copy, fork, and ship inside your own work.</div>
+      </div>
+    </div>
+    <div class="hero-meta">
+      <span>● No telemetry, no accounts, no cloud</span>
+      <span>● Runs entirely on your machine</span>
+      <span>● No AI in the loop</span>
+    </div>
+
+    <div class="hero-shot-wrap">
+      <div class="hero-shot-frame">
+        <div class="hero-shot-cap">// neight on windows · the blank page</div>
+        <img class="hero-shot" src="../screenshots/neight-1.png" alt="Neight editor on Windows with a clean, blank document." />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ABOUT ============ -->
+<section id="about">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">What is Neight</div>
+      <h2 class="sec-title">A notepad built <em>for writing.</em> Nothing else.</h2>
+    </div>
+    <div class="about-grid">
+      <div class="about-body">
+        <p>
+          Most text editors are built for coders. Most word processors feel like they were built for scientists and big offices &mdash; full of toolbars, ribbons, and settings most people never touch. Neight is for everyone in between &mdash; the blog post, the Twitter thread, the short story, the column, the lecture notes. The kind of writing that happens in plain text, in a single window, late at night.
+        </p>
+        <p>
+          Its Tamil name is <b class="tamil">சொல்வெளி</b> &mdash; <i>solveḷi</i> &mdash; literally <i>&ldquo;the open field of words.&rdquo;</i> That&rsquo;s the feeling we&rsquo;re after: a wide, quiet field with nothing on it but you and what you&rsquo;re trying to say.
+        </p>
+        <p>
+          Neight is <b>free</b>. Not free with an asterisk, not free-during-a-trial, not free-if-you-sign-up. It&rsquo;s released under the <b>MIT license</b> &mdash; you can use it, share it, fork it, ship it inside your own work, no permission needed. There are no paid tiers and there is nothing to upgrade to.
+        </p>
+        <div class="pill-row">
+          <span class="pill">Free forever</span>
+          <span class="pill">Open source · MIT</span>
+          <span class="pill">No sign-in</span>
+          <span class="pill">No AI in the loop</span>
+          <span class="pill">No network calls</span>
+        </div>
+      </div>
+
+      <aside class="stat-card">
+        <h4>// At a glance</h4>
+        <ul class="stat-list">
+          <li><span class="k">Platforms</span><span class="v">macOS · Windows</span></li>
+          <li><span class="k">License</span><span class="v">MIT</span></li>
+          <li><span class="k">Price</span><span class="v">$0</span></li>
+          <li><span class="k">Size on disk</span><span class="v">~40 – 51 MB</span></li>
+          <li><span class="k">Network use</span><span class="v">None by default</span></li>
+          <li><span class="k">File types</span><span class="v">.txt · .md</span></li>
+          <li><span class="k">Languages</span><span class="v">Tamil + English + any</span></li>
+          <li><span class="k">Releases</span><span class="v"><a href="https://github.com/venkatarangan/neight/releases" style="color: var(--green-2); border-bottom: 0;">on GitHub →</a></span></li>
+        </ul>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============ INSTALL ============ -->
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">Install</div>
+      <h2 class="sec-title">Two downloads. <em>Three minutes.</em></h2>
+      <p class="sec-sub">Pick your platform. There is no installer wizard, no account, no setup. Just an app you double-click.</p>
+    </div>
+
+    <div class="install-grid">
+      <!-- macOS -->
+      <article class="install-card mac" id="install-mac">
+        <div class="install-head">
+          <span class="install-glyph"></span>
+          <div>
+            <div class="install-name">macOS</div>
+            <div class="install-sub">Apple Silicon · signed build only</div>
+          </div>
+        </div>
+        <ol class="install-steps">
+          <li>Click the download button below &mdash; you&rsquo;ll get a zip with the <b>signed</b> <code>Neight.app</code> inside. <b>Use this build.</b> Don&rsquo;t hand-build or use unsigned copies.</li>
+          <li>Double-click the zip to unpack it. macOS will leave a <code>Neight.app</code> next to it.</li>
+          <li>Drag <code>Neight.app</code> into your <b>Applications</b> folder.</li>
+          <li>Open Applications and double-click Neight. It opens normally &mdash; no right-click-open, no Gatekeeper prompt.</li>
+        </ol>
+        <div class="install-note">
+          <b>Why only the signed build?</b> A well-wisher contributed an Apple Developer signature so the app installs without the usual unsigned-app warnings. Stick to that build. The macOS download is <b>Apple Silicon only</b> (M1, M2, M3, M4).
+        </div>
+        <a class="install-dl" href="https://github.com/venkatarangan/neight/blob/main/stable/Neight-mac-arm64-signed.zip">
+          ↓ Download signed Neight.app <span class="sz">arm64 · ~40 MB</span>
+        </a>
+      </article>
+
+      <!-- Windows -->
+      <article class="install-card win" id="install-win">
+        <div class="install-head">
+          <span class="install-glyph"></span>
+          <div>
+            <div class="install-name">Windows</div>
+            <div class="install-sub">Windows 10 / 11 · single .exe</div>
+          </div>
+        </div>
+        <ol class="install-steps">
+          <li>Click the download button below to get <code>Neight.exe</code>. Save it anywhere &mdash; Desktop, Documents, a USB stick &mdash; whatever you prefer.</li>
+          <li>Double-click <code>Neight.exe</code> to run it. No installer, no admin rights, no registry edits.</li>
+          <li>If Windows SmartScreen pops up, click <b>More info</b>, then <b>Run anyway</b>. This is normal for small independent apps that haven&rsquo;t been signed yet.</li>
+          <li>Optional &mdash; right-click <code>Neight.exe</code> and choose <b>Pin to taskbar</b> or <b>Create shortcut</b> to keep it handy.</li>
+        </ol>
+        <div class="install-note">
+          <b>Open With integration.</b> After the first launch, Neight will show up in the right-click <b>Open With</b> menu of <code>.txt</code> files in File Explorer.
+        </div>
+        <a class="install-dl" href="https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe">
+          ↓ Download Neight.exe <span class="sz">~51 MB</span>
+        </a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW TO USE ============ -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">How to use</div>
+      <h2 class="sec-title">If you&rsquo;ve used <em>Notepad,</em> you already know how.</h2>
+      <p class="sec-sub">Neight opens to a blank page. Type. Save with <span class="kbd">Ctrl + S</span>. That&rsquo;s the whole tutorial. The rest is shortcuts you discover as you need them.</p>
+    </div>
+
+    <div class="shot-strip">
+      <div class="shot">
+        <img src="../screenshots/neight-2.png" alt="Neight editor showing Markdown content" />
+        <div class="shot-cap"><span>Writing in Markdown &mdash; headings, lists, links.</span><span class="platform">Windows</span></div>
+      </div>
+      <div class="shot">
+        <img src="../screenshots/macos/2026-May-06-mac-language-screenshot.jpg" alt="Neight language switch settings on macOS" />
+        <div class="shot-cap"><span>Double-press <b>⌃ Control</b> to flip between Tamil and English.</span><span class="platform">macOS</span></div>
+      </div>
+    </div>
+
+    <div class="shot-strip">
+      <div class="shot">
+        <img src="../screenshots/neight-3.png" alt="Neight with line numbers and gutter" />
+        <div class="shot-cap"><span>Turn on the gutter for paragraph-level line numbers.</span><span class="platform">Windows</span></div>
+      </div>
+      <div class="shot">
+        <img src="../screenshots/neight-5.png" alt="Neight in writer mode" />
+        <div class="shot-cap"><span>Writer Mode &mdash; large Tamil serif, generous margins.</span><span class="platform">Windows</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">What it does</div>
+      <h2 class="sec-title">Small features. <em>Sharp ones.</em></h2>
+      <p class="sec-sub">Everything you&rsquo;d expect from a notepad, plus a careful set of writer-first touches. Nothing more.</p>
+    </div>
+
+    <div class="feat-grid">
+      <div class="feat">
+        <div class="feat-num">01</div>
+        <h3>Two writing modes</h3>
+        <p>One click for <b>Writer Mode</b> &mdash; large Tamil serif, generous spacing, calm margins. One click for <b>Techie Mode</b> &mdash; compact font, gutter line numbers, full status bar.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">02</div>
+        <h3>Tamil + English, side by side</h3>
+        <p>Double-press <b>Ctrl</b> (or <b>⌃ Control</b> on Mac) and the keyboard flips. No System Settings, no menu hunt. Just write.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">03</div>
+        <h3>Markdown without the toolbar</h3>
+        <p>Headings, bold, italic, lists, links, tables, code blocks &mdash; all under one Markdown menu, all under sensible shortcuts.</p>
+        <span class="kbd">Ctrl + 1…6</span>
+      </div>
+      <div class="feat">
+        <div class="feat-num">04</div>
+        <h3>Auto-save &amp; recovery</h3>
+        <p>Auto-saves every 2, 5, 15 or 30 minutes. If you start typing before naming a file, a recovery copy is kept quietly in <code>~/Documents/Neight/</code>.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">05</div>
+        <h3>Smart filenames</h3>
+        <p>Press <b>Ctrl + S</b> on an unsaved draft and the save dialog opens pre-filled with the first few words of your text. Accept it or edit it.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">06</div>
+        <h3>Find &amp; replace, properly</h3>
+        <p>Includes escape sequences &mdash; <code>\n</code>, <code>\t</code>, hex bytes, Unicode codepoints. Click the <b>ⓘ</b> button for the cheat sheet.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">07</div>
+        <h3>Sorkuvai lookup</h3>
+        <p>Right-click any Tamil word to look it up in the Sorkuvai dictionary. Helpful when a word is on the tip of your tongue.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">08</div>
+        <h3>Triple-click to Google</h3>
+        <p>Triple-click any word and your default browser opens a Google search for it. Press <b>Ctrl + E</b> on any selection for the same.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">09</div>
+        <h3>Export to PDF</h3>
+        <p>A4 layout, real margins, your chosen font. Headings and tables render properly when exporting from Markdown.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">10</div>
+        <h3>Pick up where you left off</h3>
+        <p>Neight reopens your last file at startup, cursor in roughly the right place. Toggle it off if you&rsquo;d rather always start blank.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">11</div>
+        <h3>Quiet status bar</h3>
+        <p>Word count, sentence count, reading time, line/column, keyboard layout. Hide what you don&rsquo;t want from <b>View → Status Bar</b>.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-num">12</div>
+        <h3>Word index overlay</h3>
+        <p>Number every word in your document &mdash; the &ldquo;butter paper&rdquo; effect. A translucent sheet for precise editorial annotation.</p>
+        <span class="kbd">Ctrl + Shift + W</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MENU STRUCTURE ============ -->
+<section id="menus">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">Menus</div>
+      <h2 class="sec-title">Everything is <em>one menu</em> away.</h2>
+      <p class="sec-sub">Seven menus. No nested settings panels, no preferences buried four clicks deep.</p>
+    </div>
+
+    <table class="menu-table">
+      <thead>
+        <tr><th>Menu</th><th>What lives there</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>File</th><td>New, New Window, Open, Save, Save As, Export Text/Markdown to PDF, View Recovery Folder, Empty Recovery Folder, Exit.</td></tr>
+        <tr><th>Edit</th><td>Undo/Redo, clipboard, Find, Replace, Go To Line, Time/Date insert, Search with Google, blank-line tools, Normalize Unicode.</td></tr>
+        <tr><th>Markdown</th><td>Headings, bold/italic, lists (ordered, unordered, checkbox), quotes, code blocks, strikethrough, highlight, tables, links, images.</td></tr>
+        <tr><th>Format</th><td>Font picker, Word Wrap.</td></tr>
+        <tr><th>View</th><td>Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar items.</td></tr>
+        <tr><th>Settings</th><td>Continue where you left off, Appearance, Save current settings as Writer / Techie Mode Preset, Language Switch, Auto-Save Interval.</td></tr>
+        <tr><th>Help</th><td>Writer (<span class="tamil">சொல்வெளி</span>) Mode, Techie (<span class="tamil">நுட்பர்</span>) Mode, Check for Updates, About, Debug Info.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ NAME ============ -->
+<section class="panel-dark" id="name">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">How it got its name</div>
+      <h2 class="sec-title">Neight is just <em>N&middot;8.</em></h2>
+      <p class="sec-sub">It started life as a slightly clunky working title and shed letters until it sounded right.</p>
+    </div>
+
+    <div class="name-grid">
+      <div>
+        <div class="formula">
+          <b>NotepadEnhanced</b> <span class="arrow">→</span> <b>NotepadE</b> <span class="arrow">→</span> <b>N8</b> <span class="arrow">→</span> <b>Neight.</b>
+        </div>
+        <p style="margin-top: 28px; font-size: 17px; color: rgba(255,255,255,.8); line-height: 1.6;">
+          The Tamil name is <b class="tamil" style="color:white;">சொல்வெளி</b> &mdash; <i>solveḷi</i> &mdash; from <span class="tamil" style="color:white;">சொல்</span> (word) + <span class="tamil" style="color:white;">வெளி</span> (open space, field, expanse). It&rsquo;s the name of the writer&rsquo;s mode inside the app, and the spirit of the whole thing.
+        </p>
+      </div>
+
+      <div class="pronounce">
+        <h4>// How to pronounce it</h4>
+        <div class="pronounce-word">Neight</div>
+        <div class="pronounce-ipa">/neɪt/ &mdash; rhymes with <i>eight</i>.</div>
+        <p class="pronounce-eq">
+          <b>N + eight</b> &mdash; that&rsquo;s it. Say the letter N, then say the number 8. Run them together. <b>Neight</b>.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHY ============ -->
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">Why it exists</div>
+      <h2 class="sec-title">Built by a writer, <em>for writers.</em></h2>
+    </div>
+
+    <blockquote class="why-quote">
+      Neight started because Tamil text wasn&rsquo;t rendering right in newer Windows Notepad, and the alternatives were either too heavy, too cluttered, or just not suited to quick bilingual writing.
+    </blockquote>
+
+    <div class="why-body">
+      <p>
+        The goal was simple: a small, dependable editor that feels close to Notepad, but works better for the way real writing actually happens &mdash; switching languages mid-sentence, drafting in Markdown, exporting a clean PDF, recovering when the laptop dies.
+      </p>
+      <p>
+        Neight is a personal project, <b>vibe-coded</b> with AI assistance over evenings and weekends. That means a lot of the code was scaffolded in conversation with an AI pair, then read, edited, tested, and shipped by a human. The AI never touches your text &mdash; it helped <i>build</i> the app, it doesn&rsquo;t <i>run inside</i> the app. The app makes <b>zero</b> network calls on its own.
+      </p>
+      <p>
+        Neight is especially useful if you want a simple editor for short and medium-form writing, better support for Tamil + English workflows, or a Markdown-capable editor without a cluttered toolbar &mdash; instead of reaching for a full IDE or a word processor.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ READ MORE ============ -->
+<section id="read-more">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">Go deeper</div>
+      <h2 class="sec-title">Three more docs <em>if you&rsquo;re curious.</em></h2>
+      <p class="sec-sub">Nothing here is required reading. Open whichever one fits where you are.</p>
+    </div>
+
+    <div class="read-grid">
+      <a class="read" href="https://github.com/venkatarangan/neight/blob/main/README.md">
+        <span class="read-kicker">// readme.md</span>
+        <span class="read-title">The full README</span>
+        <p class="read-desc">The complete write-up &mdash; every feature, every keyboard shortcut, every menu, every setting, in one long page. Start here if you&rsquo;re evaluating Neight.</p>
+        <span class="read-arrow">Read on GitHub →</span>
+      </a>
+      <a class="read" href="https://github.com/venkatarangan/neight/blob/main/ADVANCED.md">
+        <span class="read-kicker">// advanced.md</span>
+        <span class="read-title">Power-user features</span>
+        <p class="read-desc">Custom presets, Writer / Techie Mode internals, reading-time tuning, the Word Index overlay, Unicode tools, where settings live on disk &mdash; for when you want to bend Neight to fit you.</p>
+        <span class="read-arrow">Read on GitHub →</span>
+      </a>
+      <a class="read" href="https://github.com/venkatarangan/neight/blob/main/DEVELOPER.md">
+        <span class="read-kicker">// developer.md</span>
+        <span class="read-title">For developers</span>
+        <p class="read-desc">Build from source, architecture overview, release workflow, macOS Open With internals, autosave watchdog notes &mdash; everything you&rsquo;d want before forking or contributing.</p>
+        <span class="read-arrow">Read on GitHub →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ACKNOWLEDGEMENTS ============ -->
+<section id="thanks">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-kicker">Acknowledgements</div>
+      <h2 class="sec-title">Neight wouldn&rsquo;t exist <em>without these people.</em></h2>
+    </div>
+    <div class="ack-grid">
+      <div class="ack">
+        <h3 class="ack-name">Pa. Raghavan</h3>
+        <div class="ack-role">// the spark</div>
+        <p class="ack-text">Editor of <a href="https://madraspaper.com">MadrasPaper.com</a>, an online Tamil magazine. His years-long search for the perfect distraction-free writing app on macOS was the seed that became this project. That level of care for the craft of writing was reason enough to build something.</p>
+      </div>
+      <div class="ack">
+        <h3 class="ack-name">Muthu Nedumaran</h3>
+        <div class="ack-role">// encouragement &amp; support</div>
+        <p class="ack-text">Of <a href="https://murasu.com">Murasu.com</a>. Warm thanks for the encouragement and support throughout. Neight stands on a long history of Tamil computing work that the Murasu community has been quietly doing for decades.</p>
+      </div>
+    </div>
+    <p style="margin-top: 28px; font-size: 14.5px; color: var(--ink-mute);">
+      And a quiet thank-you to the kind soul who contributed the Apple Developer signature so macOS users can install without friction.
+    </p>
+  </div>
+</section>
+
+<!-- ============ LEGAL ============ -->
+<section id="legal">
+  <div class="wrap">
+    <div class="legal-grid">
+      <div class="legal-card">
+        <h3>// License</h3>
+        <div class="mit">MIT</div>
+        <p>Neight is released under the <b>MIT License</b>. Use it, copy it, modify it, embed it in your own work, sell what you build on top of it &mdash; no permission needed. The only requirement is that you keep the copyright and license notice in your copies.</p>
+        <p><a href="https://github.com/venkatarangan/neight/blob/main/LICENSE">Read the full license →</a></p>
+      </div>
+      <div class="legal-card">
+        <h3>// Disclaimer</h3>
+        <p>Neight is provided <b>as is</b>, without warranties of any kind &mdash; express or implied &mdash; including fitness for a particular purpose, reliability, availability, performance, and accuracy.</p>
+        <p>Neight is not affiliated with, endorsed by, or sponsored by Google, Sorkuvai, the Government of Tamil Nadu, or any other third-party service referenced. Trademarks remain with their respective owners. You are responsible for deciding whether it&rsquo;s suitable for your workflow.</p>
+        <p><a href="https://github.com/venkatarangan/neight/blob/main/PRIVACY.md">Read the privacy policy →</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="foot-brand">
+        <img src="assets/neight-icon.png" alt="" />
+        <div>
+          <div class="foot-brand-name">Neight <span class="tamil" style="color: var(--green-1); font-size: 16px; font-style: italic; margin-left: 6px;">சொல்வெளி</span></div>
+          <div class="foot-brand-tag">Notepad, reimagined. Write into the night.</div>
+        </div>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/venkatarangan/neight">GitHub</a>
+        <a href="https://github.com/venkatarangan/neight/blob/main/README.md">README</a>
+        <a href="https://github.com/venkatarangan/neight/blob/main/ADVANCED.md">Advanced</a>
+        <a href="https://github.com/venkatarangan/neight/blob/main/DEVELOPER.md">Developer</a>
+        <a href="https://github.com/venkatarangan/neight/blob/main/PRIVACY.md">Privacy</a>
+        <a href="https://github.com/venkatarangan/neight/blob/main/LICENSE">License</a>
+      </div>
+    </div>
+    <div class="foot-copy">
+      <span>// brewed at venkatarangan.com · MIT licensed</span>
+      <span>// made for writers who write in the dark.</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
