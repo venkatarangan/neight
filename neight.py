@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.056"
+VERSION = "2026.058"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -2099,6 +2099,23 @@ class Notepad(QMainWindow):
         self._ctrl_press_timer = QTimer(self)
         self._ctrl_press_timer.setSingleShot(True)
         self._ctrl_press_timer.timeout.connect(self._reset_ctrl_press)
+        # True when Ctrl/Meta was held while a non-modifier key was pressed (i.e. used
+        # as part of a chord like Cmd+S or Cmd+.).  The subsequent Ctrl/Meta release
+        # must NOT be counted toward the double-Ctrl quick-switch detection.
+        self._ctrl_used_as_modifier = False
+        # Install an application-level event filter so we can observe key
+        # events BEFORE Qt's shortcut dispatch consumes them.  Without this,
+        # chord key-presses like Cmd+S never reach Notepad.keyPressEvent
+        # because the matching QAction shortcut fires first and swallows the
+        # event — leaving the subsequent Cmd key-release to be misinterpreted
+        # as a single Ctrl tap and (combined with any later Ctrl release)
+        # triggering the unwanted layout quick-switch.
+        try:
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.installEventFilter(self)
+        except Exception:
+            pass
 
         # Keyboard quick switch settings (defaults; overridden properly in _load_preferences)
         self._quick_switch_enabled = True
@@ -2743,6 +2760,53 @@ class Notepad(QMainWindow):
             f"Update available: {latest} — see Help menu", 8000
         )
 
+    def eventFilter(self, watched, event):
+        """Application-level filter that detects Ctrl/Meta chord usage.
+
+        Qt's shortcut dispatch consumes matching key-press events (e.g. Cmd+S
+        firing the save QAction) before they reach Notepad.keyPressEvent.
+        That left the bare Cmd key-release looking like a single Ctrl tap and
+        could trigger the double-Ctrl layout quick-switch on the *next* Cmd
+        release (or even immediately, if the press_time window was still open).
+
+        We catch the chord at the application level here: any non-modifier
+        KeyPress / ShortcutOverride with Ctrl or Meta held, AND any Shortcut
+        event, marks the next Ctrl/Meta release as 'consumed by a chord' so it
+        is discarded by keyReleaseEvent.  We also reset _ctrl_press_time so a
+        previously-armed first tap can't combine with the post-chord release.
+        """
+        try:
+            etype = event.type()
+            if etype == QEvent.Type.Shortcut:
+                self._ctrl_used_as_modifier = True
+                self._ctrl_press_time = 0
+            elif etype in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
+                key = event.key()
+                if key not in (Qt.Key_Control, Qt.Key_Meta, Qt.Key_Shift,
+                               Qt.Key_Alt, Qt.Key_AltGr):
+                    if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier):
+                        self._ctrl_used_as_modifier = True
+                        self._ctrl_press_time = 0
+        except Exception:
+            pass
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event):
+        """Track whether Ctrl/Meta is used as part of a shortcut chord.
+
+        If a non-modifier key is pressed while Ctrl or Meta is held (e.g.
+        Cmd+S, Cmd+., Cmd+Z …), mark _ctrl_used_as_modifier so the subsequent
+        Ctrl/Meta key-release is not counted toward the double-Ctrl
+        quick-switch detection.
+        """
+        key = event.key()
+        _modifier_keys = (Qt.Key_Control, Qt.Key_Meta, Qt.Key_Shift, Qt.Key_Alt)
+        if key not in _modifier_keys:
+            mods = event.modifiers()
+            if mods & (Qt.ControlModifier | Qt.MetaModifier):
+                self._ctrl_used_as_modifier = True
+        super().keyPressEvent(event)
+
     def keyReleaseEvent(self, event):
         """Detect double Ctrl press to toggle keyboard layout."""
         if sys.platform not in ("win32", "darwin"):
@@ -2758,6 +2822,12 @@ class Notepad(QMainWindow):
 
         # Only track double-Ctrl presses when quick switch is enabled
         if event.key() in (Qt.Key_Control, Qt.Key_Meta):
+            # If this release belongs to a chord (e.g. Cmd+S, Cmd+., Cmd+Z),
+            # discard it — it must not count toward the double-Ctrl detection.
+            if getattr(self, '_ctrl_used_as_modifier', False):
+                self._ctrl_used_as_modifier = False
+                super().keyReleaseEvent(event)
+                return
             if getattr(self, '_quick_switch_enabled', False):
                 current_time = time.time()
 
@@ -6080,18 +6150,34 @@ class Notepad(QMainWindow):
         # Font \u2014 applied last so _apply_theme_preferences() cannot reset widget font
         family = data.get("font_family")
         size = data.get("font_size")
-        if family and isinstance(family, str) and isinstance(size, int) and 4 <= size <= 256:
-            try:
-                font = QFont(family, size)
-                raw_weight = data.get("font_weight")
-                if raw_weight is not None:
-                    try:
-                        font.setWeight(QFont.Weight(int(raw_weight)))
-                    except Exception:
-                        pass
-                self.editor.setFont(font)
-            except Exception:
-                pass
+        # Normalise size: accept int or float (e.g. 12.0 written by an older version)
+        if isinstance(size, float) and size == int(size):
+            size = int(size)
+        # If family is absent or empty, fall back to a platform-appropriate default
+        # so the editor never silently inherits whatever Qt picks as its default.
+        if not (family and isinstance(family, str)):
+            if sys.platform == "win32":
+                family = "Segoe UI"
+            elif sys.platform == "darwin":
+                family = ".AppleSystemUIFont"
+            else:
+                family = ""
+        # Default size when missing or out of range
+        if not (isinstance(size, int) and 4 <= size <= 256):
+            size = 12
+        try:
+            font = QFont(family, size) if family else QFont()
+            if not family:
+                font.setPointSize(size)
+            raw_weight = data.get("font_weight")
+            if raw_weight is not None:
+                try:
+                    font.setWeight(QFont.Weight(int(raw_weight)))
+                except Exception:
+                    pass
+            self.editor.setFont(font)
+        except Exception:
+            pass
 
         # Startup behaviour flag (checkbox only; actual file-open is the caller's job)
         reopen = data.get("reopen_last_file_on_launch", True)
@@ -6256,7 +6342,11 @@ class Notepad(QMainWindow):
                     getattr(self, '_line_spacing_preset', 'single_line')
                 ),
                 "text_margin_percent": self.editor.textMarginPercent(),
-                "font_family": font.family(),
+                "font_family": font.family() or (
+                    "Segoe UI" if sys.platform == "win32"
+                    else ".AppleSystemUIFont" if sys.platform == "darwin"
+                    else ""
+                ),
                 "font_size": int(font.pointSize()) if font.pointSize() > 0 else 12,
                 "font_weight": int(font.weight()),
                 "default_directory": str(self.default_directory),
