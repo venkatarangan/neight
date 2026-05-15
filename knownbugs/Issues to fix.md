@@ -1,0 +1,1 @@
+2. When two windows of neight are open, the second app, doesn't get the font settings correctly. For example in tamil, it takes the default tamil font and not the assigned font.
