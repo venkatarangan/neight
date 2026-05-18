@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**Current Version: 2026.047** | [Privacy Policy](PRIVACY.md)
+**[Latest releases on GitHub](https://github.com/venkatarangan/neight/releases)** | [Privacy Policy](PRIVACY.md)
 
 **Neight** (pronounced N8) is a lightweight text editor for writers who work in Tamil and English on Windows and macOS. It handles mixed-language drafting, Markdown, and distraction-free writing without the weight of a full IDE or word processor.
 
