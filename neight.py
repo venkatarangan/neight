@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.063"
+VERSION = "2026.065"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -1144,14 +1144,6 @@ class CodeEditor(QPlainTextEdit):
         self._overlay_dirty_timer.setInterval(150)
         self._overlay_dirty_timer.timeout.connect(self._flush_overlay_update)
 
-        # Cursor-line visibility: one reusable timer, interval=0 → fires once
-        # after the event loop drains.  Restarting an already-pending single-shot
-        # timer is a no-op accumulation guard during fast typing.
-        self._cursor_vis_timer = QTimer(self)
-        self._cursor_vis_timer.setSingleShot(True)
-        self._cursor_vis_timer.setInterval(0)
-        self._cursor_vis_timer.timeout.connect(self._ensure_cursor_line_fully_visible)
-
         # Auto-hide scrollbar
         self._auto_hide_scrollbar = False
         self._scrollbar_hide_timer = QTimer(self)
@@ -1164,7 +1156,6 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self.updateLineNumberArea)
         self.updateRequest.connect(self._sync_word_index_overlay)
         self.cursorPositionChanged.connect(self.updateCurrentLineHighlight)
-        self.cursorPositionChanged.connect(self._schedule_cursor_visibility_check)
         self.document().contentsChange.connect(self._on_document_contents_change)
         self.verticalScrollBar().valueChanged.connect(self._update_word_index_overlay)
         self.horizontalScrollBar().valueChanged.connect(self._update_word_index_overlay)
@@ -1450,50 +1441,6 @@ class CodeEditor(QPlainTextEdit):
         # Keep simple; rely on palette for current line appearance.
         pass
 
-    def _schedule_cursor_visibility_check(self):
-        """Defer cursor-line visibility check to after Qt finishes its own scrolling.
-        Restarting an already-pending QTimer is free — no new object created."""
-        self._cursor_vis_timer.start()
-
-    def _ensure_cursor_line_fully_visible(self):
-        """If the cursor's line is clipped at the viewport bottom, scroll to reveal it.
-
-        Uses the cursor block's actual rendered geometry (from the custom
-        SpacedPlainTextDocumentLayout via blockBoundingGeometry), not cursorRect's
-        font-metric height — Tamil/Indic glyphs can extend below the font metric
-        descent, and a custom line-spacing multiplier makes blocks taller still.
-
-        QPlainTextEdit's vertical scrollbar value is in *visual line* units (one
-        tick per fontMetrics().lineSpacing()), so we convert pixel overshoot to
-        line ticks.  At the last block we clamp to vsb.maximum(); the bottom
-        viewport safety padding in _apply_viewport_margins absorbs any residual
-        sub-line clipping caused by glyph extension beyond font metrics.
-        """
-        cursor = self.textCursor()
-        block = cursor.block()
-        if not block.isValid():
-            return
-        br = self.blockBoundingGeometry(block).translated(self.contentOffset())
-        vr = self.viewport().rect()
-        overshoot = int(br.bottom()) - vr.bottom()
-        vsb = self.verticalScrollBar()
-        if block == self.document().lastBlock():
-            # At the last block, always scroll to vsb.maximum() so the slack
-            # reserved by setDocumentMargin (see _apply_viewport_margins) sits
-            # below the line, absorbing any Tamil/Indic glyph ink that paints
-            # past Qt's reported font descent.  Qt's natural End-of-doc scroll
-            # frequently stops one tick short of maximum at certain font sizes
-            # (block height > fontMetric lineSpacing in the custom layout),
-            # which would leave the descender clipped despite the margin.
-            if vsb.value() < vsb.maximum():
-                vsb.setValue(vsb.maximum())
-            return
-        if overshoot <= 0:
-            return
-        line_h = max(1, self.fontMetrics().lineSpacing())
-        steps = (overshoot + line_h - 1) // line_h
-        vsb.setValue(min(vsb.maximum(), vsb.value() + steps))
-
     def setFont(self, font):
         super().setFont(font)
         # Explicitly sync the document's default font.  super().setFont() triggers a
@@ -1739,13 +1686,6 @@ class CodeEditor(QPlainTextEdit):
             handler = getattr(self.window(), "_clear_word_highlight_on_navigation", None)
             if callable(handler):
                 handler()
-            # When the cursor is already at the document boundary (e.g. pressing
-            # Right at end-of-doc, or Cmd+Down when end is already in view),
-            # cursorPositionChanged does NOT fire, so the regular scroll-correction
-            # path is skipped and the last line can be left clipped.  Schedule the
-            # visibility check explicitly here.  Restarting the single-shot timer
-            # is idempotent if the signal-driven path already scheduled it.
-            self._schedule_cursor_visibility_check()
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
