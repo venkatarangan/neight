@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.060"
+VERSION = "2026.063"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -1037,6 +1037,23 @@ class SpacedPlainTextDocumentLayout(QPlainTextDocumentLayout):
     def __init__(self, doc):
         super().__init__(doc)
         self._line_spacing_mult = 1.0
+        # Extra pixels appended to the LAST block's reported height so Qt's
+        # scrollbar math reserves real, reachable slack below the final line.
+        # This is the lever that makes vsb.maximum() honestly correspond to
+        # "last block fully visible including its true ink extent" — necessary
+        # for Tamil / Indic descenders and stacked vowel marks that paint past
+        # Qt's reported font descent.  Set by CodeEditor based on fontMetrics.
+        self._last_block_extra = 0
+
+    def setLastBlockExtra(self, extra: int):
+        extra = max(0, int(extra))
+        if extra == self._last_block_extra:
+            return
+        self._last_block_extra = extra
+        doc = self.document()
+        if doc and doc.lastBlock().isValid():
+            # Invalidate just the last block so Qt recomputes its position.
+            self.documentChanged(doc.lastBlock().position(), 0, 0)
 
     def setLineSpacingMultiplier(self, mult: float):
         value = max(0.5, min(5.0, float(mult)))
@@ -1055,18 +1072,32 @@ class SpacedPlainTextDocumentLayout(QPlainTextDocumentLayout):
         # (single-spaced) coordinates.  We then reposition them.
         r = super().blockBoundingRect(block)
         mult = self._line_spacing_mult
+        # Last-block height padding: append slack so Qt's vsb maths reserves a
+        # real, reachable position where the final line's full ink (including
+        # Tamil descenders / stacked vowel marks) sits inside the viewport.
+        extra = 0
+        if (self._last_block_extra > 0
+                and block.isValid()
+                and block == self.document().lastBlock()):
+            extra = self._last_block_extra
         if abs(mult - 1.0) < 1e-9 or not block.isValid():
+            if extra:
+                return QRectF(r.x(), r.y(), r.width(), r.height() + extra)
             return r
 
         layout = block.layout()
         n = layout.lineCount()
         if n == 0:
+            if extra:
+                return QRectF(r.x(), r.y(), r.width(), r.height() + extra)
             return r
 
         # Natural line height is the height of the first line as set by Qt's
         # text engine (ascent + descent + leading for the block's font).
         natural_h = layout.lineAt(0).height()
         if natural_h <= 0.0:
+            if extra:
+                return QRectF(r.x(), r.y(), r.width(), r.height() + extra)
             return r
 
         spaced_h = natural_h * mult
@@ -1078,7 +1109,7 @@ class SpacedPlainTextDocumentLayout(QPlainTextDocumentLayout):
             pos = line.position()
             line.setPosition(QPointF(pos.x(), i * spaced_h))
 
-        return QRectF(r.x(), r.y(), r.width(), n * spaced_h)
+        return QRectF(r.x(), r.y(), r.width(), n * spaced_h + extra)
 
 
 class CodeEditor(QPlainTextEdit):
@@ -1274,6 +1305,42 @@ class CodeEditor(QPlainTextEdit):
             bottom_margin = spacing_edge
             self.setViewportMargins(line_area + text_margin, top_margin, text_margin, bottom_margin)
 
+            # Document margin: reserve a strip *inside* the viewport, below the
+            # last block, so Tamil / Indic glyphs whose ink extends past Qt's
+            # reported font descent remain visible at vsb.maximum().  Qt clips
+            # text painting at viewport.bottom() and aligns lastBlock.bottom()
+            # to viewport.bottom() at max scroll using font-metric height — any
+            # descender beyond that metric would be clipped without this slack.
+            # Bottom *viewport* margin doesn't help because it's outside the
+            # paint area; document margin is inside the painted region and is
+            # honoured by Qt's scrollbar calculation, growing vsb.maximum() by
+            # roughly one tick so the slack is reachable.
+            #
+            # Document margin: a small symmetric inset (top / left / right /
+            # bottom) sized from the font.  Its main job here is to give the
+            # cursor and last-line glyphs a few pixels of breathing room from
+            # the viewport edges.  The bulk of the "last line descender slack"
+            # work is done by SpacedPlainTextDocumentLayout.setLastBlockExtra
+            # below, which inflates the last block's reported height so Qt's
+            # vsb math reserves real, reachable space for the full ink extent.
+            fm = self.fontMetrics()
+            desired_doc_margin = max(8, fm.descent() + 4, int(round(0.5 * fm.height())))
+            doc = self.document()
+            if abs(doc.documentMargin() - desired_doc_margin) >= 1:
+                doc.setDocumentMargin(desired_doc_margin)
+
+            # Last-block padding: a full lineSpacing of trailing slack.  Qt's
+            # vsb math allocates ticks in lineSpacing units; anything less than
+            # one tick may be "absorbed" without adding a reachable scroll
+            # position (most visible at large fonts).  A whole line of trailing
+            # slack guarantees an extra reachable tick and gives the user a
+            # comfortable margin below the last line — similar to VS Code's
+            # "scroll past end of file" behaviour, scaled to a single line.
+            extra = fm.lineSpacing() + fm.descent()
+            layout = getattr(self, '_spacing_layout', None)
+            if layout is not None:
+                layout.setLastBlockExtra(extra)
+
             # Snap: ensure the viewport height is an exact multiple of the actual
             # rendered line height so no partial line is visible at the bottom.
             # Use blockBoundingRect on the first block for the true pixel height
@@ -1389,13 +1456,43 @@ class CodeEditor(QPlainTextEdit):
         self._cursor_vis_timer.start()
 
     def _ensure_cursor_line_fully_visible(self):
-        """If the cursor's line is clipped at the viewport bottom, scroll to reveal it."""
-        cr = self.cursorRect()
+        """If the cursor's line is clipped at the viewport bottom, scroll to reveal it.
+
+        Uses the cursor block's actual rendered geometry (from the custom
+        SpacedPlainTextDocumentLayout via blockBoundingGeometry), not cursorRect's
+        font-metric height — Tamil/Indic glyphs can extend below the font metric
+        descent, and a custom line-spacing multiplier makes blocks taller still.
+
+        QPlainTextEdit's vertical scrollbar value is in *visual line* units (one
+        tick per fontMetrics().lineSpacing()), so we convert pixel overshoot to
+        line ticks.  At the last block we clamp to vsb.maximum(); the bottom
+        viewport safety padding in _apply_viewport_margins absorbs any residual
+        sub-line clipping caused by glyph extension beyond font metrics.
+        """
+        cursor = self.textCursor()
+        block = cursor.block()
+        if not block.isValid():
+            return
+        br = self.blockBoundingGeometry(block).translated(self.contentOffset())
         vr = self.viewport().rect()
-        overshoot = cr.bottom() - vr.bottom()
-        if overshoot > 0:
-            vsb = self.verticalScrollBar()
-            vsb.setValue(vsb.value() + overshoot)
+        overshoot = int(br.bottom()) - vr.bottom()
+        vsb = self.verticalScrollBar()
+        if block == self.document().lastBlock():
+            # At the last block, always scroll to vsb.maximum() so the slack
+            # reserved by setDocumentMargin (see _apply_viewport_margins) sits
+            # below the line, absorbing any Tamil/Indic glyph ink that paints
+            # past Qt's reported font descent.  Qt's natural End-of-doc scroll
+            # frequently stops one tick short of maximum at certain font sizes
+            # (block height > fontMetric lineSpacing in the custom layout),
+            # which would leave the descender clipped despite the margin.
+            if vsb.value() < vsb.maximum():
+                vsb.setValue(vsb.maximum())
+            return
+        if overshoot <= 0:
+            return
+        line_h = max(1, self.fontMetrics().lineSpacing())
+        steps = (overshoot + line_h - 1) // line_h
+        vsb.setValue(min(vsb.maximum(), vsb.value() + steps))
 
     def setFont(self, font):
         super().setFont(font)
@@ -1642,6 +1739,13 @@ class CodeEditor(QPlainTextEdit):
             handler = getattr(self.window(), "_clear_word_highlight_on_navigation", None)
             if callable(handler):
                 handler()
+            # When the cursor is already at the document boundary (e.g. pressing
+            # Right at end-of-doc, or Cmd+Down when end is already in view),
+            # cursorPositionChanged does NOT fire, so the regular scroll-correction
+            # path is skipped and the last line can be left clipped.  Schedule the
+            # visibility check explicitly here.  Restarting the single-shot timer
+            # is idempotent if the signal-driven path already scheduled it.
+            self._schedule_cursor_visibility_check()
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
