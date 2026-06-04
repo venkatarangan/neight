@@ -773,6 +773,37 @@
   .contribute-arrow {
     font-family: var(--mono); color: var(--green-1); font-size: 18px;
   }
+
+  /* notice banner (platform / compatibility warnings) */
+  .notice-banner {
+    margin-top: 28px;
+    padding: 18px 22px;
+    background: color-mix(in srgb, #D97706 7%, white);
+    border: 1px solid color-mix(in srgb, #D97706 28%, transparent);
+    border-left: 3px solid #D97706;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    max-width: 720px;
+  }
+  .notice-banner-label {
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: #92400E; margin-bottom: 8px;
+  }
+  .notice-body {
+    margin: 0; font-size: 14.5px; color: var(--ink); line-height: 1.55;
+  }
+  .notice-body + .notice-body { margin-top: 8px; }
+  .notice-banner b { color: #92400E; font-weight: 600; }
+  .notice-banner.notice-info {
+    background: color-mix(in srgb, #0E7490 7%, white);
+    border-color: color-mix(in srgb, #0E7490 28%, transparent);
+    border-left-color: #0E7490;
+  }
+  .notice-banner.notice-info .notice-banner-label { color: #155E75; }
+  .notice-banner.notice-info b { color: #155E75; }
+  @media (max-width: 520px) {
+    .notice-banner { padding: 16px 18px; margin-top: 22px; }
+  }
 </style>
 <!-- 
 ⚠️ TAMIL: Do NOT retype or autocomplete. Copy byte-for-byte only.
@@ -827,6 +858,11 @@
         <span class="btn-size">.exe · 51 MB</span>
       </a>
     </div>
+    <div class="notice-banner notice-info">
+      <div class="notice-banner-label">// Important</div>
+      <p class="notice-body"><b>Neight is for PC and Mac only.</b> This app does not run on iPhone, Android, or any other mobile phone or tablet. The download links above are for <b>macOS</b> and <b>Windows</b> desktop computers only.</p>
+    </div>
+
     <div class="free-banner">
       <div class="free-banner-price">$0</div>
       <div class="free-banner-body">
@@ -834,6 +870,11 @@
         <div class="free-banner-sub">No tiers, no upgrades, no &ldquo;Pro&rdquo; version, no subscription, no ads. MIT licensed &mdash; yours to use, copy, fork, and ship inside your own work.</div>
       </div>
     </div>
+    <div class="notice-banner">
+      <div class="notice-banner-label">// Tamil Typing</div>
+      <p class="notice-body"><b>Tamil typing works only with the built-in keyboard layouts</b> that ship with Windows 11 and macOS &mdash; such as <i>Tamil 99</i> or <i>Tamil Phonetic</i> on Windows, or the <i>Tamil layout</i> in macOS Keyboard Settings. Third-party Tamil input apps like <b>NHM Writer</b> and <b>Azhagi</b> are not supported and will not work correctly with Neight.</p>
+    </div>
+
     <div class="privacy-strip">
       <div class="privacy-strip-label">// Privacy at a glance</div>
       <div class="privacy-strip-items">
@@ -1056,7 +1097,7 @@
       <div class="feat">
         <div class="feat-num">02</div>
         <h3>Tamil + English, side by side</h3>
-        <p>Double-press <b>Ctrl</b> (or <b>⌃ Control</b> on Mac) and the keyboard flips. No System Settings, no menu hunt. Just write.</p>
+        <p>Double-press <b>Ctrl</b> (or <b>⌃ Control</b> on Mac) and the keyboard flips. No System Settings, no menu hunt. Just write. Works only with the <b>built-in keyboard layouts</b> that ship with Windows 11 and macOS &mdash; not with third-party input apps like NHM Writer or Azhagi.</p>
       </div>
       <div class="feat">
         <div class="feat-num">03</div>
@@ -1206,6 +1247,14 @@
       <details class="faq-item">
         <summary>How do I uninstall it?</summary>
         <div class="faq-body">On macOS, drag <code>Neight.app</code> from Applications to the Trash. On Windows, just delete <code>Neight.exe</code>. There is no installer, no registry, no leftover files. (If you want to be thorough, the only thing Neight writes outside itself is <code>~/Documents/Neight/</code> &mdash; safe to delete.)</div>
+      </details>
+      <details class="faq-item">
+        <summary>Does Neight work on iPhone or Android?</summary>
+        <div class="faq-body">No. <b>Neight is a desktop app for PC and Mac only.</b> There is no iOS or Android version, and there are no plans for one. If you are visiting this page on a phone, you will need to download and install Neight on a <b>Windows PC</b> or <b>Mac</b> to use it.</div>
+      </details>
+      <details class="faq-item">
+        <summary>Does Neight work with NHM Writer, Azhagi, or other Tamil input apps?</summary>
+        <div class="faq-body">No. Tamil typing in Neight relies on the <b>built-in keyboard layouts</b> that ship with <b>Windows 11</b> and <b>macOS</b> &mdash; for example, <i>Tamil 99</i> or <i>Tamil Phonetic</i> on Windows, or the <i>Tamil</i> layout under macOS Keyboard Settings. Third-party Tamil input apps such as <b>NHM Writer</b> and <b>Azhagi</b> are not supported and will not work correctly inside Neight.</div>
       </details>
     </div>
   </div>
