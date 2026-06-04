@@ -204,3 +204,4 @@ deploylocal.bat
 *.app/
 dist/*.app/
 dist/Neight/
+make_slides.py
