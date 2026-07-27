@@ -18,6 +18,15 @@
 # Info.plist (bundle identifier, version, document types) before the next
 # release, per the release checklist.
 
+import re
+from pathlib import Path
+
+_neight_source = (Path(SPECPATH) / '..' / 'neight.py').read_text(encoding='utf-8')
+_version_match = re.search(r'^VERSION = "(\d{4}\.\d{3})"', _neight_source, re.MULTILINE)
+if not _version_match:
+    raise SystemExit("Could not find VERSION in neight.py")
+APP_VERSION = _version_match.group(1)
+
 a = Analysis(
     ['../neight.py'],
     pathex=[],
@@ -73,6 +82,8 @@ app = BUNDLE(
         'CFBundleDisplayName': 'Neight',
         'CFBundleExecutable': 'Neight',
         'CFBundlePackageType': 'APPL',
+        'CFBundleShortVersionString': APP_VERSION,
+        'CFBundleVersion': APP_VERSION,
         'NSHighResolutionCapable': True,
         # Neight is a document-based editor; without these it cannot be chosen
         # from Finder's "Open With" menu or set as the default .txt handler.

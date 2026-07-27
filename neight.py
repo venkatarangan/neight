@@ -2463,15 +2463,23 @@ class Notepad(QMainWindow):
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
-        # Set a Tamil-capable UI font on the status bar so Tamil text in
-        # showMessage() calls renders consistently with the system UI font.
+        # Give the status bar a fallback font stack: the system UI font first,
+        # then a Tamil-capable font.  Qt only falls back per-run to the second
+        # family when the first one lacks glyphs for that script, so ordinary
+        # Latin status text keeps using the system UI font (San Francisco on
+        # macOS, Segoe UI on Windows) and only Tamil runs pick up the fallback.
+        # An earlier version set the Tamil font as the *sole* family, which
+        # also replaced the Latin glyphs — Tamil Sangam MN's digits and Latin
+        # letters don't match San Francisco, so ordinary status text looked
+        # visibly different from the rest of the UI.
         _sb_tamil_font_name = (
             "Nirmala UI" if sys.platform == "win32"
             else "Tamil Sangam MN" if sys.platform == "darwin"
             else None
         )
         if _sb_tamil_font_name:
-            _sb_font = QFont(_sb_tamil_font_name)
+            _sb_font = QFont()
+            _sb_font.setFamilies([QGuiApplication.font().family(), _sb_tamil_font_name])
             _sb_ui_pt = QGuiApplication.font().pointSize()
             if _sb_ui_pt > 0:
                 _sb_font.setPointSize(_sb_ui_pt)
