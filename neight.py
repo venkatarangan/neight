@@ -16,6 +16,7 @@ import ctypes
 import html
 import threading
 import random
+import shutil
 import urllib.request
 import platform
 from datetime import datetime
@@ -803,7 +804,16 @@ class SettingsManager:
             # For non-Windows systems, use appropriate config directory
             appdata = Path.home() / ".config" / "Neight"
         self.fallback_path = appdata / filename
-        
+
+        # macOS keeps settings out of the executable directory altogether: there
+        # that directory is inside Neight.app, so anything written beside the
+        # executable is destroyed every time the bundle is replaced by an update.
+        # Windows keeps the portable "settings next to the .exe" workflow.
+        self.appsupport_path: Optional[Path] = (
+            (Path.home() / "Library" / "Application Support" / "Neight" / filename)
+            if sys.platform == "darwin" else None
+        )
+
         # Legacy paths for migration
         self.legacy_paths = tuple((base_dir / legacy) for legacy in legacy_files)
         
@@ -825,8 +835,35 @@ class SettingsManager:
         date_str = datetime.now().strftime("%Y-%m-%d")
         return self.path.parent / f"neight_autosave_{date_str}.log"
 
+    def _migrate_to_appsupport(self) -> None:
+        """Seed the macOS Application Support store from an older location, once.
+
+        Runs only when the new file does not exist yet, so it can never overwrite
+        newer settings.  The source file is deliberately left in place: copying is
+        reversible, deleting is not, and an older build re-run from the same
+        bundle still finds what it expects.
+        """
+        target = self.appsupport_path
+        if target is None or target.exists():
+            return
+        # Order matters: the bundle-relative file was the previous default, and
+        # ~/.config/Neight was only ever the fallback, so it can be older.
+        for source in (self.primary_path, self.fallback_path):
+            try:
+                if source == target or not source.is_file():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(source), str(target))
+            except Exception:
+                continue
+            return
+
     def _determine_active_path(self) -> Path:
         """Determine which path to use for settings (primary or fallback)."""
+        if self.appsupport_path is not None:
+            self._migrate_to_appsupport()
+            return self.appsupport_path
+
         # If primary path exists and is readable, use it
         if self.primary_path.exists():
             try:
@@ -932,6 +969,9 @@ class SettingsManager:
             # relocation is permanent for the process, so record why: two windows
             # that relocate differently would otherwise silently read and write
             # different files while both believe they are authoritative.
+            # On macOS self.path is the Application Support file, never
+            # primary_path, so a failure there is reported rather than answered by
+            # relocating settings back inside the app bundle.
             if self.path == self.primary_path:
                 try:
                     _atomic_write_text(self.fallback_path, payload)
@@ -5203,7 +5243,8 @@ class Notepad(QMainWindow):
         family = font.family()
         size_pt = font.pointSize() if font.pointSize() > 0 else 12
 
-        if for_screen and self._is_dark_mode_active():
+        dark = for_screen and self._is_dark_mode_active()
+        if dark:
             fg, muted = "#e8eaed", "#9aa0a6"
             code_bg, rule = "#2a2d2e", "#5f6368"
             table_head_bg, border = "#35383a", "#5f6368"
@@ -5213,6 +5254,20 @@ class Notepad(QMainWindow):
             code_bg, rule = "#f4f4f4", "#cccccc"
             table_head_bg, border = "#f2f2f2", "#dddddd"
             link = "#1a73e8"
+
+        # The codehilite extension marks up code as <span class="k"> and friends;
+        # without Pygments' stylesheet those classes are invisible and highlighting
+        # silently does nothing.  The style is chosen per theme so code is never
+        # rendered dark-on-dark.  Pygments is a pinned dependency, but the app must
+        # still render if a source checkout lacks it.
+        highlight_css = ""
+        try:
+            from pygments.formatters import HtmlFormatter
+            highlight_css = HtmlFormatter(
+                style="monokai" if dark else "default"
+            ).get_style_defs(".codehilite")
+        except Exception:
+            pass
 
         # Qt's rich text supports roughly HTML4 + CSS 2.1.  Notably border-left
         # is ignored, so a blockquote is marked with a background tint and an
@@ -5231,6 +5286,7 @@ hr {{ height: 1px; background-color: {rule}; }}
 table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
 th, td {{ border: 1px solid {border}; padding: 8px; text-align: left; }}
 th {{ background-color: {table_head_bg}; }}
+{highlight_css}
 </style></head><body>
 {html_content}
 </body></html>"""
@@ -7023,18 +7079,33 @@ th {{ background-color: {table_head_bg}; }}
         self._sync_action_checked(self.line_numbers_act, line_numbers_visible)
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
 
+        # Keys below fall back to the CURRENT in-memory value rather than to a
+        # hardcoded literal, for the reason spelled out at update_check_on_launch
+        # near the end of this method: a saved Writer/Techie preset written before
+        # a setting existed does not carry its key, and a literal default would
+        # silently reset a choice the user had deliberately made.  Every attribute
+        # used as a fallback here is assigned in Notepad.__init__, so a fresh
+        # install with no settings file still lands on the documented default.
+
         # Auto-hide scrollbar
-        auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
+        auto_hide_scrollbar = bool(data.get(
+            "auto_hide_scrollbar", getattr(self, "_auto_hide_scrollbar", False)
+        ))
         self._auto_hide_scrollbar = auto_hide_scrollbar
         self._sync_action_checked(self.auto_hide_scrollbar_act, auto_hide_scrollbar)
         self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
 
         # Status bar item visibility
-        self._status_show_words = bool(data.get("status_show_words", True))
-        self._status_show_sentences = bool(data.get("status_show_sentences", True))
-        self._status_show_chars = bool(data.get("status_show_chars", True))
-        self._status_show_line = bool(data.get("status_show_line", True))
-        self._status_show_col = bool(data.get("status_show_col", True))
+        self._status_show_words = bool(data.get(
+            "status_show_words", getattr(self, "_status_show_words", True)))
+        self._status_show_sentences = bool(data.get(
+            "status_show_sentences", getattr(self, "_status_show_sentences", True)))
+        self._status_show_chars = bool(data.get(
+            "status_show_chars", getattr(self, "_status_show_chars", True)))
+        self._status_show_line = bool(data.get(
+            "status_show_line", getattr(self, "_status_show_line", True)))
+        self._status_show_col = bool(data.get(
+            "status_show_col", getattr(self, "_status_show_col", True)))
         self._sync_action_checked(self.status_words_act, self._status_show_words)
         self._sync_action_checked(self.status_sentences_act, self._status_show_sentences)
         self._sync_action_checked(self.status_chars_act, self._status_show_chars)
@@ -7062,35 +7133,49 @@ th {{ background-color: {table_head_bg}; }}
         _init_keyboard_choices(self._installed_imes)
         ime_count = len(self._installed_imes)
         if ime_count < 2:
+            # Nothing to switch between, so the stored preference is irrelevant.
             self._quick_switch_enabled = False
         else:
-            self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
-        self._force_anjal_english = bool(data.get("force_anjal_english", True))
+            self._quick_switch_enabled = bool(data.get(
+                "quick_switch_enabled", getattr(self, "_quick_switch_enabled", True)
+            ))
+        self._force_anjal_english = bool(data.get(
+            "force_anjal_english", getattr(self, "_force_anjal_english", True)
+        ))
 
         # Appearance
-        raw_theme_mode = data.get("appearance_theme_mode", "follow_os")
-        raw_custom_bg = data.get("appearance_custom_bg", "#202124")
-        raw_custom_fg = data.get("appearance_custom_fg", "#f1f3f4")
+        raw_theme_mode = data.get(
+            "appearance_theme_mode", getattr(self, "_appearance_theme_mode", "follow_os"))
+        raw_custom_bg = data.get(
+            "appearance_custom_bg", getattr(self, "_appearance_custom_bg", "#202124"))
+        raw_custom_fg = data.get(
+            "appearance_custom_fg", getattr(self, "_appearance_custom_fg", "#f1f3f4"))
         self._appearance_theme_mode = self._normalize_theme_mode(raw_theme_mode)
         self._appearance_custom_bg = self._normalize_hex_color(raw_custom_bg, "#202124")
         self._appearance_custom_fg = self._normalize_hex_color(raw_custom_fg, "#f1f3f4")
         self._apply_theme_preferences()
 
         # Experimental features
-        self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
+        self._unicode_substring_highlight = bool(data.get(
+            "unicode_substring_highlight", getattr(self, "_unicode_substring_highlight", False)))
         self._sync_action_checked(self.unicode_substring_highlight_act, self._unicode_substring_highlight)
-        self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
+        self._reading_time_enabled = bool(data.get(
+            "reading_time_enabled", getattr(self, "_reading_time_enabled", False)))
         self.reading_time_label.setVisible(self._reading_time_enabled)
-        self._word_index_enabled = bool(data.get("word_index_enabled", False))
-        self._word_index_adaptive_density = bool(data.get("word_index_adaptive_density", True))
-        raw_word_index_color = data.get("word_index_color", "white")
+        self._word_index_enabled = bool(data.get(
+            "word_index_enabled", getattr(self, "_word_index_enabled", False)))
+        self._word_index_adaptive_density = bool(data.get(
+            "word_index_adaptive_density", getattr(self, "_word_index_adaptive_density", True)))
+        raw_word_index_color = data.get(
+            "word_index_color", getattr(self, "_word_index_color", "white"))
         overlay_defaults = self._word_index_visual_preset_for_color(raw_word_index_color)
         raw_backdrop_dark = data.get("word_index_backdrop_opacity_dark", overlay_defaults["backdrop_dark"])
         raw_backdrop_light = data.get("word_index_backdrop_opacity_light", overlay_defaults["backdrop_light"])
         raw_text_opacity = data.get("word_index_text_opacity", overlay_defaults["text"])
         raw_halo_dark = data.get("word_index_halo_opacity_dark", overlay_defaults["halo_dark"])
         raw_halo_light = data.get("word_index_halo_opacity_light", overlay_defaults["halo_light"])
-        raw_word_index_alignment = data.get("word_index_alignment", "right")
+        raw_word_index_alignment = data.get(
+            "word_index_alignment", getattr(self, "_word_index_alignment", "right"))
         raw_word_index_top_margin = data.get("word_index_top_margin", 20)
         self._word_index_backdrop_opacity_dark = self._normalize_opacity(raw_backdrop_dark, 72)
         self._word_index_backdrop_opacity_light = self._normalize_opacity(raw_backdrop_light, 64)

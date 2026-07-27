@@ -281,16 +281,24 @@ Neight creates and updates `settings.json` automatically.
 
 ### Where settings are stored
 
-Neight prefers to keep `settings.json` **next to the executable or script**, which makes a Windows install portable — copy the folder, keep your preferences.
+The location differs by platform, because what is safe differs by platform.
 
-It falls back to a per-user location only when the app folder cannot be written to:
+**Windows and Linux** keep `settings.json` **next to the executable or script**, which makes a Windows install portable — copy the folder, keep your preferences. Only when that folder cannot be written to does Neight fall back to a per-user location:
 
 - **Windows:** `%LOCALAPPDATA%\Neight\settings.json`
-- **macOS / Linux:** `~/.config/Neight/settings.json`
+- **Linux:** `~/.config/Neight/settings.json`
 
-**Help → Debug Info** always shows the path actually in use. Do not assume one or the other — check there.
+**macOS** always uses a per-user location and never writes inside the app bundle:
 
-> **macOS caveat.** For a `.app` bundle the "app folder" is inside `Neight.app`. If that folder is writable, your settings live inside the bundle and are **deleted along with the app** when you replace or remove it. See [What happens to your settings when you delete Neight on macOS?](#what-happens-to-your-settings-when-you-delete-neight-on-macos) below. Use **Save Presets** to keep a copy outside the bundle.
+```
+~/Library/Application Support/Neight/settings.json
+```
+
+Beside the executable would mean *inside* `Neight.app`, where settings are destroyed every time the app is replaced by an update. Your settings now survive updates and reinstalls.
+
+The first launch after upgrading to this behaviour performs a **one-time migration**: if the Application Support file does not exist yet, Neight copies your existing `settings.json` from inside the old bundle, or failing that from `~/.config/Neight/`. The old file is copied, not moved — nothing is deleted, it is simply no longer read. If neither file is still present (because the old `Neight.app` was deleted before the new one was first launched), Neight starts with factory defaults.
+
+**Help → Debug Info** always shows the path actually in use. Do not assume — check there.
 
 ### Accessing settings files
 
@@ -388,23 +396,15 @@ There is no pop-up dialog and no interruption to your work. Use **Help → Check
 
 ### What happens to your settings when you delete Neight on macOS?
 
-**This depends on where your settings actually ended up, so check Help → Debug Info first.**
-
-Neight prefers to store `settings.json` beside the executable. Inside a `.app` bundle that means a path such as:
+They survive. Settings live outside the app bundle:
 
 ```
-/Applications/Neight.app/Contents/MacOS/settings.json
+~/Library/Application Support/Neight/settings.json
 ```
 
-If that is the path Debug Info shows, then **replacing or deleting `Neight.app` deletes your settings with it.** This is a known limitation and is recorded in [`release_install_notes.md`](release_install_notes.md).
+Deleting or replacing `Neight.app` does not touch that folder, so an update keeps your preferences.
 
-Only if the bundle is not writable does Neight fall back to:
-
-```
-~/.config/Neight/settings.json
-```
-
-which does survive deleting the app.
+**One exception, and it applies only once.** Older versions stored `settings.json` *inside* the bundle, at a path such as `/Applications/Neight.app/Contents/MacOS/settings.json`. Those settings are migrated on the first launch of the new version — but only if the old bundle is still there to read from. If you delete the old `Neight.app` before launching the new one, the settings inside it are already gone. Check **Help → Debug Info** to see which path is in use.
 
 **To protect your preferences across updates,** use **Save Presets** (below). Preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset.
 
