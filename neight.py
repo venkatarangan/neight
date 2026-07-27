@@ -16,6 +16,7 @@ import ctypes
 import html
 import threading
 import random
+import shutil
 import urllib.request
 import platform
 from datetime import datetime
@@ -803,7 +804,16 @@ class SettingsManager:
             # For non-Windows systems, use appropriate config directory
             appdata = Path.home() / ".config" / "Neight"
         self.fallback_path = appdata / filename
-        
+
+        # macOS keeps settings out of the executable directory altogether: there
+        # that directory is inside Neight.app, so anything written beside the
+        # executable is destroyed every time the bundle is replaced by an update.
+        # Windows keeps the portable "settings next to the .exe" workflow.
+        self.appsupport_path: Optional[Path] = (
+            (Path.home() / "Library" / "Application Support" / "Neight" / filename)
+            if sys.platform == "darwin" else None
+        )
+
         # Legacy paths for migration
         self.legacy_paths = tuple((base_dir / legacy) for legacy in legacy_files)
         
@@ -825,8 +835,35 @@ class SettingsManager:
         date_str = datetime.now().strftime("%Y-%m-%d")
         return self.path.parent / f"neight_autosave_{date_str}.log"
 
+    def _migrate_to_appsupport(self) -> None:
+        """Seed the macOS Application Support store from an older location, once.
+
+        Runs only when the new file does not exist yet, so it can never overwrite
+        newer settings.  The source file is deliberately left in place: copying is
+        reversible, deleting is not, and an older build re-run from the same
+        bundle still finds what it expects.
+        """
+        target = self.appsupport_path
+        if target is None or target.exists():
+            return
+        # Order matters: the bundle-relative file was the previous default, and
+        # ~/.config/Neight was only ever the fallback, so it can be older.
+        for source in (self.primary_path, self.fallback_path):
+            try:
+                if source == target or not source.is_file():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(source), str(target))
+            except Exception:
+                continue
+            return
+
     def _determine_active_path(self) -> Path:
         """Determine which path to use for settings (primary or fallback)."""
+        if self.appsupport_path is not None:
+            self._migrate_to_appsupport()
+            return self.appsupport_path
+
         # If primary path exists and is readable, use it
         if self.primary_path.exists():
             try:
@@ -932,6 +969,9 @@ class SettingsManager:
             # relocation is permanent for the process, so record why: two windows
             # that relocate differently would otherwise silently read and write
             # different files while both believe they are authoritative.
+            # On macOS self.path is the Application Support file, never
+            # primary_path, so a failure there is reported rather than answered by
+            # relocating settings back inside the app bundle.
             if self.path == self.primary_path:
                 try:
                     _atomic_write_text(self.fallback_path, payload)
