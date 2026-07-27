@@ -90,6 +90,16 @@ jobs:
           print(f'startup made {len(writes)} write(s), all preserving the stored font')
           PY
 
+      # Opening and saving must not alter the user's characters, and the cursor,
+      # the painted caret and a click must all agree on the same visual line.
+      - name: Regression suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONIOENCODING: utf-8
+        run: |
+          python tests/test_text_integrity.py
+          python tests/test_cursor_layout.py
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
