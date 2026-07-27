@@ -14,8 +14,8 @@
 # Development, build and design tools live in requirements-dev.txt, so a runtime
 # install no longer drags in PyInstaller and Pillow.
 
-PySide6==6.11.0
-shiboken6==6.11.0
+PySide6==6.11.1
+shiboken6==6.11.1
 
 # Markdown rendering for PDF export
 Markdown==3.10.2

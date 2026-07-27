@@ -6,10 +6,13 @@
 # build releases, generate design assets, or run the repository's checks.
 
 # Packaging (buildme.bat / buildme_mac_app.sh)
-pyinstaller==6.20.0
+pyinstaller==6.21.0
 
 # Design asset generation only — not used by the application
-pillow==12.2.0
+pillow==12.3.0
+
+# Slide deck generation (make_slides.py) — not used by the application
+python-pptx==1.0.2
 
 # Repository hooks: BOM check, line-ending check, Tamil spelling guard.
 # Enable with: pre-commit install
