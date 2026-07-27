@@ -1490,6 +1490,20 @@ class CodeEditor(QPlainTextEdit):
     def isWordWrap(self) -> bool:
         return self._wrap_enabled
 
+    def documentText(self) -> str:
+        """The document's text with the user's own characters preserved.
+
+        QTextDocument.toPlainText() substitutes ASCII lookalikes for a few
+        characters — in particular a no-break space (U+00A0) comes back as an
+        ordinary space.  Reading the document that way and then writing the
+        result to disk silently edits the file: NBSP is common in text pasted
+        from the web, and every save quietly replaced it.  toRawText() keeps
+        the original characters but separates blocks with U+2029, so those are
+        mapped back to newlines here to match what callers expect.
+        """
+        raw = self.document().toRawText()
+        return raw.replace("\u2029", "\n").replace("\u2028", "\n")
+
     def _refresh_wrap_layout(self, force: bool = False):
         if self._refreshing_wrap_layout:
             return
@@ -3672,13 +3686,26 @@ class Notepad(QMainWindow):
 
         text = None
         source_encoding = ""
+        # A decode that "succeeds" but yields NUL characters is almost certainly
+        # the wrong encoding: BOM-less UTF-16/UTF-32 holding ASCII decodes
+        # perfectly well as UTF-8, leaving a NUL between every character and a
+        # document that looks like "H e l l o".  Keep such a result only as a
+        # last resort so a genuine (if odd) UTF-8 file containing a NUL still
+        # opens exactly as it used to.
+        nul_fallback = None
         for enc in candidates:
             try:
-                text = raw_bytes.decode(enc)
-                source_encoding = enc
-                break
+                decoded = raw_bytes.decode(enc)
             except (UnicodeDecodeError, LookupError):
                 continue
+            if "\x00" in decoded:
+                if nul_fallback is None:
+                    nul_fallback = (decoded, enc)
+                continue
+            text, source_encoding = decoded, enc
+            break
+        if text is None and nul_fallback is not None:
+            text, source_encoding = nul_fallback
         if text is None:
             if notify_errors:
                 QMessageBox.critical(
@@ -3920,7 +3947,7 @@ class Notepad(QMainWindow):
             # used to skip both, making it less durable than autosave — and uses a
             # temp name unique per call, so it can no longer collide with the
             # autosave worker writing the same target.
-            _atomic_write_text(path_obj, self.editor.toPlainText())
+            _atomic_write_text(path_obj, self.editor.documentText())
             # The file now matches what we write, so any pending conversion has
             # happened and must not be reported again.
             self._source_encoding = "utf-8"
@@ -3959,7 +3986,7 @@ class Notepad(QMainWindow):
             return
 
         # Capture everything needed by the worker on the UI thread.
-        text = self.editor.toPlainText()
+        text = self.editor.documentText()
         path = self.current_path
 
         # Optimistically clear the dirty flag now; restored on failure.
@@ -4056,7 +4083,7 @@ class Notepad(QMainWindow):
             rand = random.randint(100_000, 999_999)
             self._recovery_path = folder / f"recovery-{os.getpid()}-{rand}.txt"
 
-        text = self.editor.toPlainText()
+        text = self.editor.documentText()
         recovery_path = self._recovery_path  # local snapshot; safe across threads
         self._recovery_in_progress = True
 
@@ -4499,7 +4526,7 @@ class Notepad(QMainWindow):
         return pattern.sub(replace, text)
 
     def collapse_blank_lines(self):
-        text = self.editor.toPlainText()
+        text = self.editor.documentText()
         if not text:
             self.status.showMessage("Document is empty", 1500)
             return
@@ -4559,7 +4586,7 @@ class Notepad(QMainWindow):
         self.status.showMessage(f"Collapsed {blocks_collapsed} blank block(s)", 3000)
 
     def insert_blank_lines(self):
-        text = self.editor.toPlainText()
+        text = self.editor.documentText()
         if not text:
             self.status.showMessage("Document is empty", 1500)
             return
@@ -8430,7 +8457,7 @@ th {{ background-color: {table_head_bg}; }}
         if has_selection:
             original = cursor.selectedText().replace("\u2029", "\n")
         else:
-            original = self.editor.toPlainText()
+            original = self.editor.documentText()
 
         normalized = unicodedata.normalize("NFC", original)
         if normalized == original:
