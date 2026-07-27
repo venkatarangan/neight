@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QPalette, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QThread
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QThread, QLockFile
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -538,6 +538,64 @@ def _win_unregister_txt_association() -> None:
 # ---------------------
 # Settings persistence
 # ---------------------
+# Settings keys that describe *this machine or this window* rather than the
+# user's portable preferences.  Excluded from exported presets so applying a
+# preset from another machine never opens a stale path or resizes the window.
+# Defined once and shared by preset export, preset application and repair so the
+# lists cannot drift apart.
+MACHINE_LOCAL_SETTINGS_KEYS = frozenset({
+    "last_opened_file",
+    "default_directory",
+    "window_size",
+    "window_maximized",
+})
+
+
+def _atomic_write_text(
+    target: Path,
+    text: str,
+    *,
+    encoding: str = "utf-8",
+    newline=None,
+    should_commit=None,
+) -> bool:
+    """Durably replace ``target`` with ``text``.  Returns True when committed.
+
+    Writes to a temp file that is unique per process *and* per call, flushes and
+    fsyncs before the atomic rename.  A crash or power loss can therefore never
+    leave a half-written file, and two writers aimed at the same target — for
+    example a manual save and an autosave inside one window — can never delete
+    or replace each other's temp file.
+
+    ``should_commit``, when given, is consulted immediately before the rename and
+    aborts the write if it returns False.  Background autosave uses it to drop a
+    snapshot that a newer save has already superseded: checking only after the
+    write would be too late, since by then the stale bytes are already in place.
+
+    ``newline=None`` keeps Python's default line-ending translation, matching the
+    behaviour every existing caller relied on.  Raises on write failure; callers
+    decide how to report it.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.{random.randrange(1 << 24):06x}.tmp~")
+    try:
+        with open(tmp, "w", encoding=encoding, newline=newline) as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if should_commit is not None and not should_commit():
+            tmp.unlink(missing_ok=True)
+            return False
+        os.replace(str(tmp), str(target))
+        return True
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 class SettingsManager:
     def __init__(self, filename: str = "settings.json", legacy_files: tuple[str, ...] = ("config.json",)):
         # Determine the executable/script directory
@@ -568,6 +626,10 @@ class SettingsManager:
         self.corrupted_settings_path: Optional[Path] = None
         self.corrupted_settings_reason: str = ""
         self.last_save_error: str = ""
+        # Set when a write to primary_path failed and the store permanently
+        # relocated to fallback_path.  Surfaced in Debug Info so the active
+        # location is never a silent surprise.
+        self.relocated_reason: str = ""
 
     @property
     def log_path(self) -> Path:
@@ -652,35 +714,50 @@ class SettingsManager:
 
         return {}
 
+    def read_current(self) -> dict:
+        """Re-read the active settings file, bypassing migration and caching.
+
+        Used by the cross-process merge in _save_preferences() so a window never
+        writes a stale whole-dictionary snapshot over another window's changes.
+        """
+        data = self._load_file(self.path)
+        return data if isinstance(data, dict) else {}
+
+    def lock(self) -> QLockFile:
+        """Return an advisory lock guarding read-modify-write of the settings file.
+
+        New Window runs each window in its own process (see Notepad.new_window),
+        so serialising the read-modify-write is what keeps two windows from
+        losing each other's preference changes.
+        """
+        lock = QLockFile(str(self.path.with_name(self.path.name + ".lock")))
+        # A crashed process must not block preference saving forever.
+        lock.setStaleLockTime(30_000)
+        return lock
+
     def save(self, data: dict) -> bool:
         self.last_save_error = ""
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp~")
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(str(tmp), str(self.path))
+            _atomic_write_text(self.path, payload)
             return True
         except Exception as e:
-            try:
-                self.path.with_suffix(".tmp~").unlink(missing_ok=True)
-            except Exception:
-                pass
-            # If save fails and we're using primary path, try fallback
+            # If save fails and we're using primary path, try fallback.  This
+            # relocation is permanent for the process, so record why: two windows
+            # that relocate differently would otherwise silently read and write
+            # different files while both believe they are authoritative.
             if self.path == self.primary_path:
                 try:
-                    self.path = self.fallback_path
-                    self.path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = self.path.with_suffix(".tmp~")
-                    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                    os.replace(str(tmp), str(self.path))
-                    return True
+                    _atomic_write_text(self.fallback_path, payload)
                 except Exception as e2:
-                    try:
-                        self.path.with_suffix(".tmp~").unlink(missing_ok=True)
-                    except Exception:
-                        pass
                     self.last_save_error = str(e2)
                     return False
+                self.relocated_reason = (
+                    f"Write to {self.primary_path} failed ({e}); "
+                    f"settings relocated to {self.fallback_path}."
+                )
+                self.path = self.fallback_path
+                return True
             self.last_save_error = str(e)
             return False
 
@@ -1143,6 +1220,16 @@ class CodeEditor(QPlainTextEdit):
         self._overlay_dirty_timer.setSingleShot(True)
         self._overlay_dirty_timer.setInterval(150)
         self._overlay_dirty_timer.timeout.connect(self._flush_overlay_update)
+
+        # Zoom gesture accumulators.  Trackpads deliver many deltas far smaller
+        # than one wheel notch; these carry the remainder between events so slow
+        # gestures still zoom.  _native_zoom_active suppresses the wheel path
+        # while macOS is delivering a pinch as a native gesture.
+        self._zoom_accum_angle = 0.0
+        self._zoom_accum_pixels = 0.0
+        self._zoom_accum_sign = 0
+        self._native_zoom_active = False
+        self._native_zoom_accum = 0.0
 
         # Auto-hide scrollbar
         self._auto_hide_scrollbar = False
@@ -1634,21 +1721,115 @@ class CodeEditor(QPlainTextEdit):
         menu.exec(event.globalPos())
         menu.deleteLater()
 
+    # One notch of a traditional mouse wheel.  A trackpad delivers many much
+    # smaller deltas instead, which is why they have to be accumulated.
+    _WHEEL_STEP = 120.0
+    # Pixel-delta equivalent of one zoom step.  Only used when the platform
+    # reports pixelDelta but no angleDelta.
+    _PIXEL_STEP = 50.0
+
+    def _consume_zoom_steps(self, angle: int, pixels: int) -> int:
+        """Accumulate wheel deltas and return whole zoom steps to apply.
+
+        A smooth trackpad reports deltas far smaller than one wheel notch.  The
+        previous integer division discarded them entirely — and because the old
+        code only fell back to pixelDelta when angleDelta was exactly zero, a
+        small non-zero angleDelta produced no zoom at all while still being
+        swallowed.  Keeping the remainder makes slow gestures accumulate into a
+        step instead of being lost.
+        """
+        if angle:
+            source, step = "angle", self._WHEEL_STEP
+            self._zoom_accum_pixels = 0.0
+            self._zoom_accum_angle += angle
+            accum = self._zoom_accum_angle
+        elif pixels:
+            source, step = "pixels", self._PIXEL_STEP
+            self._zoom_accum_angle = 0.0
+            self._zoom_accum_pixels += pixels
+            accum = self._zoom_accum_pixels
+        else:
+            return 0
+
+        # Reversing direction mid-gesture must not be damped by leftover travel
+        # in the opposite direction.
+        if self._zoom_accum_sign and accum and (accum > 0) != (self._zoom_accum_sign > 0):
+            accum = float(angle if source == "angle" else pixels)
+        self._zoom_accum_sign = 1 if accum > 0 else -1 if accum < 0 else 0
+
+        steps = int(accum / step)
+        remainder = accum - steps * step
+        if source == "angle":
+            self._zoom_accum_angle = remainder
+        else:
+            self._zoom_accum_pixels = remainder
+        return steps
+
+    def _reset_zoom_accumulator(self):
+        self._zoom_accum_angle = 0.0
+        self._zoom_accum_pixels = 0.0
+        self._zoom_accum_sign = 0
+
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
-            delta = event.angleDelta().y()
-            steps = int(delta / 120) if delta else 0
-            if steps == 0 and not delta:
-                pixel_delta = event.pixelDelta().y()
-                steps = 1 if pixel_delta > 0 else -1 if pixel_delta < 0 else 0
-            handler = getattr(self.window(), "_change_font_size", None)
-            if callable(handler) and steps != 0:
-                direction = 1 if steps > 0 else -1
-                for _ in range(abs(steps)):
-                    handler(direction)
+            # A native pinch is already driving the zoom; ignore the wheel events
+            # macOS also synthesises for the same gesture, or it zooms twice.
+            if self._native_zoom_active:
+                event.accept()
+                return
+            steps = self._consume_zoom_steps(event.angleDelta().y(), event.pixelDelta().y())
+            if steps:
+                handler = getattr(self.window(), "_apply_font_size_delta", None)
+                if callable(handler):
+                    handler(steps)
+                event.accept()
+                return
+            # Sub-threshold travel: consumed into the accumulator, and the event
+            # is accepted so the view does not scroll while the user is zooming.
             event.accept()
             return
+        self._reset_zoom_accumulator()
         super().wheelEvent(event)
+
+    def event(self, event):
+        # Native gestures have no dedicated virtual handler on QWidget — Qt
+        # delivers them through event() as QEvent.Type.NativeGesture.
+        if event.type() == QEvent.Type.NativeGesture:
+            if self._handle_native_gesture(event):
+                return True
+        return super().event(event)
+
+    def _handle_native_gesture(self, event) -> bool:
+        """Handle macOS trackpad pinch-to-zoom.
+
+        Qt reports pinch as a series of ZoomNativeGesture events carrying a
+        fractional scale change.  Those are accumulated the same way wheel deltas
+        are, so a slow pinch still produces steady, whole-point size changes.
+
+        Windows delivers no such events, so this is inert there.
+        """
+        gesture = event.gestureType()
+        if gesture == Qt.NativeGestureType.BeginNativeGesture:
+            self._native_zoom_active = True
+            self._native_zoom_accum = 0.0
+            return True
+        if gesture == Qt.NativeGestureType.EndNativeGesture:
+            self._native_zoom_active = False
+            self._native_zoom_accum = 0.0
+            return True
+        if gesture == Qt.NativeGestureType.ZoomNativeGesture:
+            self._native_zoom_active = True
+            self._native_zoom_accum += float(event.value())
+            # ~8% accumulated pinch per point of font size: small enough to feel
+            # continuous, large enough not to race away on a fast gesture.
+            steps = int(self._native_zoom_accum / 0.08)
+            if steps:
+                self._native_zoom_accum -= steps * 0.08
+                handler = getattr(self.window(), "_apply_font_size_delta", None)
+                if callable(handler):
+                    handler(steps)
+            return True
+        return False
 
     def keyPressEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -2045,6 +2226,7 @@ class Notepad(QMainWindow):
     # in PySide6; the call is automatically queued to the main event loop).
     _autosave_succeeded = Signal()
     _autosave_failed = Signal(Exception)  # carries the exception from the worker
+    _autosave_superseded = Signal()       # a newer save committed while this one was writing
     _recovery_succeeded = Signal(str)     # str = path written by the recovery worker
     _recovery_failed = Signal()           # recovery write failed (always silent)
 
@@ -2214,13 +2396,41 @@ class Notepad(QMainWindow):
         # In-memory cache of the settings dict — avoids a disk read on every save.
         self._settings_cache: dict = {}
 
+        # Coalesces the settings write behind a zoom gesture so a fast scroll
+        # produces one save rather than one per point of font size.
+        self._font_size_save_timer = QTimer(self)
+        self._font_size_save_timer.setSingleShot(True)
+        self._font_size_save_timer.setInterval(400)
+        self._font_size_save_timer.timeout.connect(self._save_preferences)
+
         # Set to True after a deliberate reset so closeEvent does not
         # overwrite the freshly-emptied settings file with stale in-memory state.
         self._settings_reset_pending: bool = False
 
+        # True while _apply_settings_dict is running.  Suppresses _save_preferences()
+        # so a half-applied window state can never be persisted — see the comment
+        # on _apply_settings_dict for why this matters to multi-window font loss.
+        self._applying_preferences: bool = False
+
+        # Settings-write failure reporting (shown once per failure run, and in Debug Info).
+        self._settings_save_warned: bool = False
+        self._last_settings_save_error: str = ""
+
         # Autosave background-thread state.
         self._autosave_in_progress: bool = False
         self._autosave_started_at: float = 0.0
+        # Monotonic save generation.  Bumped by every manual save and by the
+        # watchdog; a background worker only commits while its generation is
+        # still current, so a slow or hung write can never replace newer content
+        # with an older snapshot.
+        self._save_generation: int = 0
+
+        # On-disk format of the currently open file.  Neight normalises to UTF-8
+        # without a BOM on save, so these are kept to tell the user when saving
+        # will change the file's representation.
+        self._source_encoding: str = ""
+        self._source_had_bom: bool = False
+        self._source_newline: str = ""
 
         self._create_actions()
         self._create_menus()
@@ -2416,6 +2626,14 @@ class Notepad(QMainWindow):
             "Uncheck to always start with a new empty file."
         )
 
+        self.update_check_act = QAction("Check for Updates on Launch", self, checkable=True)
+        self.update_check_act.setChecked(True)  # default; overridden by _load_preferences
+        self.update_check_act.setToolTip(
+            "Asks GitHub once, a few seconds after launch, whether a newer release exists.\n"
+            "Nothing about you or your text is sent — only an ordinary HTTPS request.\n"
+            "Uncheck to make Neight contact the network only when you ask it to."
+        )
+
         # Scroll bar
         self.auto_hide_scrollbar_act = QAction("Auto-Hide Scrollbar", self, checkable=True)
         self.auto_hide_scrollbar_act.setChecked(False)
@@ -2601,6 +2819,7 @@ class Notepad(QMainWindow):
 
         settings_menu = menubar.addMenu("&Settings")
         settings_menu.addAction(self.reopen_last_act)
+        settings_menu.addAction(self.update_check_act)
         settings_menu.addSeparator()
         settings_menu.addAction(self.appearance_act)
         save_preset_menu = settings_menu.addMenu("Save Current Settings to")
@@ -2681,6 +2900,7 @@ class Notepad(QMainWindow):
         self.autosave_30min_act.triggered.connect(lambda: self._set_autosave_interval(30))
         self._autosave_succeeded.connect(self._on_autosave_success)
         self._autosave_failed.connect(self._on_autosave_failure)
+        self._autosave_superseded.connect(self._on_autosave_superseded)
         self._recovery_succeeded.connect(self._on_recovery_success)
         self._recovery_failed.connect(self._on_recovery_failure)
 
@@ -2727,6 +2947,7 @@ class Notepad(QMainWindow):
         # Settings
         self.appearance_act.triggered.connect(self._show_appearance_dialog)
         self.reopen_last_act.toggled.connect(self._on_reopen_last_toggled)
+        self.update_check_act.toggled.connect(self._on_update_check_toggled)
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
 
         # Scroll bar
@@ -2774,14 +2995,28 @@ class Notepad(QMainWindow):
         if getattr(self, "_restore_maximized", False):
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
             self._restore_maximized = False
-        # Schedule a silent background update check 5 s after first show,
-        # so startup is never delayed.
-        if not getattr(self, "_startup_update_check_scheduled", False):
+        # Schedule a silent background update check 5 s after first show, so
+        # startup is never delayed.  Skipped entirely when the user has turned
+        # the launch check off, in which case Neight makes no network request
+        # unless explicitly asked (Settings › Check for Updates on Launch).
+        if (getattr(self, "_update_check_on_launch", True)
+                and not getattr(self, "_startup_update_check_scheduled", False)):
             self._startup_update_check_scheduled = True
             QTimer.singleShot(5000, self._run_startup_update_check)
 
+    def _on_update_check_toggled(self, checked: bool) -> None:
+        self._update_check_on_launch = bool(checked)
+        self._save_preferences()
+        self.status.showMessage(
+            "Update check on launch: on" if checked
+            else "Update check on launch: off — Neight will not contact the network on its own",
+            3000,
+        )
+
     def _run_startup_update_check(self):
         """Silent background check on startup — no UI feedback unless an update is found."""
+        if not getattr(self, "_update_check_on_launch", True):
+            return
         self._startup_update_worker = _UpdateCheckWorker(self)
         self._startup_update_worker.result_ready.connect(self._on_startup_update_result)
         self._startup_update_worker.start()
@@ -3051,6 +3286,10 @@ class Notepad(QMainWindow):
         self.editor.clear()
         self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = None
+        # A new document carries no inherited on-disk format.
+        self._source_encoding = ""
+        self._source_had_bom = False
+        self._source_newline = ""
         self.editor.document().setModified(False)
         self._update_title()
         self._update_status_bar()
@@ -3123,41 +3362,65 @@ class Notepad(QMainWindow):
             return False
 
         try:
-            text = path_obj.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # UTF-8 failed — try other Unicode encodings before giving up
-            text = None
-            try:
-                raw_bytes = path_obj.read_bytes()
-            except Exception as e:
-                if notify_errors:
-                    QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
-                return False
-            for enc in ("utf-8-sig", "utf-16", "utf-32"):
-                try:
-                    text = raw_bytes.decode(enc)
-                    break
-                except (UnicodeDecodeError, LookupError):
-                    continue
-            if text is None:
-                if notify_errors:
-                    QMessageBox.critical(
-                        self,
-                        "Cannot Open File",
-                        "This file could not be opened.\n\n"
-                        "It does not appear to be a Unicode text file "
-                        "(UTF-8, UTF-16, or UTF-32).\n"
-                        "It may be a binary file or use an unsupported encoding."
-                    )
-                return False
+            raw_bytes = path_obj.read_bytes()
         except Exception as e:
             if notify_errors:
                 QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
             return False
 
-        self.editor.setPlainText(text)
+        # Decode by explicit BOM first.  A UTF-32 BOM starts with the UTF-16 BOM
+        # bytes, so testing UTF-16 first would decode a UTF-32 file into garbage
+        # rather than failing; and plain "utf-8" leaves a UTF-8 BOM in the text as
+        # a stray U+FEFF, which used to show up as an invisible first character.
+        if raw_bytes.startswith(b"\xff\xfe\x00\x00") or raw_bytes.startswith(b"\x00\x00\xfe\xff"):
+            candidates, had_bom = ("utf-32",), True
+        elif raw_bytes.startswith(b"\xff\xfe") or raw_bytes.startswith(b"\xfe\xff"):
+            candidates, had_bom = ("utf-16",), True
+        elif raw_bytes.startswith(b"\xef\xbb\xbf"):
+            candidates, had_bom = ("utf-8-sig",), True
+        else:
+            candidates, had_bom = ("utf-8", "utf-16", "utf-32"), False
+
+        text = None
+        source_encoding = ""
+        for enc in candidates:
+            try:
+                text = raw_bytes.decode(enc)
+                source_encoding = enc
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if text is None:
+            if notify_errors:
+                QMessageBox.critical(
+                    self,
+                    "Cannot Open File",
+                    "This file could not be opened.\n\n"
+                    "It does not appear to be a Unicode text file "
+                    "(UTF-8, UTF-16, or UTF-32).\n"
+                    "It may be a binary file or use an unsupported encoding."
+                )
+            return False
+
+        # Record the original format, then normalise to \n for the editor exactly
+        # as read_text()'s universal-newline handling used to.
+        source_newline = self._detect_newline_style(text)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+        # setPlainText emits textChanged, which would schedule a status refresh and
+        # a highlight scan over a file that may be up to _MAX_OPEN_FILE_BYTES.  The
+        # explicit _update_status_bar() below already covers the status bar, and a
+        # freshly opened document has no selection to highlight.
+        _blocked = self.editor.blockSignals(True)
+        try:
+            self.editor.setPlainText(text)
+        finally:
+            self.editor.blockSignals(_blocked)
         self._clear_recovery_file()
         self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
+        self._source_encoding = source_encoding
+        self._source_had_bom = had_bom
+        self._source_newline = source_newline
         self.current_path = str(path_obj)
         self.editor.document().setModified(False)
         self._update_default_directory(path_obj.parent)
@@ -3166,9 +3429,66 @@ class Notepad(QMainWindow):
         self._update_export_menu_visibility()
         if show_status:
             self.status.showMessage(f"Opened: {path_obj}", 2000)
+        # Announced after the "Opened" message so the conversion note is what the
+        # user is left looking at.
+        self._warn_if_save_will_convert()
         if not self.autosave_enabled:
             self._start_autosave()
         return True
+
+    # Neight always writes UTF-8 without a BOM, using the platform's newline
+    # (CRLF on Windows, LF elsewhere — Python's default translation on write).
+    # Files that arrive in any other shape are converted on save; these helpers
+    # detect that up front so the conversion is announced rather than silent.
+    NATIVE_NEWLINE: str = "CRLF" if os.linesep == "\r\n" else "LF"
+
+    @staticmethod
+    def _detect_newline_style(text: str) -> str:
+        """Return the dominant newline style of freshly decoded text."""
+        crlf = text.count("\r\n")
+        cr = text.count("\r") - crlf
+        lf = text.count("\n") - crlf
+        if crlf == 0 and cr == 0 and lf == 0:
+            return ""          # single line — nothing to preserve either way
+        if crlf >= lf and crlf >= cr:
+            return "CRLF"
+        return "LF" if lf >= cr else "CR"
+
+    def _describe_source_format(self) -> str:
+        """Human-readable summary of the open document's on-disk format."""
+        if not self.current_path:
+            return f"New document (will be saved as UTF-8, no BOM, {self.NATIVE_NEWLINE})"
+        enc = self._source_encoding or "unknown"
+        if enc == "utf-8-sig":
+            enc = "utf-8"
+        bom = "with BOM" if self._source_had_bom else "no BOM"
+        newline = self._source_newline or "single line"
+        return f"{enc}, {bom}, {newline}"
+
+    def _pending_conversions(self) -> list[str]:
+        """What saving this document would change about its on-disk format."""
+        changes = []
+        if self._source_encoding in ("utf-16", "utf-32"):
+            changes.append(f"{self._source_encoding.upper()} → UTF-8")
+        if self._source_had_bom:
+            changes.append("byte-order mark removed")
+        if self._source_newline and self._source_newline != self.NATIVE_NEWLINE:
+            changes.append(f"{self._source_newline} → {self.NATIVE_NEWLINE} line endings")
+        return changes
+
+    def _warn_if_save_will_convert(self) -> None:
+        """Announce, once per opened file, that saving will rewrite its format.
+
+        Neight normalises on save.  Doing that without telling anyone meant a
+        UTF-16 or CRLF file could be silently rewritten by nothing more than an
+        autosave tick.
+        """
+        changes = self._pending_conversions()
+        if not changes:
+            return
+        self.status.showMessage(
+            "Note: saving this file will convert it — " + "; ".join(changes), 8000
+        )
 
     def _load_initial_path(self, path: str) -> None:
         if not path:
@@ -3286,22 +3606,37 @@ class Notepad(QMainWindow):
         self._post_file_dialog()
         if not path:
             return False
+        # Treat Save As as a transaction: commit the new document identity only
+        # after the bytes are safely on disk.  Committing first meant a failed
+        # write left the window claiming to be a file that was never created.
+        previous_path = self.current_path
         self.current_path = path
+        if not self._write_to_path(path):
+            self.current_path = previous_path
+            self._update_export_menu_visibility()
+            self._update_title()
+            return False
         self._update_default_directory(Path(path).parent)
         self._update_export_menu_visibility()
-        return self._write_to_path(path)
+        return True
 
     def _write_to_path(self, path: str) -> bool:
-        tmp_path = None
         try:
             path_obj = Path(path)
-            # PID-qualified name avoids collision when two Neight windows edit
-            # the same file simultaneously.
-            tmp_path = path_obj.with_name(path_obj.name + f".{os.getpid()}.tmp~")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(self.editor.toPlainText())
-            os.replace(str(tmp_path), path)
-            tmp_path = None  # rename succeeded; skip temp-file cleanup
+            # A manual save supersedes any queued autosave: bumping the generation
+            # makes an in-flight autosave worker discard its now-stale snapshot
+            # instead of writing it over what we are about to commit.
+            self._save_generation += 1
+            # _atomic_write_text flushes and fsyncs before the rename — manual save
+            # used to skip both, making it less durable than autosave — and uses a
+            # temp name unique per call, so it can no longer collide with the
+            # autosave worker writing the same target.
+            _atomic_write_text(path_obj, self.editor.toPlainText())
+            # The file now matches what we write, so any pending conversion has
+            # happened and must not be reported again.
+            self._source_encoding = "utf-8"
+            self._source_had_bom = False
+            self._source_newline = self.NATIVE_NEWLINE
             self.editor.document().setModified(False)
             self._clear_recovery_file()
             self._update_default_directory(path_obj.parent)
@@ -3311,11 +3646,6 @@ class Notepad(QMainWindow):
                 self._start_autosave()
             return True
         except Exception as e:
-            if tmp_path is not None:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
             QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
             return False
 
@@ -3350,28 +3680,29 @@ class Notepad(QMainWindow):
         # Record when this write started so the watchdog can detect hangs.
         self._autosave_started_at = time.monotonic()
 
+        # Snapshot the save generation.  The watchdog and any manual save bump it;
+        # a worker whose generation is no longer current must not commit, or a
+        # thread declared hung could wake up later and replace the file with an
+        # older snapshot than the one already on disk.
+        self._save_generation += 1
+        generation = self._save_generation
+
         def _worker():
-            tmp_path = None
             try:
-                path_obj = Path(path)
-                # PID-qualified name prevents temp-file collisions when two
-                # Neight windows are editing the same file simultaneously.
-                tmp_path = path_obj.with_name(path_obj.name + f".{os.getpid()}.tmp~")
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                    # fsync guarantees data is on physical storage before the
-                    # atomic rename, so a power loss cannot corrupt the file.
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(str(tmp_path), path)
-                tmp_path = None  # rename succeeded; skip cleanup
-                self._autosave_succeeded.emit()
+                # _atomic_write_text fsyncs before the rename and uses a temp name
+                # unique per call, so this cannot collide with a manual save of the
+                # same file inside this window.  should_commit is evaluated just
+                # before the rename, so a snapshot superseded mid-write is dropped
+                # rather than written over the newer content.
+                committed = _atomic_write_text(
+                    Path(path), text,
+                    should_commit=lambda: generation == self._save_generation,
+                )
+                if committed:
+                    self._autosave_succeeded.emit()
+                else:
+                    self._autosave_superseded.emit()
             except Exception as exc:
-                if tmp_path is not None:
-                    try:
-                        tmp_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
                 self._autosave_failed.emit(exc)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -3382,6 +3713,19 @@ class Notepad(QMainWindow):
         self._autosave_started_at = 0.0
         self._update_title()
         self.status.showMessage("Auto-saved", 1500)
+
+    def _on_autosave_superseded(self):
+        """A newer save committed while this autosave was still writing.
+
+        Nothing was written, and the newer save already holds the content, so the
+        document is not dirty on account of this worker.  Logged only — the user
+        does not need to know a redundant write was skipped.
+        """
+        self._autosave_in_progress = False
+        self._autosave_started_at = 0.0
+        self._write_autosave_log(
+            f"SUPERSEDED: autosave snapshot dropped, newer save won.  path={self.current_path!r}"
+        )
 
     def _on_autosave_failure(self, exc: Exception):
         """Called on the UI thread after a failed background autosave."""
@@ -3428,22 +3772,10 @@ class Notepad(QMainWindow):
         self._recovery_in_progress = True
 
         def _worker():
-            tmp_path = None
             try:
-                tmp_path = recovery_path.with_name(recovery_path.name + ".tmp~")
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(str(tmp_path), str(recovery_path))
-                tmp_path = None
+                _atomic_write_text(recovery_path, text)
                 self._recovery_succeeded.emit(str(recovery_path))
             except Exception:
-                if tmp_path is not None:
-                    try:
-                        tmp_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
                 self._recovery_failed.emit()
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -3578,8 +3910,13 @@ class Notepad(QMainWindow):
             self._autosave_in_progress = False
             self._autosave_started_at = 0.0
             self.editor.document().setModified(True)
+            # Invalidate the hung worker's generation.  Clearing the boolean alone
+            # let a new autosave start while the old thread was still alive; if the
+            # old one finished last it replaced the file with an older snapshot.
+            # The stale worker now aborts at its pre-rename check instead.
+            self._save_generation += 1
             msg = (f"WATCHDOG: autosave thread hung for {elapsed:.0f}s "
-                   f"(threshold {timeout_sec:.0f}s). Flag reset. "
+                   f"(threshold {timeout_sec:.0f}s). Generation invalidated. "
                    f"path={self.current_path!r}")
             self._write_autosave_log(msg)
             self.status.showMessage(
@@ -5120,6 +5457,31 @@ class Notepad(QMainWindow):
         layout.addWidget(settings_row_widget)
         layout.addWidget(_path_row("Autosave Log:", self.settings.log_path))
 
+        # On-disk format of the open document, and what saving will change.
+        fmt_lines = [f"Document format: {self._describe_source_format()}"]
+        _conversions = self._pending_conversions()
+        if _conversions:
+            fmt_lines.append("Saving will convert: " + "; ".join(_conversions))
+        fmt_lbl = QLabel("\n".join(fmt_lines), dialog)
+        fmt_lbl.setWordWrap(True)
+        if _conversions:
+            fmt_lbl.setStyleSheet("color: #b06000; margin-top: 4px;")
+        layout.addWidget(fmt_lbl)
+
+        # Settings-store health: a failed write or a permanent relocation to the
+        # fallback directory used to be entirely silent, so a preference could
+        # appear applied while never reaching disk.
+        _store_notes = []
+        if self.settings.relocated_reason:
+            _store_notes.append(self.settings.relocated_reason)
+        if getattr(self, "_last_settings_save_error", ""):
+            _store_notes.append(f"Last settings write failed: {self._last_settings_save_error}")
+        if _store_notes:
+            warn_lbl = QLabel("\n".join(_store_notes), dialog)
+            warn_lbl.setWordWrap(True)
+            warn_lbl.setStyleSheet("color: #d93025; margin-top: 4px;")
+            layout.addWidget(warn_lbl)
+
         # ── Experimental features section (Windows only) ──────────────────
         if sys.platform == "win32":
             exp_header = QLabel("Experimental Features", dialog)
@@ -5309,13 +5671,10 @@ class Notepad(QMainWindow):
                 except Exception:
                     pass
 
-            try:
-                data = self.settings.load()
-                data["quick_switch_enabled"] = new_qs
-                data["force_anjal_english"] = new_force
-                self.settings.save(data)
-            except Exception:
-                pass
+            # Both keys are already serialised by _save_preferences, so go through
+            # it rather than doing a bespoke whole-dictionary write: that bypassed
+            # the cross-window lock and merge, and left _settings_cache stale.
+            self._save_preferences()
 
     def _show_reading_time_dialog(self):
         dialog = QDialog(self)
@@ -6066,18 +6425,43 @@ class Notepad(QMainWindow):
         self.editor.setWordIndexAdaptiveDensity(self._word_index_adaptive_density)
         self.editor.setWordIndexTopMargin(self._word_index_top_margin)
 
+    @staticmethod
+    def _sync_action_checked(action, checked: bool) -> None:
+        """Set a checkable QAction's state from stored settings without emitting
+        toggled().  Every such handler calls _save_preferences(), so an unblocked
+        setChecked() during settings application persists half-applied state."""
+        was_blocked = action.blockSignals(True)
+        try:
+            action.setChecked(bool(checked))
+        finally:
+            action.blockSignals(was_blocked)
+
     def _apply_settings_dict(self, data: dict) -> None:
         """Apply a settings dict to the live UI without any disk I/O.
 
         Shared by _load_preferences() (startup / full reload) and the user-preset
         loader so neither code path duplicates widget-sync logic.
 
+        Runs as a transaction: _applying_preferences suppresses _save_preferences()
+        for the whole call.  Without it, synchronising a checkable QAction whose
+        stored value differs from its construction default emits toggled(), whose
+        handler saves the *partially applied* window state.  During startup that
+        meant writing Qt's default font to settings.json, because the font is
+        applied at the end of this method \u2014 which is how a second window could
+        come up with the wrong font (knownbugs/Issues to fix.md).
+
         Deliberately excluded \u2014 handled by the caller:
           \u2022 default_directory  (machine-local path)
           \u2022 window_size / window_maximized  (startup-only resize)
           \u2022 last_opened_file  (startup-only side-effect)
-          \u2022 _settings_cache  (set by the caller after this returns)
         """
+        self._applying_preferences = True
+        try:
+            self._apply_settings_dict_inner(data)
+        finally:
+            self._applying_preferences = False
+
+    def _apply_settings_dict_inner(self, data: dict) -> None:
         # Auto-save interval \u2014 clamp to known valid values
         _VALID_AUTOSAVE = {0, 2, 5, 15, 30}
         try:
@@ -6091,20 +6475,18 @@ class Notepad(QMainWindow):
 
         # Word wrap
         wrap = data.get("word_wrap", True)
-        self.wrap_act.setChecked(bool(wrap))
+        self._sync_action_checked(self.wrap_act, wrap)
         self.editor.setWordWrap(bool(wrap))
 
         # Line numbers
         line_numbers_visible = data.get("line_numbers_visible", True)
-        self.line_numbers_act.setChecked(bool(line_numbers_visible))
+        self._sync_action_checked(self.line_numbers_act, line_numbers_visible)
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
 
         # Auto-hide scrollbar
         auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
         self._auto_hide_scrollbar = auto_hide_scrollbar
-        self.auto_hide_scrollbar_act.blockSignals(True)
-        self.auto_hide_scrollbar_act.setChecked(auto_hide_scrollbar)
-        self.auto_hide_scrollbar_act.blockSignals(False)
+        self._sync_action_checked(self.auto_hide_scrollbar_act, auto_hide_scrollbar)
         self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
 
         # Status bar item visibility
@@ -6113,11 +6495,11 @@ class Notepad(QMainWindow):
         self._status_show_chars = bool(data.get("status_show_chars", True))
         self._status_show_line = bool(data.get("status_show_line", True))
         self._status_show_col = bool(data.get("status_show_col", True))
-        self.status_words_act.setChecked(self._status_show_words)
-        self.status_sentences_act.setChecked(self._status_show_sentences)
-        self.status_chars_act.setChecked(self._status_show_chars)
-        self.status_line_act.setChecked(self._status_show_line)
-        self.status_col_act.setChecked(self._status_show_col)
+        self._sync_action_checked(self.status_words_act, self._status_show_words)
+        self._sync_action_checked(self.status_sentences_act, self._status_show_sentences)
+        self._sync_action_checked(self.status_chars_act, self._status_show_chars)
+        self._sync_action_checked(self.status_line_act, self._status_show_line)
+        self._sync_action_checked(self.status_col_act, self._status_show_col)
         self.words_label.setVisible(self._status_show_words)
         self.sentences_label.setVisible(self._status_show_sentences)
         self.chars_label.setVisible(self._status_show_chars)
@@ -6156,7 +6538,7 @@ class Notepad(QMainWindow):
 
         # Experimental features
         self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
-        self.unicode_substring_highlight_act.setChecked(self._unicode_substring_highlight)
+        self._sync_action_checked(self.unicode_substring_highlight_act, self._unicode_substring_highlight)
         self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
         self.reading_time_label.setVisible(self._reading_time_enabled)
         self._word_index_enabled = bool(data.get("word_index_enabled", False))
@@ -6189,7 +6571,7 @@ class Notepad(QMainWindow):
             raw_sorkuvai_prefix, DEFAULT_SORKUVAI_SEARCH_URL_PREFIX
         )
         self._apply_word_index_preferences()
-        self.word_index_act.setChecked(self._word_index_enabled)
+        self._sync_action_checked(self.word_index_act, self._word_index_enabled)
 
         # Font \u2014 applied last so _apply_theme_preferences() cannot reset widget font
         family = data.get("font_family")
@@ -6226,9 +6608,17 @@ class Notepad(QMainWindow):
         # Startup behaviour flag (checkbox only; actual file-open is the caller's job)
         reopen = data.get("reopen_last_file_on_launch", True)
         self._restore_last_session = bool(reopen)
-        self.reopen_last_act.blockSignals(True)
-        self.reopen_last_act.setChecked(self._restore_last_session)
-        self.reopen_last_act.blockSignals(False)
+        self._sync_action_checked(self.reopen_last_act, self._restore_last_session)
+
+        # Automatic update check on launch (the app's only unprompted network use).
+        # Falls back to the CURRENT value, not to True: presets and preset files
+        # written before this setting existed do not carry the key, and defaulting
+        # to True there would silently re-enable network access for a user who had
+        # deliberately turned it off.
+        self._update_check_on_launch = bool(data.get(
+            "update_check_on_launch", getattr(self, "_update_check_on_launch", True)
+        ))
+        self._sync_action_checked(self.update_check_act, self._update_check_on_launch)
 
     # --- Preferences ---
     def _load_preferences(self):
@@ -6307,6 +6697,15 @@ class Notepad(QMainWindow):
 
         self._restore_maximized = bool(data.get("window_maximized", False))
 
+        # Seed the cache BEFORE applying, so that any save triggered while
+        # settings are being applied serialises from the real loaded values
+        # rather than from an empty dict.  Belt-and-braces with the
+        # _applying_preferences transaction guard in _apply_settings_dict.
+        # A copy, not the same object: the seed step below mutates `data`, and
+        # the merge in _commit_settings needs the pre-seed values to recognise
+        # the seeded keys as this window's own changes.
+        self._settings_cache = dict(data)
+
         self._apply_settings_dict(data)
 
         # Seed defaults: on first run or after a partial settings file, persist
@@ -6329,7 +6728,12 @@ class Notepad(QMainWindow):
         if any(data.get(k) != v for k, v in _seed.items()):
             try:
                 data.update(_seed)
-                self.settings.save(data)
+                # Through _commit_settings, not settings.save(): this was the last
+                # remaining wholesale write, and two windows starting at the same
+                # time could use it to clobber each other's preferences.
+                ok, merged = self._commit_settings(data)
+                if ok:
+                    data = merged
             except Exception:
                 pass
 
@@ -6349,9 +6753,17 @@ class Notepad(QMainWindow):
         self._start_autosave()
         return True
 
-    def _save_preferences(self):
+    def _save_preferences(self) -> bool:
+        """Persist current window state.  Returns True when the write succeeded.
+
+        No-ops while a settings/preset transaction is in progress: during
+        _apply_settings_dict the window is only half-updated, so saving there
+        would persist a mixture of new and stale values.
+        """
         if getattr(self, '_settings_reset_pending', False):
-            return
+            return False
+        if getattr(self, '_applying_preferences', False):
+            return False
         try:
             font = self.editor.font()
             data = dict(self._settings_cache)
@@ -6399,6 +6811,7 @@ class Notepad(QMainWindow):
                 "autosave_interval": autosave_interval,
                 "last_opened_file": last_opened_file,
                 "reopen_last_file_on_launch": self._restore_last_session,
+                "update_check_on_launch": getattr(self, '_update_check_on_launch', True),
                 "appearance_theme_mode": self._normalize_theme_mode(
                     getattr(self, '_appearance_theme_mode', 'follow_os')
                 ),
@@ -6447,8 +6860,72 @@ class Notepad(QMainWindow):
                     DEFAULT_SORKUVAI_SEARCH_URL_PREFIX,
                 ),
             })
-            self.settings.save(data)
-            self._settings_cache = data
+            ok, merged = self._commit_settings(data)
+            if ok:
+                self._settings_cache = merged
+                self._settings_save_warned = False
+            else:
+                self._report_settings_save_failure(self.settings.last_save_error)
+            return ok
+        except Exception as exc:
+            self._report_settings_save_failure(str(exc))
+            return False
+
+    def _commit_settings(self, data: dict) -> tuple[bool, dict]:
+        """Write ``data`` to the settings file, merging at key level.
+
+        New Window spawns a separate process per window (see new_window), so two
+        windows hold independent whole-dictionary snapshots.  Writing a snapshot
+        wholesale means the second window to save silently reverts whatever the
+        first one changed.
+
+        Instead, only the keys *this window actually changed* since it last read
+        the store are written over a freshly re-read copy.  A window that changed
+        only its margins therefore cannot revert another window's font.  The
+        read-modify-write is serialised with an advisory lock; if the lock cannot
+        be taken the merge still runs, since a merged write is strictly better
+        than the whole-snapshot write it replaces.
+        """
+        lock = self.settings.lock()
+        locked = False
+        try:
+            locked = lock.tryLock(2000)
+            disk = self.settings.read_current()
+            changed = {
+                key: value for key, value in data.items()
+                if key not in self._settings_cache or self._settings_cache[key] != value
+            }
+            merged = dict(disk)
+            # Keys this window changed win; keys it never knew about (written by a
+            # newer version, or by another window) are preserved untouched.
+            merged.update(changed)
+            # Seed anything the store has never held, e.g. a first run or a reset.
+            for key, value in data.items():
+                merged.setdefault(key, value)
+            try:
+                merged["settings_revision"] = int(disk.get("settings_revision", 0)) + 1
+            except (TypeError, ValueError):
+                merged["settings_revision"] = 1
+            ok = self.settings.save(merged)
+            return ok, (merged if ok else self._settings_cache)
+        finally:
+            if locked:
+                lock.unlock()
+
+    def _report_settings_save_failure(self, error: str) -> None:
+        """Surface a settings write failure once per failure run.
+
+        Previously every _save_preferences() failure was swallowed, so the UI
+        could report a preference as applied when it had not been persisted.
+        """
+        self._last_settings_save_error = error or "unknown error"
+        if getattr(self, '_settings_save_warned', False):
+            return
+        self._settings_save_warned = True
+        try:
+            self.status.showMessage(
+                "Could not save settings — see Help › Debug Info for details", 6000
+            )
         except Exception:
             pass
 
@@ -6632,12 +7109,8 @@ class Notepad(QMainWindow):
                             # Preserve machine-local keys so applying a preset from
                             # another machine never opens a stale file path or
                             # resizes the window.
-                            _MACHINE_LOCAL = {
-                                "last_opened_file", "default_directory",
-                                "window_size", "window_maximized",
-                            }
                             merged = {**preset_data}
-                            for k in _MACHINE_LOCAL:
+                            for k in MACHINE_LOCAL_SETTINGS_KEYS:
                                 if k in self._settings_cache:
                                     merged[k] = self._settings_cache[k]
                             self._apply_settings_dict(merged)
@@ -6799,18 +7272,7 @@ class Notepad(QMainWindow):
         # ── 12a. Rewrite a bad preset file with the fresh factory defaults ────
         # Done silently — no dialog, no interruption.
         if _writer_preset_bad and _writer_preset_bad_reason:
-            _tmp = preset_path.with_suffix(".tmp")
-            try:
-                _tmp.write_text(
-                    json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-                os.replace(str(_tmp), str(preset_path))
-            except OSError:
-                try:
-                    _tmp.unlink(missing_ok=True)
-                except Exception:
-                    pass
+            self._write_preset_file(preset_path)
 
         # ── 13. Tamil Anjal typing layout ────────────────────────────────────
         # Done after the save so a layout-switch failure cannot corrupt JSON.
@@ -6875,12 +7337,8 @@ class Notepad(QMainWindow):
                             # Preserve machine-local keys so applying a preset from
                             # another machine never opens a stale file path or
                             # resizes the window.
-                            _MACHINE_LOCAL = {
-                                "last_opened_file", "default_directory",
-                                "window_size", "window_maximized",
-                            }
                             merged = {**preset_data}
-                            for k in _MACHINE_LOCAL:
+                            for k in MACHINE_LOCAL_SETTINGS_KEYS:
                                 if k in self._settings_cache:
                                     merged[k] = self._settings_cache[k]
                             self._apply_settings_dict(merged)
@@ -7031,18 +7489,7 @@ class Notepad(QMainWindow):
         # ── 12a. Rewrite a bad preset file with the fresh factory defaults ────
         # Done silently — no dialog, no interruption.
         if _techie_preset_bad and _techie_preset_bad_reason:
-            _tmp = preset_path.with_suffix(".tmp")
-            try:
-                _tmp.write_text(
-                    json.dumps(self._settings_cache, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-                os.replace(str(_tmp), str(preset_path))
-            except OSError:
-                try:
-                    _tmp.unlink(missing_ok=True)
-                except Exception:
-                    pass
+            self._write_preset_file(preset_path)
 
         # Refresh status bar display immediately.
         self._update_status_bar()
@@ -7070,12 +7517,31 @@ class Notepad(QMainWindow):
 
     # Keys that are machine-local and must not be stored in portable preset files.
     # reopen_last_file_on_launch is intentionally kept — it is a per-mode preference.
-    _PRESET_MACHINE_LOCAL_KEYS: frozenset = frozenset({
-        "default_directory",
-        "window_size",
-        "window_maximized",
-        "last_opened_file",
-    })
+    # Single definition shared by preset export, preset application and repair —
+    # see MACHINE_LOCAL_SETTINGS_KEYS at module level.
+    _PRESET_MACHINE_LOCAL_KEYS: frozenset = MACHINE_LOCAL_SETTINGS_KEYS
+
+    def _portable_preset_data(self) -> dict:
+        """Current settings with machine-local keys removed, ready to write as a preset.
+
+        One serializer for normal Save-as-preset and for silent repair of a corrupt
+        preset file.  Repair used to dump the whole settings cache, which put back
+        exactly the keys normal export deliberately strips — so a repaired preset
+        could carry another machine's window size and last-opened path.
+        """
+        return {k: v for k, v in self._settings_cache.items()
+                if k not in self._PRESET_MACHINE_LOCAL_KEYS}
+
+    def _write_preset_file(self, preset_path: Path) -> bool:
+        """Write the portable preset atomically.  Returns True on success."""
+        try:
+            _atomic_write_text(
+                preset_path,
+                json.dumps(self._portable_preset_data(), indent=2, ensure_ascii=False),
+            )
+            return True
+        except OSError:
+            return False
 
     def _save_as_solveli_preset(self):
         """Save the current configuration to ~/Documents/neight/writer_mode.json.
@@ -7099,27 +7565,15 @@ class Notepad(QMainWindow):
             return
         # Flush the latest in-memory state to disk and update _settings_cache.
         self._save_preferences()
-        preset_data = {k: v for k, v in self._settings_cache.items()
-                       if k not in self._PRESET_MACHINE_LOCAL_KEYS}
-        tmp_path = preset_path.with_suffix(".tmp")
-        try:
-            tmp_path.write_text(
-                json.dumps(preset_data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            os.replace(str(tmp_path), str(preset_path))
+        if self._write_preset_file(preset_path):
             self.status.showMessage(
                 f"Writer Mode preset saved \u2192 {preset_path}", 4000
             )
-        except OSError as exc:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+        else:
             QMessageBox.critical(
                 self,
                 "Save Failed",
-                f"Could not write the preset file.\n\n{preset_path}\n\nError: {exc}",
+                f"Could not write the preset file.\n\n{preset_path}",
             )
 
     def _save_as_engineer_preset(self):
@@ -7143,27 +7597,15 @@ class Notepad(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         self._save_preferences()
-        preset_data = {k: v for k, v in self._settings_cache.items()
-                       if k not in self._PRESET_MACHINE_LOCAL_KEYS}
-        tmp_path = preset_path.with_suffix(".tmp")
-        try:
-            tmp_path.write_text(
-                json.dumps(preset_data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            os.replace(str(tmp_path), str(preset_path))
+        if self._write_preset_file(preset_path):
             self.status.showMessage(
                 f"Techie Mode preset saved \u2192 {preset_path}", 4000
             )
-        except OSError as exc:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+        else:
             QMessageBox.critical(
                 self,
                 "Save Failed",
-                f"Could not write the preset file.\n\n{preset_path}\n\nError: {exc}",
+                f"Could not write the preset file.\n\n{preset_path}",
             )
 
     def _toggle_unicode_substring_highlight(self, enabled: bool):
@@ -7272,12 +7714,10 @@ class Notepad(QMainWindow):
 
     def _set_autosave_interval(self, minutes: int):
         self._autosave_interval_minutes = minutes
-        cache = getattr(self, '_settings_cache', {})
-        if not cache:
-            cache = self.settings.load()
-        cache["autosave_interval"] = minutes
-        self.settings.save(cache)
-        self._settings_cache = cache
+        # _save_preferences already writes autosave_interval, and does it through
+        # the locked key-level merge.  The previous whole-cache write here could
+        # revert a font or margin another window had just changed.
+        self._save_preferences()
         self._update_autosave_menu(minutes)
         
         if minutes > 0:
@@ -7370,20 +7810,39 @@ class Notepad(QMainWindow):
         self.editor.setTextCursor(final_cursor)
         self.status.showMessage("Normalized document text to Unicode NFC", 2000)
 
+    MIN_FONT_POINT_SIZE = 6
+    MAX_FONT_POINT_SIZE = 100
+
     def _change_font_size(self, step: int):
+        """Nudge the font size by one step (Ctrl +/-)."""
+        self._apply_font_size_delta(step)
+
+    def _apply_font_size_delta(self, steps: int):
+        """Apply a whole zoom gesture as a single font-size change.
+
+        A large wheel or trackpad delta used to be applied one point at a time in
+        a loop, and every iteration re-laid out the document, rebuilt the
+        overlays and wrote settings.json.  One clamped target size, applied once,
+        does the same job for a fraction of the work.
+        """
+        if not steps:
+            return
         font = self.editor.font()
         current_size = font.pointSize()
         if current_size <= 0:
             current_size = 12
 
-        new_size = max(6, min(100, current_size + step))
+        new_size = max(self.MIN_FONT_POINT_SIZE,
+                       min(self.MAX_FONT_POINT_SIZE, current_size + steps))
         if new_size == current_size:
             self.status.showMessage("Font size limit reached", 1500)
             return
 
         font.setPointSize(new_size)
         self.editor.setFont(font)
-        self._save_preferences()
+        # Persist once the gesture goes quiet rather than on every step — a fast
+        # scroll otherwise produced a settings write per point of size change.
+        self._font_size_save_timer.start()
         self.status.showMessage(f"Font size: {new_size}pt", 1500)
 
     # --- Helpers ---
@@ -7412,7 +7871,18 @@ class Notepad(QMainWindow):
         self._schedule_status_update()
         # Invalidate the same-word cache so a post-edit highlight scan always runs.
         self._current_highlight_word = None
-        self._update_word_highlights()
+        # Route through the 80 ms timer rather than scanning inline.  A direct
+        # call here meant every keystroke could run a whole-document doc.find()
+        # loop (up to _HIGHLIGHT_MATCH_LIMIT matches), bypassing the debounce that
+        # selection changes already use.  When there is nothing to highlight,
+        # clear immediately and cancel any pending scan — that path is O(1).
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            self._word_highlight_timer.stop()
+            self._clear_word_highlights()
+            self._update_word_match_status(None, 0)
+            return
+        self._schedule_word_highlight_update()
 
     def _schedule_status_update(self):
         # 250 ms is imperceptible after keyup but collapses rapid-fire bursts

@@ -1,0 +1,144 @@
+name: Checks
+
+on: [push, pull_request]
+
+jobs:
+  # The application imports PySide6 at module scope, so "does it even parse and
+  # import" needs a real Qt install and an offscreen platform plugin.  Running it
+  # on both target platforms is what catches a change that only compiles on one.
+  import-and-construct:
+    name: Import and construct (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -c "import ast, io; ast.parse(io.open('neight.py', encoding='utf-8').read()); print('syntax OK')"
+
+      - name: Import and construct the main window offscreen
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -c "
+          import sys
+          import neight
+          app = neight.NeightApplication(sys.argv)
+          win = neight.Notepad(initial_file=None, restore_last_session=False)
+          assert win.editor is not None
+          print('constructed OK on', sys.platform)
+          "
+
+      # Regression guard for the multi-window font loss (knownbugs/Issues to fix.md).
+      # Applying settings used to emit action toggled() signals whose handlers
+      # saved the half-applied window — writing Qt's default font over the stored
+      # one, because the font is applied at the end of that method.
+      #
+      # Checking every write rather than the final file contents: a legitimate
+      # first-run seeding write happens for an incomplete settings file, and a
+      # later write can repair an earlier bad one, masking the bug depending on
+      # which keys the settings file happens to hold.  The invariant that matters
+      # is that no write during startup may carry a font the user never chose.
+      - name: Startup must never persist a font the user did not choose
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONIOENCODING: utf-8
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          import neight
+
+          STORED_FAMILY, STORED_SIZE = 'Courier New', 17
+          # Every one of these differs from its QAction construction default, so
+          # each would emit toggled() while settings are being applied.
+          pathlib.Path('settings.json').write_text(json.dumps({
+              'font_family': STORED_FAMILY, 'font_size': STORED_SIZE,
+              'unicode_substring_highlight': True,
+              'word_wrap': False,
+              'line_numbers_visible': False,
+              'status_show_words': False,
+          }), encoding='utf-8')
+
+          writes = []
+          original_save = neight.SettingsManager.save
+          neight.SettingsManager.save = lambda self, data: (
+              writes.append((data.get('font_family'), data.get('font_size')))
+              or original_save(self, data))
+
+          app = neight.NeightApplication(sys.argv)
+          win = neight.Notepad(initial_file=None, restore_last_session=False)
+
+          bad = [w for w in writes if w != (STORED_FAMILY, STORED_SIZE)]
+          if bad:
+              print(f'::error::startup persisted a font the user never chose: {bad} '
+                    f'(all writes: {writes})')
+              sys.exit(1)
+          font = win.editor.font()
+          assert font.family() == STORED_FAMILY, font.family()
+          assert font.pointSize() == STORED_SIZE, font.pointSize()
+          print(f'startup made {len(writes)} write(s), all preserving the stored font')
+          PY
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ruff
+        run: pip install ruff
+      # Report only.  CI must never rewrite source: an automatic fix could
+      # silently alter a Tamil string literal.
+      - name: Ruff (report only, no fixes)
+        run: ruff check --no-fix --output-format=github . || true
+
+  encoding-guards:
+    name: Encoding and Tamil guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No UTF-8 BOM in tracked text files
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            if head -c 3 "$f" | grep -q $'\xef\xbb\xbf'; then
+              echo "::error file=$f::file starts with a UTF-8 BOM"
+              bad=1
+            fi
+          done < <(git ls-files '*.py' '*.md' '*.html' '*.txt' '*.yml' '*.spec')
+          exit $bad
+
+      - name: Tamil source strings decode as UTF-8
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          # -z, split on NUL: several tracked files have spaces in their names,
+          # and git otherwise quote-escapes non-ASCII paths.
+          out = subprocess.check_output(
+              ['git', 'ls-files', '-z', '*.py', '*.md', '*.html'])
+          files = [f for f in out.decode('utf-8').split('\0') if f]
+          bad = []
+          for f in files:
+              try:
+                  open(f, encoding='utf-8').read()
+              except UnicodeDecodeError as exc:
+                  bad.append(f'{f}: {exc}')
+          if bad:
+              print('\n'.join(bad))
+              sys.exit(1)
+          print(f'{len(files)} files decode cleanly as UTF-8')
+          PY

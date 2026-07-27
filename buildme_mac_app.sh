@@ -31,10 +31,12 @@ rm -rf dist/Neight.app
 rm -rf __pycache__ .pytest_cache
 
 echo ""
-echo "Starting PyInstaller .app build from Neight.spec..."
+echo "Starting PyInstaller .app build from packaging/Neight.macos.spec..."
 
-# Run PyInstaller using the committed spec file (preserves info_plist, argv_emulation, etc.)
-if ! pyinstaller Neight.spec; then
+# Run PyInstaller using the committed spec file (preserves info_plist, argv_emulation,
+# file associations and the BUNDLE step).  This previously pointed at an untracked
+# Neight.spec that a clean clone did not have.
+if ! pyinstaller packaging/Neight.macos.spec; then
     echo ""
     echo "Error: PyInstaller command failed."
     exit 1

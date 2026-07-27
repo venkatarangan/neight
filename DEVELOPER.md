@@ -30,13 +30,23 @@ python neight.py
 
 ### Requirements
 
-- Python 3.10+
-- PySide6 6.x (Qt 6)
-- markdown
-- pillow (for design helpers only)
-- pyinstaller (only if building distributables)
+- Python 3.10+ (built and tested on 3.12)
+- PySide6 / shiboken6 6.11.0 (Qt 6) — pinned
+- Markdown 3.10.2 — pinned
 
-See [requirements.txt](requirements.txt) for the current pinned list.
+Runtime dependencies are in [requirements.txt](requirements.txt), pinned so a
+release can be reproduced. A Qt minor release can change text layout, cursor
+geometry and Tamil shaping without a line of Neight changing, so bump the pin
+deliberately and re-run the cross-platform checks.
+
+Build and design tools are separate, in [requirements-dev.txt](requirements-dev.txt):
+`pyinstaller` (distributables), `pillow` (design asset generation only — not
+imported by the application), and `pre-commit` (repository hooks).
+
+```bash
+pip install -r requirements.txt                          # to run Neight
+pip install -r requirements.txt -r requirements-dev.txt  # to build or contribute
+```
 
 > Neight uses **PySide6 exclusively**. All PyQt5 references have been removed. There is no Qt5 fallback.
 
@@ -54,7 +64,7 @@ buildme.bat
 
 What it does:
 1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
-2. Runs PyInstaller: `pyinstaller --name Neight --onefile --windowed --icon neight.ico --add-data "neight.ico;." neight.py`
+2. Runs PyInstaller from the checked-in spec: `pyinstaller packaging\Neight.windows.spec`
 3. Produces `dist\Neight.exe`
 
 After a successful build the script prints a reminder:
@@ -76,7 +86,7 @@ chmod +x buildme_mac_app.sh
 What it does:
 1. Runs `python3 increment_version.py` to bump `VERSION` in `neight.py`
 2. Cleans `build/`, `dist/Neight.app`, and `__pycache__`
-3. Runs `pyinstaller Neight.spec` (the checked-in spec preserves `info_plist`, `argv_emulation`, and file-type associations)
+3. Runs `pyinstaller packaging/Neight.macos.spec` (the checked-in spec preserves `BUNDLE`, `info_plist`, `argv_emulation`, and file-type associations)
 4. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
 5. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
 
@@ -235,10 +245,15 @@ Update either prefix if the service URLs change.
 ```
 neight.py              — the entire application
 neight.ico / .icns     — app icons
-requirements.txt       — Python dependencies
+requirements.txt       — pinned runtime dependencies
+requirements-dev.txt   — build, design and hook tooling
 buildme.bat            — Windows build script
 buildme_mac_app.sh     — macOS build script
-Neight.spec            — PyInstaller spec (auto-generated, checked in for reference)
+packaging/             — the PyInstaller specs the build scripts use:
+                         Neight.windows.spec (EXE) and Neight.macos.spec (BUNDLE).
+                         These are build inputs, not generated output — do not
+                         build with a bare `pyinstaller ... neight.py`, which
+                         overwrites a spec instead of using one.
 design/                — icon generators and architecture infographic source
 knownbugs/             — documented Qt-level bugs and reproduction notes
 screenshots/           — screenshots used in documentation

@@ -17,8 +17,11 @@ echo.
 echo Starting PyInstaller build...
 echo.
 
-REM Run PyInstaller
-pyinstaller --name Neight --onefile --windowed --icon neight.ico --add-data "neight.ico;." neight.py
+REM Build from the committed Windows spec.
+REM Do NOT go back to a bare "pyinstaller ... neight.py" command line: that
+REM regenerates a spec file in the repo root and used to clobber the macOS
+REM build input on every Windows build.
+pyinstaller packaging\Neight.windows.spec
 if errorlevel 1 (
     echo Error: PyInstaller build failed
     pause

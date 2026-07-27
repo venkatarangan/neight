@@ -55,7 +55,18 @@ move — still trigger a scroll correction.
 and is generally beneficial. **Does not** fix the Tamil descender clipping,
 because Qt will not scroll past its own `maximum()`.
 
-Status: **kept in code** (safe, useful on its own).
+Status: **REMOVED from the code.** Commit `ca5a73d` ("new mac build with the QT
+Text Scrolling fixes", 2026-05-23) deleted all 61 lines of it:
+`_cursor_vis_timer`, the `cursorPositionChanged` → `_schedule_cursor_visibility_check`
+connection, `_schedule_cursor_visibility_check()`, `_ensure_cursor_line_fully_visible()`
+and the navigation-key fallback in `keyPressEvent`.
+
+This document previously said the code was kept, which was wrong from `ca5a73d`
+onwards. **Do not restore it blindly** — it was removed as part of macOS
+scrolling fixes, so putting it back may reintroduce whatever it was removed to
+solve. Reproduce the cursor problem against the current layout first and compare
+the three candidates (current custom layout, the historical guard, and stock
+`QPlainTextDocumentLayout`) under identical conditions.
 
 ### Option B — carve a "glyph safety" slack inside the viewport snap
 
@@ -142,10 +153,11 @@ The bug is fixed by combining two mechanisms:
    descender of the final line paints into this strip rather than into
    clipped pixels at the viewport bottom edge.
 
-The `_ensure_cursor_line_fully_visible` strengthening (Option A) and the
-nav-key scheduling in `keyPressEvent` are kept — they remain useful for
-defending against Qt's natural-scroll occasionally stopping one tick short
-of `vsb.maximum()`.
+The `_ensure_cursor_line_fully_visible` strengthening (Option A) and the nav-key
+scheduling in `keyPressEvent` are **no longer present** — they were removed in
+`ca5a73d`. The two mechanisms above are what the fix now rests on entirely. If
+the "cursor disappears when pressing Right past end of document" symptom returns,
+that removal is the first thing to check.
 
 ### Validated outcome
 

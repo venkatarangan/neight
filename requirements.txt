@@ -1,20 +1,21 @@
-# Neight - Text Editor Dependencies
-# python3 -m venv venv
-# source venv/bin/activate
-# pip install -r requirements.txt
+# Neight — runtime dependencies
+#
+#   python -m venv .venv
+#   .venv\Scripts\activate          (Windows)
+#   source .venv/bin/activate       (macOS / Linux)
+#   pip install -r requirements.txt
+#
+# Versions are pinned so a release can be reproduced.  They record what Neight
+# is actually built and tested against, not a lower bound: `PySide6>=6.0.0`
+# meant every machine linked a different Qt, and a Qt minor release can change
+# text layout, cursor geometry and Tamil shaping without a line of code changing
+# here.  Bump deliberately, then re-run the cross-platform checks.
+#
+# Development, build and design tools live in requirements-dev.txt, so a runtime
+# install no longer drags in PyInstaller and Pillow.
 
-# Qt bindings (install one of these):
-PySide6>=6.0.0
+PySide6==6.11.0
+shiboken6==6.11.0
 
 # Markdown rendering for PDF export
-markdown>=3.0.0
-
-# Image processing for design generation
-pillow>=9.0.0
-
-# Optional: for building standalone executables
-pyinstaller>=5.0.0
-
-# Git pre-commit hooks (run: pre-commit install)
-pre-commit>=3.0.0
-
+Markdown==3.10.2

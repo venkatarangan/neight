@@ -281,10 +281,16 @@ Neight creates and updates `settings.json` automatically.
 
 ### Where settings are stored
 
-- If the app folder is writable, settings are saved next to the executable or script.
-- Otherwise:
-  - **Windows:** `%LOCALAPPDATA%\Neight\settings.json`
-  - **macOS / Linux:** `~/.config/Neight/settings.json`
+Neight prefers to keep `settings.json` **next to the executable or script**, which makes a Windows install portable — copy the folder, keep your preferences.
+
+It falls back to a per-user location only when the app folder cannot be written to:
+
+- **Windows:** `%LOCALAPPDATA%\Neight\settings.json`
+- **macOS / Linux:** `~/.config/Neight/settings.json`
+
+**Help → Debug Info** always shows the path actually in use. Do not assume one or the other — check there.
+
+> **macOS caveat.** For a `.app` bundle the "app folder" is inside `Neight.app`. If that folder is writable, your settings live inside the bundle and are **deleted along with the app** when you replace or remove it. See [What happens to your settings when you delete Neight on macOS?](#what-happens-to-your-settings-when-you-delete-neight-on-macos) below. Use **Save Presets** to keep a copy outside the bundle.
 
 ### Accessing settings files
 
@@ -342,7 +348,7 @@ There is no pop-up dialog and no interruption to your work. Use **Help → Check
 1. Download the new `Neight.exe` from [GitHub Releases](https://github.com/venkatarangan/neight/releases).
 2. Close the running Neight instance.
 3. Replace the old `Neight.exe` with the downloaded file in the same folder.
-4. Your settings are stored separately in `%LOCALAPPDATA%\Neight\settings.json` and are not affected.
+4. Replacing only the `.exe` leaves `settings.json` untouched, wherever it lives. Check **Help → Debug Info** for its exact path if you are moving the whole folder.
 
 #### macOS
 
@@ -356,15 +362,27 @@ There is no pop-up dialog and no interruption to your work. Use **Help → Check
 
 ### What happens to your settings when you delete Neight on macOS?
 
-On macOS, Neight stores its settings at:
+**This depends on where your settings actually ended up, so check Help → Debug Info first.**
+
+Neight prefers to store `settings.json` beside the executable. Inside a `.app` bundle that means a path such as:
+
+```
+/Applications/Neight.app/Contents/MacOS/settings.json
+```
+
+If that is the path Debug Info shows, then **replacing or deleting `Neight.app` deletes your settings with it.** This is a known limitation and is recorded in [`release_install_notes.md`](release_install_notes.md).
+
+Only if the bundle is not writable does Neight fall back to:
 
 ```
 ~/.config/Neight/settings.json
 ```
 
-Deleting `Neight.app` from `/Applications` **does not** delete this file. If you reinstall Neight, it will pick up your previous settings automatically the next time it launches.
+which does survive deleting the app.
 
-However, `settings.json` contains a few machine-specific values (last-opened file path, window size). If you move to a new machine, those values will not apply, but all other preferences — font, theme, line spacing, autosave interval, and so on — will carry over cleanly.
+**To protect your preferences across updates,** use **Save Presets** (below). Preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset.
+
+Note that `settings.json` also contains a few machine-specific values (last-opened file path, window size). If you move to a new machine those will not apply, but font, theme, line spacing, autosave interval and the rest carry over cleanly.
 
 ### Protecting your settings with Save Presets
 

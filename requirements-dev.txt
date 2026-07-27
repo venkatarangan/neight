@@ -1,0 +1,16 @@
+# Neight — development, build and design dependencies
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Nothing here is imported by neight.py at runtime; these are only needed to
+# build releases, generate design assets, or run the repository's checks.
+
+# Packaging (buildme.bat / buildme_mac_app.sh)
+pyinstaller==6.20.0
+
+# Design asset generation only — not used by the application
+pillow==12.2.0
+
+# Repository hooks: BOM check, line-ending check, Tamil spelling guard.
+# Enable with: pre-commit install
+pre-commit>=3.0.0

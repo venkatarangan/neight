@@ -32,6 +32,11 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# ...but the maintained platform specs ARE the build inputs and must be tracked.
+# Without these committed, a clean clone cannot build the macOS bundle at all:
+# buildme_mac_app.sh runs `pyinstaller <spec>` against a file that would not exist.
+!packaging/Neight.windows.spec
+!packaging/Neight.macos.spec
 
 # Installer logs
 pip-log.txt
@@ -192,6 +197,12 @@ cython_debug/
 # Neight editor settings
 # User-specific configuration file with personal preferences, paths, and window state
 settings.json
+# Advisory lock guarding the settings read-modify-write between windows, and the
+# unique temp files atomic writes leave behind if a process is killed mid-write.
+*.lock
+*.tmp~
+# Dated autosave diagnostic logs written next to settings.json
+neight_autosave_*.log
 CODE_REVIEW_AND_SUGGESTIONS.md
 CHANGELOG.md
 deploylocal.bat
