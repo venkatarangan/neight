@@ -23,7 +23,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('../neight.icns', '.')],
-    hiddenimports=[],
+    # Pygments is reached only through Markdown's codehilite extension, which is
+    # itself loaded by name through entry points.  Naming it here guarantees
+    # PyInstaller's bundled hook-pygments runs and collects the lexers and styles
+    # it loads dynamically; without them code blocks ship unhighlighted.
+    hiddenimports=['pygments'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

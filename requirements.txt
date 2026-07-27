@@ -19,3 +19,8 @@ shiboken6==6.11.0
 
 # Markdown rendering for PDF export
 Markdown==3.10.2
+
+# Syntax highlighting inside fenced code blocks.  Markdown's codehilite
+# extension — requested for both the preview and PDF export — is a silent no-op
+# without it, so this is a runtime requirement, not a build tool.
+Pygments==2.20.0

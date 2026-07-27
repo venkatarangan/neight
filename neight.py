@@ -5235,7 +5235,8 @@ class Notepad(QMainWindow):
         family = font.family()
         size_pt = font.pointSize() if font.pointSize() > 0 else 12
 
-        if for_screen and self._is_dark_mode_active():
+        dark = for_screen and self._is_dark_mode_active()
+        if dark:
             fg, muted = "#e8eaed", "#9aa0a6"
             code_bg, rule = "#2a2d2e", "#5f6368"
             table_head_bg, border = "#35383a", "#5f6368"
@@ -5245,6 +5246,20 @@ class Notepad(QMainWindow):
             code_bg, rule = "#f4f4f4", "#cccccc"
             table_head_bg, border = "#f2f2f2", "#dddddd"
             link = "#1a73e8"
+
+        # The codehilite extension marks up code as <span class="k"> and friends;
+        # without Pygments' stylesheet those classes are invisible and highlighting
+        # silently does nothing.  The style is chosen per theme so code is never
+        # rendered dark-on-dark.  Pygments is a pinned dependency, but the app must
+        # still render if a source checkout lacks it.
+        highlight_css = ""
+        try:
+            from pygments.formatters import HtmlFormatter
+            highlight_css = HtmlFormatter(
+                style="monokai" if dark else "default"
+            ).get_style_defs(".codehilite")
+        except Exception:
+            pass
 
         # Qt's rich text supports roughly HTML4 + CSS 2.1.  Notably border-left
         # is ignored, so a blockquote is marked with a background tint and an
@@ -5263,6 +5278,7 @@ hr {{ height: 1px; background-color: {rule}; }}
 table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
 th, td {{ border: 1px solid {border}; padding: 8px; text-align: left; }}
 th {{ background-color: {table_head_bg}; }}
+{highlight_css}
 </style></head><body>
 {html_content}
 </body></html>"""
