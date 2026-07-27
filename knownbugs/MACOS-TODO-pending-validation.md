@@ -1,5 +1,10 @@
 # macOS TODO — Everything Pending
 
+> **This was worked through on 2026-07-27.** Results, the four bugs it found and the five
+> items that still need a person are in
+> [`MACOS-VALIDATION-RESULTS.md`](MACOS-VALIDATION-RESULTS.md). Read that first; this file
+> is kept as the record of what was asked for.
+
 **Written:** 2026-07-27 on Windows 11 · Python 3.12.10 · PySide6 6.11.0
 **Applies to:** `neight.py` @ 8,842 lines, `VERSION = "2026.066"`
 **Commits this covers:** `7b19c33` (settings/saving/input/build) and `e15bfd0` (Markdown preview)
