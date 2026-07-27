@@ -7071,18 +7071,33 @@ th {{ background-color: {table_head_bg}; }}
         self._sync_action_checked(self.line_numbers_act, line_numbers_visible)
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
 
+        # Keys below fall back to the CURRENT in-memory value rather than to a
+        # hardcoded literal, for the reason spelled out at update_check_on_launch
+        # near the end of this method: a saved Writer/Techie preset written before
+        # a setting existed does not carry its key, and a literal default would
+        # silently reset a choice the user had deliberately made.  Every attribute
+        # used as a fallback here is assigned in Notepad.__init__, so a fresh
+        # install with no settings file still lands on the documented default.
+
         # Auto-hide scrollbar
-        auto_hide_scrollbar = bool(data.get("auto_hide_scrollbar", False))
+        auto_hide_scrollbar = bool(data.get(
+            "auto_hide_scrollbar", getattr(self, "_auto_hide_scrollbar", False)
+        ))
         self._auto_hide_scrollbar = auto_hide_scrollbar
         self._sync_action_checked(self.auto_hide_scrollbar_act, auto_hide_scrollbar)
         self.editor.setAutoHideScrollbar(auto_hide_scrollbar)
 
         # Status bar item visibility
-        self._status_show_words = bool(data.get("status_show_words", True))
-        self._status_show_sentences = bool(data.get("status_show_sentences", True))
-        self._status_show_chars = bool(data.get("status_show_chars", True))
-        self._status_show_line = bool(data.get("status_show_line", True))
-        self._status_show_col = bool(data.get("status_show_col", True))
+        self._status_show_words = bool(data.get(
+            "status_show_words", getattr(self, "_status_show_words", True)))
+        self._status_show_sentences = bool(data.get(
+            "status_show_sentences", getattr(self, "_status_show_sentences", True)))
+        self._status_show_chars = bool(data.get(
+            "status_show_chars", getattr(self, "_status_show_chars", True)))
+        self._status_show_line = bool(data.get(
+            "status_show_line", getattr(self, "_status_show_line", True)))
+        self._status_show_col = bool(data.get(
+            "status_show_col", getattr(self, "_status_show_col", True)))
         self._sync_action_checked(self.status_words_act, self._status_show_words)
         self._sync_action_checked(self.status_sentences_act, self._status_show_sentences)
         self._sync_action_checked(self.status_chars_act, self._status_show_chars)
@@ -7110,35 +7125,49 @@ th {{ background-color: {table_head_bg}; }}
         _init_keyboard_choices(self._installed_imes)
         ime_count = len(self._installed_imes)
         if ime_count < 2:
+            # Nothing to switch between, so the stored preference is irrelevant.
             self._quick_switch_enabled = False
         else:
-            self._quick_switch_enabled = bool(data.get("quick_switch_enabled", True))
-        self._force_anjal_english = bool(data.get("force_anjal_english", True))
+            self._quick_switch_enabled = bool(data.get(
+                "quick_switch_enabled", getattr(self, "_quick_switch_enabled", True)
+            ))
+        self._force_anjal_english = bool(data.get(
+            "force_anjal_english", getattr(self, "_force_anjal_english", True)
+        ))
 
         # Appearance
-        raw_theme_mode = data.get("appearance_theme_mode", "follow_os")
-        raw_custom_bg = data.get("appearance_custom_bg", "#202124")
-        raw_custom_fg = data.get("appearance_custom_fg", "#f1f3f4")
+        raw_theme_mode = data.get(
+            "appearance_theme_mode", getattr(self, "_appearance_theme_mode", "follow_os"))
+        raw_custom_bg = data.get(
+            "appearance_custom_bg", getattr(self, "_appearance_custom_bg", "#202124"))
+        raw_custom_fg = data.get(
+            "appearance_custom_fg", getattr(self, "_appearance_custom_fg", "#f1f3f4"))
         self._appearance_theme_mode = self._normalize_theme_mode(raw_theme_mode)
         self._appearance_custom_bg = self._normalize_hex_color(raw_custom_bg, "#202124")
         self._appearance_custom_fg = self._normalize_hex_color(raw_custom_fg, "#f1f3f4")
         self._apply_theme_preferences()
 
         # Experimental features
-        self._unicode_substring_highlight = bool(data.get("unicode_substring_highlight", False))
+        self._unicode_substring_highlight = bool(data.get(
+            "unicode_substring_highlight", getattr(self, "_unicode_substring_highlight", False)))
         self._sync_action_checked(self.unicode_substring_highlight_act, self._unicode_substring_highlight)
-        self._reading_time_enabled = bool(data.get("reading_time_enabled", False))
+        self._reading_time_enabled = bool(data.get(
+            "reading_time_enabled", getattr(self, "_reading_time_enabled", False)))
         self.reading_time_label.setVisible(self._reading_time_enabled)
-        self._word_index_enabled = bool(data.get("word_index_enabled", False))
-        self._word_index_adaptive_density = bool(data.get("word_index_adaptive_density", True))
-        raw_word_index_color = data.get("word_index_color", "white")
+        self._word_index_enabled = bool(data.get(
+            "word_index_enabled", getattr(self, "_word_index_enabled", False)))
+        self._word_index_adaptive_density = bool(data.get(
+            "word_index_adaptive_density", getattr(self, "_word_index_adaptive_density", True)))
+        raw_word_index_color = data.get(
+            "word_index_color", getattr(self, "_word_index_color", "white"))
         overlay_defaults = self._word_index_visual_preset_for_color(raw_word_index_color)
         raw_backdrop_dark = data.get("word_index_backdrop_opacity_dark", overlay_defaults["backdrop_dark"])
         raw_backdrop_light = data.get("word_index_backdrop_opacity_light", overlay_defaults["backdrop_light"])
         raw_text_opacity = data.get("word_index_text_opacity", overlay_defaults["text"])
         raw_halo_dark = data.get("word_index_halo_opacity_dark", overlay_defaults["halo_dark"])
         raw_halo_light = data.get("word_index_halo_opacity_light", overlay_defaults["halo_light"])
-        raw_word_index_alignment = data.get("word_index_alignment", "right")
+        raw_word_index_alignment = data.get(
+            "word_index_alignment", getattr(self, "_word_index_alignment", "right"))
         raw_word_index_top_margin = data.get("word_index_top_margin", 20)
         self._word_index_backdrop_opacity_dark = self._normalize_opacity(raw_backdrop_dark, 72)
         self._word_index_backdrop_opacity_light = self._normalize_opacity(raw_backdrop_light, 64)
