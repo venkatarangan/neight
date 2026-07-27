@@ -39,7 +39,8 @@ from PySide6.QtWidgets import (
     QStatusBar, QWidget, QLabel, QFontDialog, QInputDialog, QDialog,
     QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QProgressBar, QDialogButtonBox, QButtonGroup, QRadioButton, QTextEdit, QComboBox,
-    QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip
+    QMenu, QCheckBox, QStyle, QSpinBox, QColorDialog, QPlainTextDocumentLayout, QToolTip,
+    QSplitter, QTextBrowser
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QPalette, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
@@ -449,90 +450,275 @@ def _activate_klid(klid: str) -> None:
 # Windows HKCU file-association helpers (no elevation needed)
 # ----------------------------------------------------------
 _NEIGHT_PROGID = "Neight.txt"
+_NEIGHT_MD_PROGID = "Neight.md"
+
+# File kinds Neight can register itself as an "Open With" handler for.
+#   kind -> (ProgID, friendly name, extensions)
+# Markdown uses its own ProgID so Explorer shows "Markdown Document" rather than
+# "Plain Text Document", and so the two registrations can be toggled separately.
+_WIN_FILE_KINDS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "text": (_NEIGHT_PROGID, "Plain Text Document", (".txt",)),
+    "markdown": (_NEIGHT_MD_PROGID, "Markdown Document", (".md", ".markdown")),
+}
 
 
-def _win_txt_association_registered() -> bool:
-    """Return True if Neight is registered in HKCU as an Open With handler for .txt."""
-    if sys.platform != "win32":
+def _win_association_registered(kind: str) -> bool:
+    """Return True if Neight is an HKCU 'Open With' handler for every extension of `kind`."""
+    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
         return False
+    progid, _label, extensions = _WIN_FILE_KINDS[kind]
     try:
         import winreg
-        key_path = r"Software\Classes\.txt\OpenWithProgids"
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.QueryValueEx(key, _NEIGHT_PROGID)
+        for ext in extensions:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}\OpenWithProgids"
+            ) as key:
+                winreg.QueryValueEx(key, progid)
         return True
     except (FileNotFoundError, OSError):
         return False
 
 
-def _win_register_txt_association() -> None:
-    """Register Neight in HKCU so it appears in the .txt 'Open With' list."""
-    if sys.platform != "win32":
+def _win_register_association(kind: str) -> None:
+    """Register Neight in HKCU so it appears in the 'Open With' list for `kind`."""
+    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
         return
     import winreg
+    progid, label, extensions = _WIN_FILE_KINDS[kind]
 
-    # Resolve exe path (works for both frozen and source-run)
-    exe_path = os.path.abspath(
-        sys.executable if getattr(sys, "frozen", False) else sys.argv[0]
-    )
+    # Build the open command.  For the frozen build this is just the exe; from a
+    # source checkout it must be "python.exe script.py", because registering the
+    # bare .py path only works if Python happens to own the .py association —
+    # and sys.argv[0] is not even a path under `python -c`.
+    if getattr(sys, "frozen", False):
+        open_command = f'"{os.path.abspath(sys.executable)}" "%1"'
+    else:
+        script = os.path.abspath(__file__)
+        open_command = f'"{os.path.abspath(sys.executable)}" "{script}" "%1"'
 
     # 1. Define the ProgID with a friendly name and open command
     with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{_NEIGHT_PROGID}"
+        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{progid}"
     ) as key:
-        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Plain Text Document")
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, label)
     with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER,
-        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open\command",
+        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{progid}\shell\open\command",
     ) as key:
-        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{exe_path}" "%1"')
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, open_command)
 
-    # 2. Register the ProgID under .txt OpenWithProgids
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, r"Software\Classes\.txt\OpenWithProgids"
-    ) as key:
-        winreg.SetValueEx(key, _NEIGHT_PROGID, 0, winreg.REG_NONE, b"")
+    # 2. Register the ProgID under each extension's OpenWithProgids
+    for ext in extensions:
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}\OpenWithProgids"
+        ) as key:
+            winreg.SetValueEx(key, progid, 0, winreg.REG_NONE, b"")
 
-    # 3. Notify the shell so Explorer picks up the change immediately
-    SHCNE_ASSOCCHANGED = 0x08000000
-    SHCNF_IDLIST = 0x0000
-    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+    _win_notify_shell_assoc_changed()
 
 
-def _win_unregister_txt_association() -> None:
-    """Remove the Neight HKCU .txt Open With registration."""
-    if sys.platform != "win32":
+def _win_unregister_association(kind: str) -> None:
+    """Remove the Neight HKCU 'Open With' registration for `kind`."""
+    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
         return
     import winreg
+    progid, _label, extensions = _WIN_FILE_KINDS[kind]
 
-    # Remove ProgID value from .txt\OpenWithProgids
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Classes\.txt\OpenWithProgids",
-            0,
-            winreg.KEY_SET_VALUE,
-        ) as key:
-            winreg.DeleteValue(key, _NEIGHT_PROGID)
-    except (FileNotFoundError, OSError):
-        pass
+    for ext in extensions:
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                rf"Software\Classes\{ext}\OpenWithProgids",
+                0,
+                winreg.KEY_SET_VALUE,
+            ) as key:
+                winreg.DeleteValue(key, progid)
+        except (FileNotFoundError, OSError):
+            pass
 
     # Remove the ProgID subtree (leaf-to-root order)
     for sub in (
-        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open\command",
-        rf"Software\Classes\{_NEIGHT_PROGID}\shell\open",
-        rf"Software\Classes\{_NEIGHT_PROGID}\shell",
-        rf"Software\Classes\{_NEIGHT_PROGID}",
+        rf"Software\Classes\{progid}\shell\open\command",
+        rf"Software\Classes\{progid}\shell\open",
+        rf"Software\Classes\{progid}\shell",
+        rf"Software\Classes\{progid}",
     ):
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
         except (FileNotFoundError, OSError):
             pass
 
-    # Notify the shell
+    _win_notify_shell_assoc_changed()
+
+
+def _win_notify_shell_assoc_changed() -> None:
+    """Tell Explorer associations changed so the change is visible immediately."""
+    if sys.platform != "win32":
+        return
     SHCNE_ASSOCCHANGED = 0x08000000
     SHCNF_IDLIST = 0x0000
-    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+    try:
+        ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+    except Exception:
+        pass
+
+
+# ----------------------------------------------------------
+# macOS Launch Services file-association helpers
+# ----------------------------------------------------------
+# Uniform Type Identifier for Markdown.  Declared in CFBundleDocumentTypes in
+# packaging/Neight.macos.spec, which is what lets Launch Services accept Neight
+# as a handler at all.
+_MACOS_MARKDOWN_UTI = "net.daringfireball.markdown"
+_MACOS_TEXT_UTI = "public.plain-text"
+_LS_ROLES_ALL = 0xFFFFFFFF
+
+
+def _macos_launch_services():
+    """Load CoreFoundation and LaunchServices, or return (None, None)."""
+    if sys.platform != "darwin":
+        return None, None
+    try:
+        import ctypes.util
+        cf_path = ctypes.util.find_library("CoreFoundation")
+        ls_path = ctypes.util.find_library("CoreServices")
+        cf = ctypes.CDLL(
+            cf_path or "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+        )
+        ls = ctypes.CDLL(
+            ls_path or "/System/Library/Frameworks/CoreServices.framework/CoreServices"
+        )
+        cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+        cf.CFStringCreateWithCString.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32
+        ]
+        cf.CFStringGetCString.restype = ctypes.c_bool
+        cf.CFStringGetCString.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32
+        ]
+        cf.CFRelease.restype = None
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        cf.CFBundleGetMainBundle.restype = ctypes.c_void_p
+        cf.CFBundleGetMainBundle.argtypes = []
+        cf.CFBundleGetIdentifier.restype = ctypes.c_void_p
+        cf.CFBundleGetIdentifier.argtypes = [ctypes.c_void_p]
+        ls.LSSetDefaultRoleHandlerForContentType.restype = ctypes.c_int32
+        ls.LSSetDefaultRoleHandlerForContentType.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p
+        ]
+        ls.LSCopyDefaultRoleHandlerForContentType.restype = ctypes.c_void_p
+        ls.LSCopyDefaultRoleHandlerForContentType.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint32
+        ]
+        return cf, ls
+    except Exception:
+        return None, None
+
+
+def _macos_bundle_identifier() -> str:
+    """Bundle identifier of the running app, or "" when not running from a bundle.
+
+    Launch Services identifies handlers by bundle ID, so this is empty — and the
+    association cannot be set — when Neight is run from source rather than from
+    the built Neight.app.
+    """
+    cf, _ls = _macos_launch_services()
+    if cf is None:
+        return ""
+    try:
+        bundle = cf.CFBundleGetMainBundle()
+        if not bundle:
+            return ""
+        ident = cf.CFBundleGetIdentifier(ctypes.c_void_p(bundle))
+        if not ident:
+            return ""
+        buf = ctypes.create_string_buffer(512)
+        if cf.CFStringGetCString(ctypes.c_void_p(ident), buf, 512, 0x08000100):
+            return buf.value.decode("utf-8", "replace")
+    except Exception:
+        pass
+    return ""
+
+
+def _macos_default_handler(uti: str) -> str:
+    """Bundle ID currently registered as the default handler for `uti`."""
+    cf, ls = _macos_launch_services()
+    if cf is None or ls is None:
+        return ""
+    cf_uti = None
+    handler = None
+    try:
+        cf_uti = cf.CFStringCreateWithCString(None, uti.encode("utf-8"), 0x08000100)
+        handler = ls.LSCopyDefaultRoleHandlerForContentType(
+            ctypes.c_void_p(cf_uti), _LS_ROLES_ALL
+        )
+        if not handler:
+            return ""
+        buf = ctypes.create_string_buffer(512)
+        if cf.CFStringGetCString(ctypes.c_void_p(handler), buf, 512, 0x08000100):
+            return buf.value.decode("utf-8", "replace")
+    except Exception:
+        pass
+    finally:
+        for ref in (cf_uti, handler):
+            if ref:
+                try:
+                    cf.CFRelease(ctypes.c_void_p(ref))
+                except Exception:
+                    pass
+    return ""
+
+
+def _macos_set_default_handler(uti: str, bundle_id: str) -> bool:
+    """Make `bundle_id` the default application for `uti`.  True on success.
+
+    Unlike Windows, macOS lets an application set itself as the default handler
+    through Launch Services, so this genuinely changes the default rather than
+    only adding an "Open With" entry.
+    """
+    cf, ls = _macos_launch_services()
+    if cf is None or ls is None or not bundle_id:
+        return False
+    cf_uti = cf_bundle = None
+    try:
+        cf_uti = cf.CFStringCreateWithCString(None, uti.encode("utf-8"), 0x08000100)
+        cf_bundle = cf.CFStringCreateWithCString(
+            None, bundle_id.encode("utf-8"), 0x08000100
+        )
+        status = ls.LSSetDefaultRoleHandlerForContentType(
+            ctypes.c_void_p(cf_uti), _LS_ROLES_ALL, ctypes.c_void_p(cf_bundle)
+        )
+        return status == 0
+    except Exception:
+        return False
+    finally:
+        for ref in (cf_uti, cf_bundle):
+            if ref:
+                try:
+                    cf.CFRelease(ctypes.c_void_p(ref))
+                except Exception:
+                    pass
+
+
+def _macos_markdown_is_default() -> bool:
+    """True when this Neight bundle is the default handler for Markdown."""
+    bundle_id = _macos_bundle_identifier()
+    if not bundle_id:
+        return False
+    return _macos_default_handler(_MACOS_MARKDOWN_UTI).lower() == bundle_id.lower()
+
+
+def _win_open_default_apps_settings() -> bool:
+    """Open the Windows 'Default apps' settings page.
+
+    Windows has blocked programmatic default-handler changes since Windows 8 —
+    the HKCU UserChoice value is protected by a hash the OS verifies, and forging
+    it is what malware does.  Registering the ProgID (above) is all an app may
+    legitimately do; making Neight *the default* is then one click by the user,
+    so the honest thing is to take them straight to the page.
+    """
+    if sys.platform != "win32":
+        return False
+    return QDesktopServices.openUrl(QUrl("ms-settings:defaultapps"))
 
 
 # ---------------------
@@ -2244,7 +2430,36 @@ class Notepad(QMainWindow):
         self._last_session_file = None
 
         self.editor = CodeEditor(self)
-        self.setCentralWidget(self.editor)
+
+        # Markdown preview lives beside the editor in an adjustable splitter.
+        # The editor keeps its own line-number area and Word Index overlay as
+        # child widgets, so re-parenting it into the splitter is safe.
+        self.preview = QTextBrowser(self)
+        self.preview.setOpenExternalLinks(True)
+        self.preview.setVisible(False)
+        self.preview.setObjectName("markdownPreview")
+
+        self.editor_splitter = QSplitter(Qt.Horizontal, self)
+        self.editor_splitter.addWidget(self.editor)
+        self.editor_splitter.addWidget(self.preview)
+        self.editor_splitter.setCollapsible(0, False)
+        self.editor_splitter.setCollapsible(1, False)
+        # Both panes share width growth evenly when the window is resized.
+        self.editor_splitter.setStretchFactor(0, 1)
+        self.editor_splitter.setStretchFactor(1, 1)
+        self.editor_splitter.setChildrenCollapsible(False)
+        self.setCentralWidget(self.editor_splitter)
+
+        self._markdown_preview_visible = False
+        self._preview_split_sizes: list[int] = []
+        # Debounce so the preview re-renders once the user pauses, not on every
+        # keystroke; above PREVIEW_LIVE_LIMIT_CHARS it stops re-rendering live.
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(300)
+        self._preview_timer.timeout.connect(self._refresh_markdown_preview)
+        self._preview_live = True
+        self._preview_stale = False
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
@@ -2471,6 +2686,21 @@ class Notepad(QMainWindow):
 
         self.export_text_pdf_act = QAction("Export Text to PDF…", self)
         self.export_md_pdf_act = QAction("Export Markdown to PDF…", self)
+
+        # Markdown preview.  Qt maps Ctrl to Command automatically on macOS, so
+        # one sequence gives Ctrl+Shift+M on Windows and Cmd+Shift+M on the Mac.
+        self.markdown_preview_act = QAction("Preview", self, checkable=True)
+        self.markdown_preview_act.setShortcut(QKeySequence("Ctrl+Shift+M"))
+        self.markdown_preview_act.setToolTip(
+            "Show the rendered Markdown beside the editor.\n"
+            "Drag the divider to resize. Available for .md files."
+        )
+        self.markdown_refresh_preview_act = QAction("Refresh Preview", self)
+        self.markdown_refresh_preview_act.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self.markdown_refresh_preview_act.setToolTip(
+            "Re-render the preview now. Used for large documents, where the "
+            "preview stops updating as you type."
+        )
 
         self.exit_act = QAction("E&xit", self)
         if sys.platform == "win32":
@@ -2743,7 +2973,13 @@ class Notepad(QMainWindow):
 
         # Markdown menu
         insert_menu = menubar.addMenu("&Markdown")
-        
+
+        # Preview first: it acts on the whole document, unlike the insert
+        # actions below which act at the cursor.
+        insert_menu.addAction(self.markdown_preview_act)
+        insert_menu.addAction(self.markdown_refresh_preview_act)
+        insert_menu.addSeparator()
+
         # Headings submenu
         headings_menu = insert_menu.addMenu("Heading")
         headings_menu.addAction(self.insert_h1_act)
@@ -2853,6 +3089,9 @@ class Notepad(QMainWindow):
         self.save_as_act.triggered.connect(self.save_file_as)
         self.export_text_pdf_act.triggered.connect(self._export_text_to_pdf)
         self.export_md_pdf_act.triggered.connect(self._export_markdown_to_pdf)
+        self.markdown_preview_act.toggled.connect(self._toggle_markdown_preview)
+        self.markdown_refresh_preview_act.triggered.connect(self._refresh_markdown_preview_now)
+        self.editor_splitter.splitterMoved.connect(self._on_preview_splitter_moved)
         self.exit_act.triggered.connect(self.close)
 
         # Edit
@@ -3277,6 +3516,8 @@ class Notepad(QMainWindow):
             # No file saved yet - hide both export options
             self.export_text_pdf_act.setVisible(False)
             self.export_md_pdf_act.setVisible(False)
+        # Preview follows the same extension rule as the Markdown export.
+        self._update_markdown_preview_availability()
 
     # --- Core features ---
     def new_file(self):
@@ -4904,6 +5145,227 @@ class Notepad(QMainWindow):
 
         dialog.exec()
 
+    # Markdown extensions used for BOTH preview and PDF export.
+    #
+    # sane_lists matters: without it python-markdown merges an ordered list that
+    # is immediately followed by a bulleted one into a single <ol>, flattening
+    # both.  That silently mis-rendered lists in exported PDFs.
+    MARKDOWN_EXTENSIONS = ('extra', 'codehilite', 'tables', 'toc', 'sane_lists')
+
+    # Markdown source larger than this re-renders on demand rather than live, so
+    # a debounced preview cannot stall the UI thread on a big document.
+    PREVIEW_LIVE_LIMIT_CHARS = 200_000
+
+    @staticmethod
+    def _markdown_task_lists_to_symbols(html_text: str) -> str:
+        """Render GitHub task list markers as check boxes.
+
+        Qt's rich-text engine has no <input type=checkbox>, so the raw "[ ]" and
+        "[x]" survive into the output as literal brackets.  Substituting the
+        box characters costs nothing and reads correctly in both preview and PDF.
+        """
+        # Markdown emits a tight item as "<li>[ ] text</li>" but a loose one —
+        # any list containing a blank line — as "<li><p>[ ] text</p></li>".
+        # Both shapes have to be handled or checkboxes appear in some lists only.
+        html_text = re.sub(r'(<li>\s*(?:<p>\s*)?)\[ \]\s*', r'\1☐ ', html_text)
+        return re.sub(r'(<li>\s*(?:<p>\s*)?)\[[xX]\]\s*', r'\1☑ ', html_text)
+
+    def _markdown_to_styled_html(self, markdown_text: str, *, for_screen: bool) -> Optional[str]:
+        """Convert Markdown to styled HTML for Qt's rich-text engine.
+
+        One renderer for the on-screen preview and the PDF export, so the two can
+        never drift: what the preview shows is what the PDF will contain.
+
+        ``for_screen`` selects theme-aware colours (the preview must not flash
+        white in dark mode) and a slightly roomier layout; the PDF keeps the
+        print-oriented palette.  Returns None when the markdown package is
+        unavailable, letting the caller fall back.
+        """
+        try:
+            import markdown
+        except ImportError:
+            return None
+
+        html_content = markdown.markdown(
+            markdown_text, extensions=list(self.MARKDOWN_EXTENSIONS)
+        )
+        html_content = self._markdown_task_lists_to_symbols(html_content)
+
+        font = self.editor.font()
+        family = font.family()
+        size_pt = font.pointSize() if font.pointSize() > 0 else 12
+
+        if for_screen and self._is_dark_mode_active():
+            fg, muted = "#e8eaed", "#9aa0a6"
+            code_bg, rule = "#2a2d2e", "#5f6368"
+            table_head_bg, border = "#35383a", "#5f6368"
+            link = "#8ab4f8"
+        else:
+            fg, muted = "#202124", "#666666"
+            code_bg, rule = "#f4f4f4", "#cccccc"
+            table_head_bg, border = "#f2f2f2", "#dddddd"
+            link = "#1a73e8"
+
+        # Qt's rich text supports roughly HTML4 + CSS 2.1.  Notably border-left
+        # is ignored, so a blockquote is marked with a background tint and an
+        # indent rather than the usual left bar.
+        return f"""<html><head><style>
+body {{ font-family: {family}; font-size: {size_pt}pt; color: {fg}; }}
+h1 {{ font-size: 2em; margin-top: 0.67em; margin-bottom: 0.67em; }}
+h2 {{ font-size: 1.5em; margin-top: 0.83em; margin-bottom: 0.83em; }}
+h3 {{ font-size: 1.17em; margin-top: 1em; margin-bottom: 1em; }}
+a {{ color: {link}; }}
+code {{ background-color: {code_bg}; padding: 2px 4px; font-family: monospace; }}
+pre {{ background-color: {code_bg}; padding: 10px; }}
+blockquote {{ background-color: {code_bg}; color: {muted};
+              margin-left: 0px; padding-left: 12px; padding-right: 12px; }}
+hr {{ height: 1px; background-color: {rule}; }}
+table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
+th, td {{ border: 1px solid {border}; padding: 8px; text-align: left; }}
+th {{ background-color: {table_head_bg}; }}
+</style></head><body>
+{html_content}
+</body></html>"""
+
+    # ------------------------------------------------------------------
+    # Markdown preview (split view)
+    # ------------------------------------------------------------------
+
+    def _current_file_is_markdown(self) -> bool:
+        """True when the open document is a Markdown file.
+
+        Preview is offered only for .md/.markdown, matching how Export Markdown
+        to PDF is already gated in _update_export_menu_visibility.
+        """
+        if not self.current_path:
+            return False
+        return Path(self.current_path).suffix.lower() in ('.md', '.markdown')
+
+    def _toggle_markdown_preview(self, enabled: bool) -> None:
+        """Show or hide the preview pane and remember the choice."""
+        enabled = bool(enabled)
+        if enabled and not self._current_file_is_markdown():
+            self._sync_action_checked(self.markdown_preview_act, False)
+            self.status.showMessage(
+                "Markdown preview is available for .md files — save this document as .md first",
+                4000,
+            )
+            return
+
+        if not enabled and self._markdown_preview_visible:
+            # Remember the divider position so re-opening restores the layout.
+            sizes = self.editor_splitter.sizes()
+            if len(sizes) == 2 and sizes[1] > 0:
+                self._preview_split_sizes = sizes
+
+        self._markdown_preview_visible = enabled
+        self.preview.setVisible(enabled)
+
+        if enabled:
+            self._apply_preview_split_sizes()
+            self._refresh_markdown_preview()
+            self.status.showMessage("Markdown preview shown", 2000)
+        else:
+            self._preview_timer.stop()
+            self.status.showMessage("Markdown preview hidden", 2000)
+
+        self._save_preferences()
+
+    def _apply_preview_split_sizes(self) -> None:
+        """Restore the saved divider position, defaulting to an even split."""
+        total = max(self.editor_splitter.width(), 400)
+        sizes = self._preview_split_sizes
+        if not (isinstance(sizes, list) and len(sizes) == 2
+                and all(isinstance(s, int) and s > 0 for s in sizes)):
+            sizes = [total // 2, total - total // 2]
+        else:
+            # Saved sizes come from a possibly different window width; scale them
+            # so the *ratio* is preserved rather than the absolute pixels.
+            saved_total = sizes[0] + sizes[1]
+            if saved_total > 0:
+                left = int(total * sizes[0] / saved_total)
+                sizes = [max(120, left), max(120, total - left)]
+        self.editor_splitter.setSizes(sizes)
+
+    def _schedule_preview_refresh(self) -> None:
+        """Queue a preview re-render after the user pauses typing."""
+        if not self._markdown_preview_visible:
+            return
+        if not self._preview_live:
+            # Large document: mark stale and let the user refresh explicitly
+            # rather than re-converting the whole file on every pause.
+            self._preview_stale = True
+            return
+        self._preview_timer.start()
+
+    def _refresh_markdown_preview(self) -> None:
+        """Re-render the preview from the current editor contents."""
+        if not self._markdown_preview_visible:
+            return
+        text = self.editor.toPlainText()
+
+        # Decide live vs on-demand from the document size, and say so once.
+        was_live = self._preview_live
+        self._preview_live = len(text) <= self.PREVIEW_LIVE_LIMIT_CHARS
+        if was_live and not self._preview_live:
+            self.status.showMessage(
+                "Large document — preview now updates on demand "
+                "(Markdown › Refresh Preview)", 6000,
+            )
+
+        # Keep the reader's place across a re-render.
+        scroll = self.preview.verticalScrollBar()
+        previous = scroll.value()
+        at_bottom = previous >= scroll.maximum() - 2
+
+        html_text = self._markdown_to_styled_html(text, for_screen=True)
+        if html_text is None:
+            self.preview.setPlainText(
+                "Markdown preview needs the 'markdown' package, which is not available "
+                "in this build."
+            )
+            return
+        self.preview.setHtml(html_text)
+        self.preview.setFont(self.editor.font())
+
+        scroll.setValue(scroll.maximum() if at_bottom
+                        else min(previous, scroll.maximum()))
+        self._preview_stale = False
+
+    def _refresh_markdown_preview_now(self) -> None:
+        """Manual refresh — also used to clear the stale state on large files."""
+        if not self._markdown_preview_visible:
+            self.status.showMessage("Markdown preview is not shown", 2000)
+            return
+        self._preview_timer.stop()
+        self._refresh_markdown_preview()
+        self.status.showMessage("Preview refreshed", 1500)
+
+    def _update_markdown_preview_availability(self) -> None:
+        """Enable/disable preview actions, and close the pane for non-Markdown files."""
+        is_md = self._current_file_is_markdown()
+        self.markdown_preview_act.setEnabled(is_md)
+        self.markdown_refresh_preview_act.setEnabled(is_md and self._markdown_preview_visible)
+        if not is_md and self._markdown_preview_visible:
+            self._sync_action_checked(self.markdown_preview_act, False)
+            self._toggle_markdown_preview(False)
+        elif is_md and self._markdown_preview_visible:
+            self._refresh_markdown_preview()
+
+    def _is_dark_mode_active(self) -> bool:
+        """True when the editor is currently showing a dark palette."""
+        mode = getattr(self, '_appearance_theme_mode', 'follow_os')
+        if mode == 'dark':
+            return True
+        if mode == 'light':
+            return False
+        if mode == 'custom':
+            return QColor(getattr(self, '_appearance_custom_bg', '#202124')).lightness() < 128
+        try:
+            return self._is_os_dark_mode()
+        except Exception:
+            return False
+
     def _export_markdown_to_pdf(self):
         """Export markdown file to PDF with proper rendering."""
         # Check if current file is .md
@@ -4962,35 +5424,13 @@ class Notepad(QMainWindow):
             
             markdown_text = self.editor.toPlainText()
             
-            if has_markdown:
-                # Convert markdown to HTML
-                html_content = markdown.markdown(
-                    markdown_text,
-                    extensions=['extra', 'codehilite', 'tables', 'toc']
-                )
-                
-                # Add basic CSS styling
-                styled_html = f"""
-                <html>
-                <head>
-                    <style>
-                        body {{ font-family: {self.editor.font().family()}; font-size: {self.editor.font().pointSize()}pt; }}
-                        h1 {{ font-size: 2em; margin-top: 0.67em; margin-bottom: 0.67em; }}
-                        h2 {{ font-size: 1.5em; margin-top: 0.83em; margin-bottom: 0.83em; }}
-                        h3 {{ font-size: 1.17em; margin-top: 1em; margin-bottom: 1em; }}
-                        code {{ background-color: #f4f4f4; padding: 2px 4px; font-family: monospace; }}
-                        pre {{ background-color: #f4f4f4; padding: 10px; overflow-x: auto; }}
-                        blockquote {{ border-left: 3px solid #ccc; margin-left: 0; padding-left: 10px; color: #666; }}
-                        table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
-                        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                        th {{ background-color: #f2f2f2; }}
-                    </style>
-                </head>
-                <body>
-                    {html_content}
-                </body>
-                </html>
-                """
+            styled_html = (
+                self._markdown_to_styled_html(markdown_text, for_screen=False)
+                if has_markdown else None
+            )
+            if styled_html is not None:
+                # Same renderer the on-screen preview uses, so the PDF cannot
+                # disagree with what the user just previewed.
                 doc.setHtml(styled_html)
             else:
                 # Fallback: simple text with basic markdown rendering
@@ -5482,38 +5922,126 @@ class Notepad(QMainWindow):
             warn_lbl.setStyleSheet("color: #d93025; margin-top: 4px;")
             layout.addWidget(warn_lbl)
 
-        # ── Experimental features section (Windows only) ──────────────────
-        if sys.platform == "win32":
-            exp_header = QLabel("Experimental Features", dialog)
-            exp_header.setStyleSheet("font-weight: 600; margin-top: 10px;")
-            layout.addWidget(exp_header)
+        # ── File associations ─────────────────────────────────────────────
+        if sys.platform in ("win32", "darwin"):
+            assoc_header = QLabel("File Associations", dialog)
+            assoc_header.setStyleSheet("font-weight: 600; margin-top: 10px;")
+            layout.addWidget(assoc_header)
 
-            chk_txt = QCheckBox("Always show Neight in 'Open With' for .txt files", dialog)
-            chk_txt.setChecked(_win_txt_association_registered())
-            chk_txt.setToolTip(
+        if sys.platform == "win32":
+            def _make_win_assoc_checkbox(kind: str, label: str, tip: str) -> QCheckBox:
+                box = QCheckBox(label, dialog)
+                box.setChecked(_win_association_registered(kind))
+                box.setToolTip(tip)
+
+                def _on_toggled(checked: bool) -> None:
+                    try:
+                        if checked:
+                            _win_register_association(kind)
+                        else:
+                            _win_unregister_association(kind)
+                    except Exception as exc:
+                        QMessageBox.warning(
+                            dialog,
+                            "Registration Error",
+                            f"Could not update file association:\n{exc}",
+                        )
+                    # Always resync from the registry: the write may have partly
+                    # succeeded, and the checkbox must show what is actually true.
+                    box.blockSignals(True)
+                    box.setChecked(_win_association_registered(kind))
+                    box.blockSignals(False)
+
+                box.toggled.connect(_on_toggled)
+                layout.addWidget(box)
+                return box
+
+            _make_win_assoc_checkbox(
+                "text",
+                "Show Neight in 'Open With' for .txt files",
                 "Registers Neight in your user account (no admin rights required).\n"
-                "Neight will appear in the right-click → Open With menu for .txt files."
+                "Neight will appear in the right-click → Open With menu for .txt files.",
+            )
+            _make_win_assoc_checkbox(
+                "markdown",
+                "Show Neight in 'Open With' for .md files",
+                "Registers Neight in your user account (no admin rights required).\n"
+                "Covers .md and .markdown files.",
             )
 
-            def _on_txt_assoc_toggled(checked: bool) -> None:
-                try:
-                    if checked:
-                        _win_register_txt_association()
-                    else:
-                        _win_unregister_txt_association()
-                except Exception as exc:
-                    QMessageBox.warning(
-                        dialog,
-                        "Registration Error",
-                        f"Could not update file association:\n{exc}",
-                    )
-                    # Revert checkbox to reflect actual state
-                    chk_txt.blockSignals(True)
-                    chk_txt.setChecked(_win_txt_association_registered())
-                    chk_txt.blockSignals(False)
+            # Windows deliberately prevents an application from making itself the
+            # default handler — the UserChoice registry value is hash-protected.
+            # Registering the ProgID above is the most an app may legitimately do,
+            # so point the user at the one place where they can confirm it.
+            default_note = QLabel(
+                "Windows only lets <i>you</i> choose the default app, not Neight. "
+                "After ticking the box above, open Default apps and set Neight for "
+                "<b>.md</b>.",
+                dialog,
+            )
+            default_note.setWordWrap(True)
+            default_note.setStyleSheet("color: palette(mid); margin-top: 2px;")
+            layout.addWidget(default_note)
 
-            chk_txt.toggled.connect(_on_txt_assoc_toggled)
-            layout.addWidget(chk_txt)
+            default_btn = QPushButton("Open Windows Default Apps settings…", dialog)
+            default_btn.clicked.connect(lambda: _win_open_default_apps_settings())
+            layout.addWidget(default_btn)
+
+        elif sys.platform == "darwin":
+            bundle_id = _macos_bundle_identifier()
+            if not bundle_id:
+                mac_note = QLabel(
+                    "Setting the default application requires the built "
+                    "<b>Neight.app</b>. Launch Services identifies handlers by "
+                    "bundle identifier, which a source checkout does not have.",
+                    dialog,
+                )
+                mac_note.setWordWrap(True)
+                mac_note.setStyleSheet("color: palette(mid);")
+                layout.addWidget(mac_note)
+            else:
+                is_default = _macos_markdown_is_default()
+                md_status = QLabel(dialog)
+                md_status.setWordWrap(True)
+
+                def _refresh_md_status() -> None:
+                    if _macos_markdown_is_default():
+                        md_status.setText("Neight <b>is</b> the default app for .md files.")
+                        md_btn.setEnabled(False)
+                    else:
+                        current = _macos_default_handler(_MACOS_MARKDOWN_UTI) or "none"
+                        md_status.setText(
+                            f"Default app for .md files: <b>{html.escape(current)}</b>"
+                        )
+                        md_btn.setEnabled(True)
+
+                md_btn = QPushButton("Open .md files with Neight", dialog)
+                md_btn.setToolTip(
+                    "Makes Neight the default application for Markdown files "
+                    "(net.daringfireball.markdown) via Launch Services."
+                )
+
+                def _on_set_md_default() -> None:
+                    if _macos_set_default_handler(_MACOS_MARKDOWN_UTI, bundle_id):
+                        self.status.showMessage(
+                            "Neight is now the default app for .md files", 4000
+                        )
+                    else:
+                        QMessageBox.warning(
+                            dialog,
+                            "Could Not Set Default",
+                            "macOS refused the change.\n\n"
+                            "This usually means Neight.app is not registered with "
+                            "Launch Services yet — move it to /Applications and "
+                            "launch it once from there, then try again.",
+                        )
+                    _refresh_md_status()
+
+                md_btn.clicked.connect(_on_set_md_default)
+                layout.addWidget(md_status)
+                layout.addWidget(md_btn)
+                _refresh_md_status()
+                del is_default
 
         btn_box = QDialogButtonBox(QDialogButtonBox.Close, dialog)
         btn_box.rejected.connect(dialog.reject)
@@ -6367,6 +6895,10 @@ class Notepad(QMainWindow):
 
         self.editor.viewport().update()
         self.editor.lineNumberArea.update()
+        # The preview's colours are baked into the generated CSS, so a theme
+        # change has to re-render it or it keeps the previous palette.
+        if getattr(self, '_markdown_preview_visible', False):
+            self._refresh_markdown_preview()
 
     def _make_menu_stylesheet(
         self, bg: str, bg_hov: str, border: str,
@@ -6610,6 +7142,26 @@ class Notepad(QMainWindow):
         self._restore_last_session = bool(reopen)
         self._sync_action_checked(self.reopen_last_act, self._restore_last_session)
 
+        # Markdown preview: remembered so re-opening a .md file restores the
+        # layout.  Falls back to the current value for the same reason the update
+        # check does — a preset written before this existed must not toggle it.
+        raw_split = data.get("markdown_preview_split")
+        if (isinstance(raw_split, list) and len(raw_split) == 2
+                and all(isinstance(s, int) and s > 0 for s in raw_split)):
+            self._preview_split_sizes = list(raw_split)
+        want_preview = bool(data.get(
+            "markdown_preview_visible",
+            getattr(self, "_markdown_preview_visible", False),
+        ))
+        # Applied only if the open document is Markdown; _update_markdown_preview_
+        # availability() re-evaluates this whenever the current file changes.
+        self._sync_action_checked(self.markdown_preview_act, want_preview)
+        self._markdown_preview_visible = False
+        if want_preview and self._current_file_is_markdown():
+            self._toggle_markdown_preview(True)
+        else:
+            self.preview.setVisible(False)
+
         # Automatic update check on launch (the app's only unprompted network use).
         # Falls back to the CURRENT value, not to True: presets and preset files
         # written before this setting existed do not carry the key, and defaulting
@@ -6812,6 +7364,8 @@ class Notepad(QMainWindow):
                 "last_opened_file": last_opened_file,
                 "reopen_last_file_on_launch": self._restore_last_session,
                 "update_check_on_launch": getattr(self, '_update_check_on_launch', True),
+                "markdown_preview_visible": bool(getattr(self, '_markdown_preview_visible', False)),
+                "markdown_preview_split": list(getattr(self, '_preview_split_sizes', []) or []),
                 "appearance_theme_mode": self._normalize_theme_mode(
                     getattr(self, '_appearance_theme_mode', 'follow_os')
                 ),
@@ -7840,6 +8394,9 @@ class Notepad(QMainWindow):
 
         font.setPointSize(new_size)
         self.editor.setFont(font)
+        # The preview embeds the editor font in its CSS, so zooming must reflow it.
+        if getattr(self, '_markdown_preview_visible', False):
+            self._schedule_preview_refresh()
         # Persist once the gesture goes quiet rather than on every step — a fast
         # scroll otherwise produced a settings write per point of size change.
         self._font_size_save_timer.start()
@@ -7867,8 +8424,20 @@ class Notepad(QMainWindow):
         modified = "*" if self.editor.document().isModified() else ""
         self.setWindowTitle(f"{name}{modified} - Neight")
 
+    def _on_preview_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Remember a divider the user dragged, and persist it when they settle."""
+        if not self._markdown_preview_visible:
+            return
+        sizes = self.editor_splitter.sizes()
+        if len(sizes) == 2 and all(s > 0 for s in sizes):
+            self._preview_split_sizes = sizes
+            # Reuse the zoom debounce timer's idea of "gesture finished" — one
+            # settings write per drag rather than one per pixel of movement.
+            self._font_size_save_timer.start()
+
     def _on_text_changed(self):
         self._schedule_status_update()
+        self._schedule_preview_refresh()
         # Invalidate the same-word cache so a post-edit highlight scan always runs.
         self._current_highlight_word = None
         # Route through the 80 ms timer rather than scanning inline.  A direct

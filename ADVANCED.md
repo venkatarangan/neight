@@ -302,6 +302,32 @@ It falls back to a per-user location only when the app folder cannot be written 
 
 > Modifying settings files by hand is supported but proceed with care — a corrupted file is caught on startup with a recovery prompt.
 
+### File associations
+
+**Help → Debug Info** has a **File Associations** section for opening `.txt` and `.md` files with Neight. The two platforms behave differently, because their operating systems allow different things.
+
+#### Windows
+
+Two checkboxes register Neight in your user account only — no administrator rights are needed, and nothing outside `HKEY_CURRENT_USER` is touched:
+
+- **Show Neight in 'Open With' for .txt files**
+- **Show Neight in 'Open With' for .md files** — covers `.md` and `.markdown`
+
+Ticking a box makes Neight appear in the right-click → **Open With** menu. It does **not** make Neight the default application, and no application is allowed to do that on Windows: since Windows 8 the setting that records your default app is protected by a hash the operating system verifies, specifically so that software cannot silently take over your file types.
+
+So the last step is yours. The **Open Windows Default Apps settings…** button takes you straight to the right page, where you can set Neight for `.md` in one click.
+
+Unticking a box removes the registration completely, including the ProgID it created.
+
+#### macOS
+
+macOS *does* let an application register itself as the default handler, through Launch Services. Debug Info shows which application currently owns `.md`, and **Open .md files with Neight** switches it to Neight.
+
+Two conditions apply:
+
+- It works only for the built **Neight.app**, not a source checkout. Launch Services identifies handlers by bundle identifier, which a plain Python run does not have — Debug Info says so if that is your situation.
+- `Neight.app` must be registered with Launch Services. If macOS refuses the change, move the app to `/Applications`, launch it once from there, and try again.
+
 ### Preset files
 
 User mode presets (see [Save Presets](#save-presets-power-user-feature) above) are stored separately from `settings.json`:

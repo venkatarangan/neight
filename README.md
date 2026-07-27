@@ -83,13 +83,16 @@ The status bar shows — per your preferences — word count, sentence count, ch
 
 ### Markdown support
 
-All Markdown shortcuts live in the **Markdown** menu:
+All Markdown features live in the **Markdown** menu:
 
+- **Live split preview** (`Ctrl+Shift+M`, `⌘⇧M` on macOS) — the rendered document sits beside the editor, with a divider you can drag to any ratio. It updates as you type and follows your light/dark theme and editor font. Available for `.md` and `.markdown` files.
 - Headings `Ctrl+1`–`Ctrl+6`, bold, italic, bold italic
 - Lists (unordered, ordered, checkbox), quotes, code blocks, strikethrough, highlight
 - Table templates, horizontal rules
 - Hyperlink and image insertion with URL validation
 - Smart tag replacement — changing a heading level or style removes old markers before inserting new ones
+
+The preview uses the same renderer as **Export Markdown to PDF**, so what you see is what the PDF will contain. On a very large document it stops re-rendering as you type and switches to **Markdown → Refresh Preview** (`Ctrl+Shift+R`), so typing never stalls.
 
 > **Privacy note:** URL validation makes a single HEAD request only when you explicitly click **Validate URL**. Your text never leaves your device. The only request Neight makes on its own is the launch update check described above, which can be switched off in **Settings → Check for Updates on Launch**. See [PRIVACY.md](PRIVACY.md).
 
@@ -123,7 +126,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 |---|---|
 | **File** | New, New Window, Open, Save, Save As, Export Text to PDF, Export Markdown to PDF, View Recovery Folder, Empty Recovery Folder, Exit |
 | **Edit** | Undo/Redo, clipboard, Find, Find Next, Replace, Replace All, Go To, Time/Date, Search with Google, Select All, blank-line tools, Normalize Unicode |
-| **Markdown** | All Markdown insertion shortcuts — headings, lists, formatting, links, tables |
+| **Markdown** | Preview, Refresh Preview, and all Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Word Wrap |
 | **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
 | **Settings** | Continue where you left off, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
@@ -153,6 +156,8 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 | Language Switch | Double Ctrl (Win/Linux) or Double ⌃ Control (macOS) |
 | Switch to layout 1 / 2 | Ctrl+, / Ctrl+. |
 | Markdown menu | Alt+M |
+| Markdown Preview (split view) | Ctrl+Shift+M (⌘⇧M on macOS) |
+| Refresh Preview | Ctrl+Shift+R |
 | Heading 1–6 | Ctrl+1 to Ctrl+6 |
 | Bold / Italic / Bold Italic | Ctrl+B / Ctrl+I / Ctrl+Shift+B |
 | Code Block | Ctrl+Shift+K |

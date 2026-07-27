@@ -123,7 +123,38 @@ undocumented. Files are now inspected on open and the conversion announced.
 saving will convert them, and **Help → Debug Info** should show the detected format. A file
 that is already UTF-8 + LF must produce **no** notice and must round-trip byte-identically.
 
-### A7. Keyboard-layout switching is unaffected
+### A7. Markdown split preview — new feature, needs a look on the Mac
+
+**Markdown → Preview**, `⌘⇧M`. Editor on the left, rendered Markdown on the right, divider draggable to any ratio. Available for `.md`/`.markdown` only. `⌘⇧R` refreshes.
+
+Verified on Windows in both light and dark themes; the renderer is Qt's own rich-text engine (`QTextDocument` in a `QTextBrowser`) — the same one that already produces your PDFs, so no new dependency and no size increase.
+
+**Test:**
+1. Open a `.md` file with mixed Tamil and English. `⌘⇧M` should split the window.
+2. Confirm **`⌘⇧M` is what actually fires** — Qt maps `Ctrl` to `Command` automatically, but this has not been exercised on a Mac keyboard. Also check it does not collide with anything system-level.
+3. Drag the divider, quit, reopen the file — the ratio should be restored.
+4. Type: the preview should follow after a short pause.
+5. Switch between light and dark (Settings → Appearance). The preview must re-render in the new palette, not stay light.
+6. Zoom with `⌘+`/`⌘-` or a pinch — the preview text should resize with the editor.
+7. Open a `.txt` file — the preview must close and the menu item grey out.
+8. Check Tamil rendering in the preview: headings, table cells, and deep marks (`ஶ்ரீ`, `ஞூ`, `கூ`).
+9. Open a large `.md` (>200 KB). The status bar should say the preview has switched to on-demand, and typing must stay fluid.
+
+### A8. Make Neight the default app for .md — macOS-only code path
+
+**Help → Debug Info → File Associations** now has **Open .md files with Neight**. This calls `LSSetDefaultRoleHandlerForContentType` through ctypes and **has never run on macOS**. The Windows side of the same feature is tested; this half is not.
+
+**Test:**
+1. Open Debug Info. It should report the current default handler for `.md`.
+2. If you are running from source, it should instead say the built app is required — Launch Services identifies handlers by bundle identifier, which a source run lacks. Confirm that message appears rather than a crash or a silent failure.
+3. From the built `Neight.app` in `/Applications`: click the button, then confirm in Finder that a `.md` file's Get Info shows Neight, and that double-clicking one opens Neight.
+4. Re-open Debug Info — it should now say Neight *is* the default and disable the button.
+
+**If it fails:** the likely causes are (a) the app not yet registered with Launch Services — launch it once from `/Applications` first; (b) the `net.daringfireball.markdown` UTI not being claimed, which depends on `CFBundleDocumentTypes` in `packaging/Neight.macos.spec` (see B1 — that spec has never been built); or (c) `LSSetDefaultRoleHandlerForContentType` returning non-zero, which the code reports as a refusal. Log the returned `OSStatus` if you need to dig in.
+
+Note this is deprecated API on macOS 12+. It still functions, but the modern replacement is `NSWorkspace.setDefaultApplicationAtURL:toOpenContentType:`, which would need PyObjC — a new dependency the project does not currently have.
+
+### A9. Keyboard-layout switching is unaffected
 
 Nothing in the macOS TIS/CoreFoundation code was touched, but the Keyboards dialog now
 persists through the shared save path instead of a bespoke whole-file write.
@@ -292,3 +323,5 @@ For context when reviewing. Full detail in
 | Performance | Highlight scans coalesced — a 20-edit burst ran 20 whole-document scans at ~35 ms each, now 1 |
 | Privacy | `update_check_on_launch` preference (default on); `PRIVACY.md`, `docs/index.html`, `README.md` corrected — they claimed "0 network calls" while the app called GitHub on every launch |
 | Build | Both PyInstaller specs committed under `packaging/`; scripts point at them; dependencies pinned and split runtime/dev; CI extended |
+| Markdown | Split-view live preview (`⌘⇧M`), sharing one renderer with PDF export so the two cannot disagree; `sane_lists` added, which also fixes an existing bug where PDF export merged an ordered list into a following bulleted one |
+| Associations | `.md`/`.markdown` "Open With" registration on Windows plus a button to the Default Apps page; Launch Services default-handler support on macOS |
