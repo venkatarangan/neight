@@ -4,7 +4,7 @@
 **Environment:** Python 3.14.6 · PySide6 6.11.1 · Markdown 3.10.2 · Pygments 2.20.0
 **Covers:** [`MACOS-TODO-pending-validation.md`](MACOS-TODO-pending-validation.md) and the
 Part C decisions it left open
-**Starting point:** `74831d3` · **Ending point:** `b13d370`
+**Starting point:** `74831d3` · **Ending point:** `42563d7`
 
 This records what was actually executed on real Apple hardware, what it found, and what
 still cannot be verified without a person at the keyboard. The companion TODO describes
@@ -17,15 +17,16 @@ Note the environment drift from the Windows work, which was Python 3.12.10 / PyS
 
 ## Summary
 
-Everything scriptable in Parts A and B was verified and passes. Four real bugs were found
-that the Windows-side work could not have caught, two of them silent text corruption. All
-four Part C decisions were taken and implemented. A regression suite now exists and runs in
-CI, so none of this depends on remembering to re-check by hand.
+Everything scriptable in Parts A and B was verified and passes. Five real bugs were found
+that the Windows-side work could not have caught, two of them silent text corruption and
+one of them a CI suite that had never actually been green. All four Part C decisions were
+taken and implemented. A regression suite now exists and runs green in CI on both
+platforms, so none of this depends on remembering to re-check by hand.
 
 | | |
 |---|---|
-| Bugs found and fixed | 4 |
-| Automated checks now committed | 759 (67 text integrity + 692 cursor/layout) |
+| Bugs found and fixed | 5 |
+| Automated checks now committed | 762 (3 startup + 67 text integrity + 692 cursor/layout) |
 | Ad-hoc checks run during validation | ~7,700 cursor round trips on a 10,000-line document |
 | Still requires manual testing | 5 items (trackpad, keyboard, Finder) |
 
@@ -66,7 +67,28 @@ be version zero — which also breaks any update comparison based on the bundle 
 spec now reads `VERSION` out of `neight.py` at build time. This is exactly what **B1** was
 written to catch, and it could only be caught by running the build.
 
-### 4. The status bar used a Tamil font for all text — `be08576`
+### 4. CI had never been green, and the Windows guard had never run — `42563d7`
+
+Found by pushing: the workflow was failing on every run, including well before this
+session. Two independent faults.
+
+On **Windows** the startup font guard was an inline heredoc (`python - <<'PY'`). PowerShell
+is the default shell on that runner and cannot parse it, so the job died with a
+`ParserError` before executing a single check — since the workflow was first written.
+
+On **macOS** the guard wrote `settings.json` next to the script, which stopped being the
+store once C1 moved settings to Application Support. The app read an empty store and fell
+back to defaults. This one is a regression introduced by C1 during this session; it is also
+the reason the guard's final assertion on the loaded font matters, because without it a
+guard writing to the wrong location keeps passing while testing nothing.
+
+Moved to `tests/test_startup_settings.py`, which points the store at a temporary file so it
+is correct on every platform and never touches the settings of whoever runs it. As a
+committed script it runs locally too, which is how this would have been caught before
+pushing. Confirmed it fails when the settings are not actually loaded. **All four CI jobs
+now pass for the first time.**
+
+### 5. The status bar used a Tamil font for all text — `be08576`
 
 `self.status.setFont()` set Tamil Sangam MN as the *sole* family, so ordinary Latin status
 text (`Words: 0`, `Ln 1`, `Col 1`) rendered in Tamil Sangam MN's Latin glyphs instead of
@@ -193,6 +215,7 @@ backup.**
 `.github/workflows/checks.yml` runs it on Windows and macOS.
 
 ```bash
+QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 ```
@@ -251,6 +274,8 @@ These cannot be automated on this machine and remain genuinely unverified:
 | `b778ce6` | Stop tracking release binaries in git; point downloads at Releases (C4) |
 | `79a8bc0` | Stop rewriting the user's characters on save |
 | `b13d370` | Add a committed regression suite and run it in CI |
+| `cd85b34` | Record the macOS validation results (this file) |
+| `42563d7` | Fix CI: the startup font guard was passing vacuously or not running |
 
 Dependencies were also upgraded and pinned at the start of the run: PySide6 / shiboken6
 6.11.1, PyInstaller 6.21.0, Pillow 12.3.0, plus `python-pptx==1.0.2`, which `make_slides.py`
