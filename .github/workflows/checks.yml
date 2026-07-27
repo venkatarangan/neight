@@ -40,63 +40,17 @@ jobs:
           print('constructed OK on', sys.platform)
           "
 
-      # Regression guard for the multi-window font loss (knownbugs/Issues to fix.md).
-      # Applying settings used to emit action toggled() signals whose handlers
-      # saved the half-applied window — writing Qt's default font over the stored
-      # one, because the font is applied at the end of that method.
-      #
-      # Checking every write rather than the final file contents: a legitimate
-      # first-run seeding write happens for an incomplete settings file, and a
-      # later write can repair an earlier bad one, masking the bug depending on
-      # which keys the settings file happens to hold.  The invariant that matters
-      # is that no write during startup may carry a font the user never chose.
-      - name: Startup must never persist a font the user did not choose
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONIOENCODING: utf-8
-        run: |
-          python - <<'PY'
-          import json, pathlib, sys
-          import neight
-
-          STORED_FAMILY, STORED_SIZE = 'Courier New', 17
-          # Every one of these differs from its QAction construction default, so
-          # each would emit toggled() while settings are being applied.
-          pathlib.Path('settings.json').write_text(json.dumps({
-              'font_family': STORED_FAMILY, 'font_size': STORED_SIZE,
-              'unicode_substring_highlight': True,
-              'word_wrap': False,
-              'line_numbers_visible': False,
-              'status_show_words': False,
-          }), encoding='utf-8')
-
-          writes = []
-          original_save = neight.SettingsManager.save
-          neight.SettingsManager.save = lambda self, data: (
-              writes.append((data.get('font_family'), data.get('font_size')))
-              or original_save(self, data))
-
-          app = neight.NeightApplication(sys.argv)
-          win = neight.Notepad(initial_file=None, restore_last_session=False)
-
-          bad = [w for w in writes if w != (STORED_FAMILY, STORED_SIZE)]
-          if bad:
-              print(f'::error::startup persisted a font the user never chose: {bad} '
-                    f'(all writes: {writes})')
-              sys.exit(1)
-          font = win.editor.font()
-          assert font.family() == STORED_FAMILY, font.family()
-          assert font.pointSize() == STORED_SIZE, font.pointSize()
-          print(f'startup made {len(writes)} write(s), all preserving the stored font')
-          PY
-
-      # Opening and saving must not alter the user's characters, and the cursor,
-      # the painted caret and a click must all agree on the same visual line.
+      # These live in tests/ rather than inline here so they can be run locally,
+      # which is the only way a change that breaks one gets noticed before it is
+      # pushed.  The startup guard was previously an inline heredoc: PowerShell
+      # is the default shell on the Windows runner and could not parse it, so
+      # that half of the matrix had never actually executed the check.
       - name: Regression suite
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONIOENCODING: utf-8
         run: |
+          python tests/test_startup_settings.py
           python tests/test_text_integrity.py
           python tests/test_cursor_layout.py
 
