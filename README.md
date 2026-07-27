@@ -14,8 +14,8 @@
 
 ### Download
 
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/blob/main/dist/Neight.exe) (~51 MB)
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/blob/main/stable/Neight-mac-arm64-signed.zip) (~40 MB, recommended)
+- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~51 MB)
+- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-signed.zip) (~40 MB, recommended)
 
 ### Install on Windows
 

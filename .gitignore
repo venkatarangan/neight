@@ -6,7 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
-#dist/
+# Build output. Release binaries are published to GitHub Releases, not
+# committed here — see release_macos.sh / release_windows.ps1.
+dist/
+stable/
 
 # Distribution / packaging
 .Python
@@ -213,6 +216,4 @@ deploylocal.bat
 
 # macOS app bundle artifacts
 *.app/
-dist/*.app/
-dist/Neight/
 make_slides.py
