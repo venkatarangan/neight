@@ -23,6 +23,7 @@ def run(app, win):
     """Text integrity"""
     editor = win.editor
     tmp = pathlib.Path(tempfile.mkdtemp())
+    native_newline = "\r\n" if win.NATIVE_NEWLINE == "CRLF" else "\n"
 
     # The document text used by every save path must be exactly what went in.
     for name, text in {
@@ -44,7 +45,7 @@ def run(app, win):
         editor.setPlainText(text)
         equal(editor.documentText(), text, f"document round trip for {name}")
 
-    # Opening then saving an already-normalised file must not touch a byte.
+    # Opening then saving a file already using the native newline must not touch a byte.
     for name, text in {
         "utf-8 lf": f"{TAMIL}\nsecond line\n",
         "no trailing newline": f"{TAMIL}\nsecond line",
@@ -55,7 +56,7 @@ def run(app, win):
         "emoji": "hi 👋🏽 👨‍👩‍👧‍👦\n",
     }.items():
         path = tmp / f"roundtrip_{name.replace(' ', '_').replace('-', '_')}.txt"
-        original = text.encode("utf-8")
+        original = text.replace("\n", native_newline).encode("utf-8")
         path.write_bytes(original)
         if not check(win._open_file_path(path, notify_errors=False, show_status=False),
                      f"could not open {name}"):
@@ -88,7 +89,7 @@ def run(app, win):
     # A file that genuinely contains a NUL is pathological, but rewriting the
     # user's bytes is worse than opening it as-is.
     path = tmp / "with_nul.txt"
-    original = b"before\x00after\n"
+    original = b"before\x00after" + native_newline.encode("ascii")
     path.write_bytes(original)
     if check(win._open_file_path(path, notify_errors=False, show_status=False),
              "UTF-8 file containing a NUL could not be opened"):
