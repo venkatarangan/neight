@@ -146,6 +146,66 @@ Step 4 — Publish to GitHub:
 
 ---
 
+## Why `dist/` Isn't on GitHub
+
+`dist/` is gitignored on `main`, and has been since 2026-07-27. It didn't
+start that way: `dist/` and `stable/` used to be committed directly, which
+meant 127 MB of binaries — 2.68 GB once every past build was counted across
+history — so a plain `git clone` pulled down every `.app` and `.exe` ever
+built, and every release commit was an opaque binary diff. History was
+rewritten with `git-filter-repo` to strip both directories from every commit.
+Nothing was lost — every binary had already been published to GitHub
+Releases — but see `knownbugs/MACOS-VALIDATION-RESULTS.md` (decision C4) for
+the full account, including the safety branch kept in case anything turned
+out to be missing.
+
+The practical effect: cloning `main` today gets you a source checkout only.
+Binaries live in two places instead —
+
+- **GitHub Releases**, for end users — `releases/latest/download/<asset>`,
+  which is what the website and `README.md` link to, and always resolves to
+  whatever was published most recently regardless of what's in the tree.
+- **The `dist-latest` branch**, for one specific machine consumer, described
+  next.
+
+### The `dist-latest` branch
+
+An external code-signing workflow (outside this repo) needs to fetch the
+freshly built, *unsigned* Mac and Windows artifacts before they're signed and
+released. It does that over a plain `raw.githubusercontent.com` URL — which,
+unlike a Release asset, only ever serves a file that is actually committed to
+some branch. `dist/` being gitignored on `main` breaks that fetch, and
+committing binaries back onto `main` to fix it would undo the entire point of
+the rewrite above.
+
+`dist-latest` is a separate branch, unrelated to `main`'s history, that exists
+solely to hold the *current* Mac and Windows build artifacts, at these fixed
+URLs:
+
+```
+https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip
+https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe
+```
+
+Both `buildme_mac_app.sh` and `buildme.bat` publish to it automatically, as
+the last step of every successful build — nothing to run separately. Each
+publish **amends** the branch's one existing commit and force-pushes, rather
+than adding a new commit on top, so the branch is always exactly one commit
+holding only the current binaries. Without that, it would slowly turn into
+the same kind of binary graveyard `main` used to be, just one branch over. The
+macOS and Windows steps each touch only their own file, so either script can
+run independently — on its own machine, at its own time — without clobbering
+whatever the other has already published. Both run inside a throwaway
+temporary clone, so the real working tree (checked out on `main`) is never
+touched, and a publish failure — no network, no `origin` remote — is reported
+but does not fail the build; the app is already built (and, on macOS, signed)
+by that point regardless.
+
+There is nothing to merge or review on this branch. It's a side channel for
+one external consumer, not something that ever becomes part of `main`.
+
+---
+
 ## Installing an Unsigned macOS Build
 
 Unsigned builds are intended for developers and testers only. If macOS Gatekeeper blocks the app, run this once in Terminal after copying the app to `/Applications`:
@@ -258,9 +318,14 @@ design/                — icon generators and architecture infographic source
 knownbugs/             — documented Qt-level bugs, validation runs and fix records
 tests/                 — regression suite, run in CI on Windows and macOS
 screenshots/           — screenshots used in documentation
-stable/                — signed macOS release zips (untracked; see CHANGELOG 2026.070)
+dist/                  — build output (gitignored — see "Why dist/ Isn't on GitHub")
+stable/                — signed macOS release zips (gitignored — see CHANGELOG 2026.070)
 CHANGELOG.md           — what changed in each build, tagged by platform
 ```
+
+Also on GitHub: a `dist-latest` branch, unrelated to `main`'s history, that
+exists only to hold the current unsigned Mac and Windows build artifacts for
+an external code-signing workflow. See "Why `dist/` Isn't on GitHub" above.
 
 ### Regression suite
 

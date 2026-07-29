@@ -1,0 +1,260 @@
+# Changelog
+
+Notable changes to Neight. Newest first.
+
+Platform tags mark where a fix applies: **[Windows]**, **[macOS]**, **[Both]**.
+Anything untagged is cross-platform.
+
+---
+
+## 2026.073 — 2026-07-29
+
+Build tooling only — no application code changed, so nothing here affects the
+running app.
+
+### Infrastructure
+
+- **`buildme_mac_app.sh` and `buildme.bat` now publish the freshly built,
+  unsigned artifact to a `dist-latest` branch on every successful build.** An
+  external code-signing workflow fetches the unsigned build over a plain
+  `raw.githubusercontent.com` URL, which only serves a file actually committed
+  to *some* branch — `dist/` itself stays gitignored on `main`, on purpose
+  (see 2026.070 below). Each publish amends the branch's one existing commit
+  and force-pushes rather than adding a new one, so it never accumulates old
+  binaries: always exactly one commit, always just the current Mac and Windows
+  artifacts. Either script can run independently, on its own machine, without
+  clobbering what the other already published. Best-effort — a publish
+  failure is reported but does not fail the build. Full detail in
+  [`DEVELOPER.md`](DEVELOPER.md#the-dist-latest-branch).
+
+---
+
+## 2026.072 — 2026-07-29
+
+Refines the BOM-less UTF-16/32 detection added in 2026.070, and fixes a
+platform gap in the test suite that was hiding a class of failure on Windows.
+
+### Fixed
+
+- **BOM-less UTF-16/32 detection tightened.** **[Both]** The heuristic added
+  in 2026.070 — skip a decode that leaves NUL bytes between characters, prefer
+  a wide encoding instead — could itself misclassify a genuine UTF-8 file that
+  happens to contain a real NUL. A new check confirms the NULs actually fall
+  in a consistent lane (every other byte for UTF-16, every fourth for UTF-32)
+  before accepting that decode, so a UTF-8 file with a stray NUL is no longer
+  at risk of being reinterpreted as wide text.
+
+### Infrastructure
+
+- **The text-integrity test suite now checks the platform's actual newline,
+  not an assumed `\n`.** **[Windows]** The "opening and re-saving an
+  already-correct file must not touch a byte" fixtures were built against a
+  bare LF, which is not what "already correct" means on Windows — Neight
+  normalises to CRLF there. The fixtures now build against
+  `Notepad.NATIVE_NEWLINE`, so the suite exercises what it claims to on both
+  platforms rather than only ever proving the Windows path with Unix newlines.
+
+---
+
+## 2026.071 — 2026-07-29
+
+Trackpad zoom and click handling. Six defects, all in event bookkeeping rather
+than layout. Full detail in
+[`knownbugs/TRACKPAD-ZOOM-AND-CLICK-FIXES.md`](knownbugs/TRACKPAD-ZOOM-AND-CLICK-FIXES.md).
+
+### Fixed
+
+- **Triple-click-to-search was inverted.** **[Both]** The feature never fired on
+  a real triple click, and *did* fire on ordinary clicks used to move the caret
+  around a long document — selecting a word you had not selected and opening a
+  browser. Qt delivers the second click of a double click as
+  `MouseButtonDblClick`, not `MouseButtonPress`, so the old press-counting
+  handler could only ever reach two. It also had no distance test, so with
+  macOS's 500 ms double-click interval any three quick clicks, however far
+  apart, were stitched together; typing in between did not reset it either.
+  Now built on Qt's own model — the third click must fall within the drag slop
+  of a genuine double click, and typing, scrolling or focus loss ends the
+  sequence.
+- **Clicking no longer disturbs Qt's selection state.** **[Both]** The old
+  handler returned early without calling `super().mousePressEvent()`, so
+  `QWidgetTextControl` never saw the press.
+- **Reversing wheel-zoom direction was damped.** **[Both]** After zooming in,
+  the first several notches of zoom-out only paid off banked travel — five
+  notches down against three up. Both directions now cost the same.
+- **Trackpads were zoomed on the mouse-wheel scale.** **[macOS]** The
+  pixel-precise path only ran when `angleDelta` was exactly zero, which on macOS
+  it never is. `pixelDelta` now takes precedence when present.
+- **Zoom accumulation had no gesture boundary.** **[Both]** A partial step banked
+  in one gesture ate the start of the next, possibly minutes later. A 250 ms
+  quiet gap now ends a gesture.
+- **Pinch-to-zoom was roughly three times too fast.** **[macOS]** An ordinary
+  pinch moved the font 14 points and a fast one 18 — from a 12 pt document, the
+  size limit in a single gesture. Now about five points, with a per-event cap so
+  one outsized delta cannot jump several.
+- **A dropped `EndNativeGesture` disabled Ctrl+wheel zoom for the session.**
+  **[macOS]** A pinch idle for half a second is now treated as finished.
+
+### Verified, not changed
+
+Cursor hit testing was measured before anything was touched and is correct — no
+layout code was changed. Every block painted in the viewport was located by its
+own painted geometry and clicked at its centre: clean across 30 configurations
+of wrap, line spacing and scroll offset, on both the offscreen plugin and real
+Cocoa, with 0 of 248 ASCII caret positions mis-mapped. The only mismatches are
+inside Tamil grapheme clusters, which is correct Unicode snapping.
+
+### Added
+
+- `tests/test_input_gestures.py` — 25 checks covering wheel and pinch
+  accumulation and the triple-click rules. Nine fail on the pre-fix code.
+
+### Infrastructure
+
+- **`buildme_mac_app.sh`'s clean step now removes both PyInstaller outputs.**
+  It previously removed `dist/Neight.app` but not `dist/Neight` — the COLLECT
+  directory the spec also writes — and PyInstaller refuses to reuse a
+  non-empty output directory, so every rebuild after the first failed outright
+  with "the output directory is not empty."
+
+---
+
+## 2026.070 — 2026-07-27
+
+The first run of the project on real Apple hardware, plus a large Windows-side
+correctness pass. Detail in
+[`knownbugs/MACOS-VALIDATION-RESULTS.md`](knownbugs/MACOS-VALIDATION-RESULTS.md).
+
+### Fixed — text integrity
+
+These two silently altered your files and are the most important entries here.
+
+- **Every save destroyed no-break spaces.** **[Both]** `QTextDocument.toPlainText()`
+  substitutes ASCII lookalikes for a few characters, so U+00A0 came back as an
+  ordinary space. All three disk-write paths and three whole-document transforms
+  read the document that way, so opening a file containing NBSP — common in
+  anything pasted from a web page — and saving it replaced every one,
+  permanently and with no indication.
+- **BOM-less UTF-16 / UTF-32 files opened as garbage.** **[Both]** ASCII encoded
+  as UTF-16 decodes perfectly well as UTF-8, leaving a NUL between every
+  character, so the file opened looking like `H e l l o`.
+- **A UTF-8 BOM no longer survives as a stray U+FEFF first character.** **[Both]**
+- **UTF-32 is now tested before UTF-16**, which otherwise decoded it into
+  garbage. **[Both]**
+- Encoding, BOM and newline are detected on open and any conversion is announced
+  in the status bar and shown in Debug Info. Neight normalises on save to UTF-8
+  without BOM and the platform newline — previously silent. **[Both]**
+
+### Fixed — settings
+
+- **A second window came up with the default font instead of the assigned one.**
+  **[Both]** Applying settings synchronised checkable menu actions without
+  blocking their signals, so every launch transiently rewrote `settings.json`
+  with Qt's default font. With one window a later save repaired it; with two
+  processes, whichever read during that window lost the font. Measured before:
+  one startup rewrote the font family and dropped the size from 14 to 9. After:
+  startup writes nothing.
+- **Settings no longer live inside the app bundle.** **[macOS]** They were
+  written beside the executable, which on macOS is *inside* `Neight.app` — so
+  every update destroyed them. They now live in
+  `~/Library/Application Support/Neight/settings.json`, migrated once from the
+  bundle or `~/.config/Neight`, copying and never deleting. Windows keeps its
+  portable, next-to-the-executable behaviour.
+- **Windows that no longer clobber each other.** **[Both]** A lock file around
+  the read-modify-write plus key-level merging, so a window writes only what it
+  changed and cannot revert another window's font or margins. Unknown keys are
+  preserved.
+- **Saved presets no longer reset settings they predate.** **[Both]** Seventeen
+  preset-loadable keys now fall back to the current in-memory value rather than
+  a hardcoded literal.
+- Settings write failures are surfaced once and in Debug Info instead of the
+  store being silently relocated. **[Both]**
+
+### Fixed — saving
+
+- One durable atomic-write helper for every path: unique temp, write, flush,
+  fsync, `os.replace`. Manual save previously skipped flush and fsync, making it
+  *less* durable than autosave, and shared a temp name with the autosave worker.
+  **[Both]**
+- **Save As is transactional** — document identity commits only after a
+  successful write. **[Both]**
+- A hung save worker can no longer overwrite newer content: save generations are
+  checked immediately before the rename. **[Both]**
+
+### Fixed — macOS specifics
+
+- **The built app reported version `0.0.0`.** The macOS PyInstaller spec set
+  neither `CFBundleShortVersionString` nor `CFBundleVersion`, so every release
+  would have shipped claiming to be version zero — which also breaks update
+  comparison. The spec now reads `VERSION` out of `neight.py` at build time.
+- **The status bar rendered all text in a Tamil font.** Tamil Sangam MN was set
+  as the sole family, so `Words: 0`, `Ln 1` and `Col 1` used its Latin glyphs
+  instead of the system UI font. Now a fallback stack, so only Tamil runs pick up
+  the Tamil face.
+- **Slow trackpad zoom did nothing.** `int(delta / 120)` with a `pixelDelta`
+  fallback gated on `delta == 0` meant a small non-zero `angleDelta` — normal
+  smooth-trackpad output — produced no zoom *and* was still accepted, so
+  Ctrl+trackpad neither zoomed nor scrolled.
+
+### Fixed — Markdown and rendering
+
+- **Code blocks were never highlighted.** **[Both]** `codehilite` had been
+  requested all along but Pygments was never installed or bundled, so the
+  extension was a silent no-op in both preview and exported PDFs. Pygments is now
+  a pinned runtime dependency and its style definitions are injected into the
+  generated CSS, following the light/dark branch so code is never rendered
+  dark-on-dark.
+- **Export Markdown to PDF flattened lists.** **[Both]** An ordered list
+  immediately followed by a bulleted one was merged into a single `<ol>`. Fixed
+  by adding `sane_lists`.
+- Task list markers now render as check boxes in every list shape. **[Both]**
+
+### Added
+
+- **Split-view Markdown preview** (`Ctrl+Shift+M` / `⌘⇧M`) with an adjustable
+  divider that is remembered, live 300 ms debounced rendering, and an on-demand
+  mode above 200,000 characters so a large document cannot stall the UI. One
+  renderer now serves both preview and PDF export, so the two cannot drift.
+  **[Both]**
+- **`.md` and `.markdown` file associations.** **[Both]** Windows registers them
+  under their own ProgID so Explorer shows "Markdown Document"; because Windows
+  has hash-protected the default-handler choice since Windows 8, the dialog says
+  so plainly and links to the Default Apps page rather than pretending to
+  succeed. macOS can set the handler via Launch Services, and Debug Info offers
+  to switch it.
+- **macOS pinch-to-zoom**, with wheel suppression so one gesture cannot zoom
+  twice.
+- A committed regression suite in `tests/`, run in CI on Windows and macOS.
+
+### Infrastructure
+
+- **CI had never been green.** On Windows the startup font guard was an inline
+  heredoc, which PowerShell — the default shell on that runner — cannot parse, so
+  that half of the matrix had failed before running a single check since the
+  workflow was written. On macOS the guard wrote to a path that stopped being the
+  settings store, so it passed while testing nothing. Both fixed; all four jobs
+  pass.
+- **Release binaries removed from Git.** `dist/` and `stable/` held 127 MB of
+  committed binaries, 2.68 GB across history. Downloads now point at
+  `releases/latest/download/`. Nothing was lost — every binary was already
+  published to GitHub Releases.
+- Dependencies pinned and upgraded: PySide6 / shiboken6 6.11.1, PyInstaller
+  6.21.0, Pillow 12.3.0, plus a missing `python-pptx` pin. Both platforms are now
+  on the same Qt version.
+
+---
+
+## Known limitations
+
+Carried forward, with reasons, in
+[`knownbugs/MACOS-VALIDATION-RESULTS.md`](knownbugs/MACOS-VALIDATION-RESULTS.md):
+
+- **Pinch-zoom calibration** has never been checked against a real trackpad. The
+  arithmetic is test-covered and the magnitude is sane; the feel is not verified.
+- **Bottom-line snapping is approximate for mixed-script documents** — block
+  heights differ between scripts, so a partial line can peek at the bottom. It is
+  cosmetic and no positional disagreement was found.
+- **Tamil text navigation in Qt** has a segmentation quirk for some consonant +
+  pulli + consonant combinations. This is Qt-level, not specific to Neight.
+- **Drag and drop from Finder** is not implemented. **[macOS]**
+- **Tamil/English keyboard switching** and **`.md` associations** still need
+  manual verification on real hardware. **[macOS]**

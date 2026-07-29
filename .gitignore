@@ -207,7 +207,6 @@ settings.json
 # Dated autosave diagnostic logs written next to settings.json
 neight_autosave_*.log
 CODE_REVIEW_AND_SUGGESTIONS.md
-CHANGELOG.md
 deploylocal.bat
 
 # macOS metadata
