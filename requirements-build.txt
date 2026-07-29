@@ -1,0 +1,12 @@
+# Neight — distributable build dependency
+#
+# Install this together with requirements.txt in a clean build environment:
+#
+#   python -m pip install -r requirements.txt -r requirements-build.txt
+#
+# Keep this environment separate from the general development environment.
+# PyInstaller hooks can discover optional packages and silently add them to a
+# distributable even when Neight does not import them.
+
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6

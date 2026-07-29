@@ -90,6 +90,8 @@ deliberately and re-run the cross-platform checks.
 Build and design tools are separate, in [requirements-dev.txt](requirements-dev.txt):
 `pyinstaller` (distributables), `pillow` (design asset generation only — not
 imported by the application), and `pre-commit` (repository hooks).
+[requirements-build.txt](requirements-build.txt) contains only the pinned
+PyInstaller version for clean distributable builds.
 
 > Neight uses **PySide6 exclusively**. All PyQt5 references have been removed. There is no Qt5 fallback.
 
@@ -128,24 +130,34 @@ To release this build to GitHub, run:
 ### macOS build
 
 The build script targets Apple Silicon (arm64). Run it on an Apple Silicon Mac.
+Use a dedicated build environment containing only runtime dependencies and
+PyInstaller. This prevents optional design or presentation packages from being
+discovered and bundled by PyInstaller hooks.
 
 ```bash
-chmod +x buildme_mac_app.sh
+git clone https://github.com/venkatarangan/neight.git
+cd neight
+python3 -m venv .venv-build
+source .venv-build/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-build.txt
 ./buildme_mac_app.sh
 ```
 
 What it does:
-1. Runs `python3 increment_version.py` to bump `VERSION` in `neight.py`
-2. Cleans `build/`, `dist/Neight`, `dist/Neight.app`, and Python test caches
-3. Runs `pyinstaller packaging/Neight.macos.spec` (the checked-in spec preserves `BUNDLE`, `info_plist`, `argv_emulation`, and file-type associations)
-4. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
-5. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
-6. Publishes the unsigned zip to the `dist-latest` branch on a best-effort
+1. Verifies that it is running on Apple Silicon in an activated virtual environment
+2. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
+3. Cleans `build/`, `dist/Neight`, `dist/Neight.app`, and Python test caches
+4. Runs the active environment's PyInstaller against `packaging/Neight.macos.spec` (the checked-in spec preserves `BUNDLE`, `info_plist`, `argv_emulation`, and file-type associations)
+5. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
+6. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
+7. Publishes the unsigned zip to the `dist-latest` branch on a best-effort
    basis without changing the working tree
 
 After a successful build the script prints the next steps for creating a signed release.
 
-> Tested on Apple Silicon. An Intel build would need to be produced on appropriate hardware.
+> Tested on Apple Silicon. The checked-in build workflow intentionally rejects
+> Intel hosts because the distributed macOS artifact is arm64-only.
 
 ---
 
@@ -372,6 +384,7 @@ Update either prefix if the service URLs change.
 neight.py              — the entire application
 neight.ico / .icns     — app icons
 requirements.txt       — pinned runtime dependencies
+requirements-build.txt — minimal pinned distributable build tooling
 requirements-dev.txt   — build, design and hook tooling
 buildme.bat            — Windows build script
 buildme_mac_app.sh     — macOS build script

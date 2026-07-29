@@ -6,7 +6,7 @@
 # build releases, generate design assets, or run the repository's checks.
 
 # Packaging (buildme.bat / buildme_mac_app.sh)
-pyinstaller==6.21.0
+-r requirements-build.txt
 
 # Design asset generation only — not used by the application
 pillow==12.3.0
