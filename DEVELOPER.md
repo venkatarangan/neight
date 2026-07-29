@@ -255,10 +255,28 @@ packaging/             — the PyInstaller specs the build scripts use:
                          build with a bare `pyinstaller ... neight.py`, which
                          overwrites a spec instead of using one.
 design/                — icon generators and architecture infographic source
-knownbugs/             — documented Qt-level bugs and reproduction notes
+knownbugs/             — documented Qt-level bugs, validation runs and fix records
+tests/                 — regression suite, run in CI on Windows and macOS
 screenshots/           — screenshots used in documentation
-stable/                — signed macOS release zips
+stable/                — signed macOS release zips (untracked; see CHANGELOG 2026.070)
+CHANGELOG.md           — what changed in each build, tagged by platform
 ```
+
+### Regression suite
+
+Plain scripts rather than pytest, so CI needs nothing beyond `requirements.txt`.
+Run them before pushing — CI runs exactly these:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
+```
+
+Each exits non-zero on failure and prints failures as GitHub Actions
+annotations. See [tests/README.md](tests/README.md) for what each one guards and
+why.
 
 ---
 

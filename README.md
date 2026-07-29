@@ -234,6 +234,15 @@ Neight is a personal project, vibe-coded with AI assistance and brewed at [venka
 
 ---
 
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) records what changed in each build, tagged by
+platform. The most recent entries cover trackpad zoom and click handling, and
+the first validation run on real Apple hardware — which found two bugs that had
+been silently altering saved files.
+
+---
+
 ## License
 
 This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
