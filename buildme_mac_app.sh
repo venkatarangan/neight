@@ -27,8 +27,12 @@ python3 increment_version.py
 echo ""
 echo "Cleaning old build artifacts..."
 rm -rf build
-rm -rf dist/Neight.app
-rm -rf __pycache__ .pytest_cache
+# Both PyInstaller outputs, not just the bundle: the spec's COLLECT step writes
+# dist/Neight alongside dist/Neight.app, and PyInstaller refuses to reuse a
+# non-empty output directory.  Leaving it behind failed every rebuild after the
+# first with "The output directory is not empty".
+rm -rf dist/Neight dist/Neight.app
+rm -rf __pycache__ .pytest_cache tests/__pycache__
 
 echo ""
 echo "Starting PyInstaller .app build from packaging/Neight.macos.spec..."
