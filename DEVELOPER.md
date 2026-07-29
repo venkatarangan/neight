@@ -327,6 +327,15 @@ Also on GitHub: a `dist-latest` branch, unrelated to `main`'s history, that
 exists only to hold the current unsigned Mac and Windows build artifacts for
 an external code-signing workflow. See "Why `dist/` Isn't on GitHub" above.
 
+### Session notes
+
+[`docs/session-notes/`](docs/session-notes/) holds a handoff record per working
+session — what changed, why, what was verified and how, and what was left open.
+Written for a person or an AI assistant starting cold on another machine. Start
+with the newest one; **if you are picking this repository up on Windows for the
+first time in a while, read its opening section before running `git pull`** —
+the July 2026 history rewrite means an old clone cannot fast-forward.
+
 ### Regression suite
 
 Plain scripts rather than pytest, so CI needs nothing beyond `requirements.txt`.
