@@ -3742,6 +3742,20 @@ class Notepad(QMainWindow):
     # from a maliciously large or accidental binary file.
     _MAX_OPEN_FILE_BYTES: int = 50 * 1024 * 1024
 
+    @staticmethod
+    def _has_wide_ascii_nul_pattern(raw_bytes: bytes, width: int) -> bool:
+        """Return whether ASCII-like wide text has the expected zero-byte lanes."""
+        if len(raw_bytes) < width * 2 or len(raw_bytes) % width:
+            return False
+        for nonzero_lane in range(width):
+            if all(
+                raw_bytes[index] == 0
+                for index in range(len(raw_bytes))
+                if index % width != nonzero_lane
+            ):
+                return True
+        return False
+
     def _open_file_path(self, path: Path | str, *, notify_errors: bool = True, show_status: bool = True) -> bool:
         try:
             path_obj = Path(path).expanduser()
@@ -3811,6 +3825,14 @@ class Notepad(QMainWindow):
             if "\x00" in decoded:
                 if nul_fallback is None:
                     nul_fallback = (decoded, enc)
+                continue
+            if (
+                nul_fallback is not None
+                and enc in ("utf-16", "utf-32")
+                and not self._has_wide_ascii_nul_pattern(
+                    raw_bytes, 2 if enc == "utf-16" else 4
+                )
+            ):
                 continue
             text, source_encoding = decoded, enc
             break
