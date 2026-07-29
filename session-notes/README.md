@@ -8,9 +8,13 @@ Each file covers one session: what changed, why, what was verified and how,
 what was deliberately left alone, and what is still open. They are written for
 a person or an AI assistant starting cold.
 
-These are **point-in-time records, not living documents.** They are not edited
-after the fact. When something here is later superseded, the newer session note
-says so — go by the newest file, and by these instead for anything current:
+These are **point-in-time records of one working session, not living
+documents.** A same-day continuation of the same session — picking back up
+after a break, a model switch, whatever — updates its existing file, since
+it's still one unfinished picture, not a new one. Once a session note is
+superseded by a genuinely *later* session, it is frozen: the newer note says
+what changed and links back, rather than editing history. Go by the newest
+file, and by these instead for anything current:
 
 | For | Read |
 |---|---|
@@ -23,4 +27,4 @@ says so — go by the newest file, and by these instead for anything current:
 
 | Date | Session |
 |---|---|
-| 2026-07-29 | [Trackpad zoom, click placement, build publishing, repository cleanup](2026-07-29-trackpad-fixes-and-cleanup.md) |
+| 2026-07-29 | [Trackpad zoom, click placement, build publishing, repository cleanup, docs audit](2026-07-29-trackpad-fixes-and-cleanup.md) |
