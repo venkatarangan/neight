@@ -1,11 +1,12 @@
 # 2026-07-29 — Trackpad zoom, click placement, build publishing, repository cleanup, docs audit
 
 **Machine:** macOS 26.5.2 · Apple M4 · arm64 · Python 3.14.6 · PySide6 6.11.1
-**Version:** `2026.070` → `2026.073` committed (`2026.075` sitting locally, uncommitted — see below)
+**Version:** `2026.070` → `2026.073` committed, released, and current
 **Range:** `4b08936` → `196ae11` (13 commits)
-**State at close:** `main` clean and in sync with GitHub, all CI green, site deployed —
-**except** `neight.py`'s `VERSION` line, which is 2 builds ahead of the last commit. See
-["Uncommitted local state at close"](#uncommitted-local-state-at-close).
+**State at close:** `main` clean and in sync with GitHub, all CI green, site deployed,
+working tree clean. `v2026.073` is the published GitHub Release. See
+["The `2026.075` extra build, and cleaning it up"](#the-2026075-extra-build-and-cleaning-it-up)
+for a real bug this session's local builds exposed in `release_macos.sh`.
 
 ---
 
@@ -55,40 +56,46 @@ Nothing else needs configuring on Windows. Line endings are handled by
 
 ---
 
-## Uncommitted local state at close
+## The `2026.075` extra build, and cleaning it up
 
-**This machine's working tree is not clean, and the next session should decide
-what to do about it rather than be surprised by it.**
+**Resolved by the end of this note — kept as a record because it exposed a
+real, still-present bug in `release_macos.sh`.**
 
-At some point after the `2026.073` build/publish commit, `buildme_mac_app.sh`
-was run locally at least twice more, outside of any commit in this note. Each
-run auto-increments `VERSION` and auto-publishes to `dist-latest` (see "Build
-and release infrastructure" below) — both of which happened, and **neither
-was committed**:
+Earlier in this session `buildme_mac_app.sh` had been run locally a couple of
+extra times outside any commit, bumping the working tree's `VERSION` to
+`2026.075` without a matching commit ever landing. That much was flagged here
+and left for a decision.
 
+What happened next, outside this conversation: the maintainer ran
+`release_macos.sh` — which reads `VERSION` from the *working tree*, not from
+what's committed — while that uncommitted `2026.075` was still sitting there.
+The script tagged the release `v2026.075`, but `gh release create` tags
+whatever commit is currently `HEAD`, and the *committed* content of that
+commit still said `2026.073`. Net result: a real GitHub tag `v2026.075` whose
+actual contents were `2026.073` — a name that never matched what it pointed
+at. `v2026.073` was evidently released the same way, from the same commit,
+and is the one that actually lines up.
+
+The maintainer deleted the `v2026.075` **Release** from GitHub — but deleting
+a Release does not delete its underlying tag unless you explicitly ask for
+that too, so `v2026.075` was still sitting on GitHub and locally, pointing at
+the same commit as `v2026.073` (`196ae11`), attached to nothing. Resolved:
+
+```bash
+git push origin --delete v2026.075   # remote tag
+git tag -d v2026.075                 # local tag
+git checkout -- neight.py            # working tree back to VERSION = "2026.073"
 ```
-$ git status --short
- M neight.py                       # only the VERSION line differs from HEAD
-$ git show HEAD:neight.py | grep VERSION
-VERSION = "2026.073"                # what's actually committed
-$ grep VERSION neight.py
-VERSION = "2026.075"                # what's on disk
-$ git log --oneline origin/dist-latest -1
-3cce48c Latest unsigned build artifacts   # newer than the 28b5c3e verified in this note
-```
 
-So: `dist-latest` on GitHub already serves a `2026.075` build (the publish step
-worked exactly as designed — that part is fine, it's meant to run unattended).
-What's missing is the corresponding `VERSION = "2026.075"` line landing in a
-commit on `main`. Every other build in this note *did* get a matching commit
-(`f8faa5e` → `2026.071`, `0fad3fe` → `2026.072`, `bcb7400` → `2026.073`); this
-one or two builds did not.
+**The underlying bug in `release_macos.sh` is not fixed** — it still tags
+from the working tree's `VERSION` rather than the committed one, so running it
+against an uncommitted version bump will reproduce this exact mismatch. Worth
+fixing before it happens again: either refuse to run with a dirty working
+tree, or read `VERSION` from `git show HEAD:neight.py` instead of the file on
+disk.
 
-**Nothing is broken** — this is a one-line version bump sitting in an otherwise
-clean working tree, not a code defect. But whoever picks this up should either commit
-it (`git add neight.py && git commit`, describing why, or folding it into
-whatever they build next) or reset it (`git checkout -- neight.py`) before
-building again, rather than let a silent third bump happen on top.
+State now: `v2026.073` is the one real, correctly-named release — signed zip,
+47.4 MB, live as "Latest" — and the working tree is clean.
 
 ---
 
@@ -257,12 +264,15 @@ spec also writes. PyInstaller refuses to reuse a non-empty output directory, so
 empty"*. This actually happened mid-session, after the version had already been
 incremented. Both outputs are now removed.
 
-### Release status — nothing has been published
+### Release status — now published
 
-The latest **GitHub Release is still `v2026.065`** (2026-05-23). Everything since
-— all of the July work and this session — is on `main` but **never released**.
-`dist/Neight.app` is ad-hoc signed only; `release_macos.sh` deliberately refuses
-to publish without a properly signed `stable/Neight-mac-arm64-signed.zip`.
+At the point this note was first written, the latest GitHub Release was still
+`v2026.065` (2026-05-23) — everything since was on `main` but never released.
+That changed before this note closed: `v2026.073` is now the published
+release, with a properly signed `Neight-mac-arm64-signed.zip` (47.4 MB). See
+["The `2026.075` extra build, and cleaning it up"](#the-2026075-extra-build-and-cleaning-it-up)
+for how that publish also created a same-content, wrongly-named `v2026.075`
+tag, and how it was cleaned up.
 
 ---
 
@@ -414,17 +424,14 @@ longer public.
 
 1. **Pinch-zoom calibration on a real trackpad** — the only genuinely unverified
    *application behaviour* from this session. Tune `_PINCH_MAGNIFICATION_PER_STEP`.
-2. **The local `VERSION` bump is uncommitted.** See "Uncommitted local state at
-   close" near the top — this is the most immediate thing to resolve, since it
-   affects what the next `buildme_mac_app.sh` run will do.
-3. **Nothing is released.** Latest Release is `v2026.065`; `main` is at
-   `2026.073` (with `2026.075` sitting uncommitted locally, per above).
-   Publishing needs a Developer ID signature, then
-   `stable/Neight-mac-arm64-signed.zip`, then `./release_macos.sh`.
-4. **Windows build has never run** with the new `dist-latest` publish step. The
+2. **`release_macos.sh` tags from the working tree's `VERSION`, not the
+   committed one.** This is what produced the `v2026.075` mismatch above. Fix
+   by refusing to run with a dirty working tree, or by reading `VERSION` from
+   `git show HEAD:neight.py` rather than the file on disk.
+3. **Windows build has never run** with the new `dist-latest` publish step. The
    logic mirrors the macOS version, which was verified end to end, but the batch
    implementation itself is untested.
-5. Carried forward from July, unchanged: drag-and-drop from Finder (not
+4. Carried forward from July, unchanged: drag-and-drop from Finder (not
    implemented), Tamil/English keyboard switching and `.md` associations (need
    manual verification), bottom-line snapping for mixed-script documents
    (cosmetic), and the Qt Tamil navigation quirk (upstream).
