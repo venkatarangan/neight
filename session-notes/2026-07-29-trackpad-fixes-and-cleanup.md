@@ -158,6 +158,18 @@ Three release-path fixes landed with it:
 The bad `v2026.074` release remains as a historical record; `v2026.076`
 supersedes it rather than rewriting an already-published release.
 
+Final published state:
+
+- immutable GitHub Release:
+  <https://github.com/venkatarangan/neight/releases/tag/v2026.076>
+- tag target: `2c819b001636af363ecdbc7122585b1c9c2d9c86`
+- release asset: `Neight.exe`, 53,239,402 bytes, SHA-256
+  `9868AD5F28E9DEA5934065D9C8CCE52B9770AC55F05FB1F41F2BB2B0FB174478`
+- `dist-latest` artifact commit: `9172e4b`; the raw download was fetched back
+  and matched the same size and SHA-256
+- `v2026.076` is GitHub's Latest release; the latest Windows download URL
+  returned HTTP 200
+
 ---
 
 ## What was wrong, and what changed
@@ -512,5 +524,9 @@ longer public.
 | `c62b5e6` | Move session-notes out of docs/ so it is not published |
 | `7002b95` | Bring README up to date with what actually ships |
 | `196ae11` | Normalise the Documents folder name to a single spelling |
+| `acbdd47` | Correct setup and project documentation |
+| `9fac6dc` | Release 2026.075 with reproducible Windows build |
+| `46d0d2a` | Advance corrected Windows release to 2026.076 |
+| `2c819b0` | Fix Windows release tag probing |
 
 37 files changed · 1,743 insertions · 3,367 deletions
