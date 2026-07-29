@@ -4208,7 +4208,7 @@ class Notepad(QMainWindow):
         # Generate a unique recovery path the first time we need it.
         if self._recovery_path is None:
             try:
-                folder = Path.home() / "Documents" / "Neight"
+                folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
                 folder.mkdir(parents=True, exist_ok=True)
             except Exception:
                 return  # Cannot create folder — skip silently this tick
@@ -4266,7 +4266,7 @@ class Notepad(QMainWindow):
     def _view_recovery_folder(self):
         """Open the recovery folder in Finder (macOS) or Explorer (Windows)."""
         try:
-            folder = Path.home() / "Documents" / "Neight"
+            folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
             folder.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             QMessageBox.warning(
@@ -4295,7 +4295,7 @@ class Notepad(QMainWindow):
         folder.  The file this window is currently writing to (if any) is
         never deleted.
         """
-        folder = Path.home() / "Documents" / "Neight"
+        folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
         ret = QMessageBox.warning(
             self,
             "Empty Recovery Folder",
@@ -7853,19 +7853,46 @@ th {{ background-color: {table_head_bg}; }}
         key = Notepad._normalize_line_spacing_preset(preset)
         return mapping.get(key, 100)
 
+    # Presets and recovery copies share one folder under Documents.  Spelled
+    # once, because it used to be spelled two ways: presets wrote to a
+    # lowercase "neight" while recovery used "Neight".  On macOS and Windows
+    # the filesystem is case-insensitive by default, so those were the same
+    # directory and the split was invisible; on a case-sensitive filesystem
+    # they were two, which is the bug this constant closes.
+    USER_DOCUMENTS_DIR_NAME = "Neight"
+    _LEGACY_USER_DOCUMENTS_DIR_NAME = "neight"
+
     @staticmethod
     def _get_user_documents_dir() -> Path:
-        """Return ~/Documents/neight/, creating it if needed.
+        """Return ~/Documents/Neight/, creating it if needed.
 
         Keeping presets in a named subfolder makes them easy for end-users
         to find while avoiding clutter in the top-level Documents folder.
         Works on macOS, Linux, and modern Windows.
+
+        Adopts presets from the old lowercase spelling if they are in a
+        genuinely separate directory, which only happens on a case-sensitive
+        filesystem.  Copying rather than moving, on the same reasoning as the
+        settings migration: copying is reversible, deleting is not.
         """
-        docs = Path.home() / "Documents" / "neight"
+        home = Path.home()
+        docs = home / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
         try:
             docs.mkdir(parents=True, exist_ok=True)
         except OSError:
-            pass  # read-only or unusual FS — callers handle write failures
+            return docs  # read-only or unusual FS — callers handle write failures
+
+        legacy = home / "Documents" / Notepad._LEGACY_USER_DOCUMENTS_DIR_NAME
+        try:
+            # samefile() is the check that matters: where the filesystem folds
+            # case these two paths are one directory and there is nothing to do.
+            if legacy.is_dir() and not legacy.samefile(docs):
+                for name in ("writer_mode.json", "techie_mode.json"):
+                    source, target = legacy / name, docs / name
+                    if source.is_file() and not target.exists():
+                        shutil.copy2(str(source), str(target))
+        except OSError:
+            pass  # nothing to adopt, or unreadable — presets simply start fresh
         return docs
 
     def _apply_solveli_preset(self):

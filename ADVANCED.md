@@ -67,13 +67,13 @@ The built-in Writer and Techie modes are starting points. If you have invested t
 **Settings → Save Current Settings to → Writer Mode Preset** saves your current Neight settings to:
 
 ```
-~/Documents/neight/writer_mode.json
+~/Documents/Neight/writer_mode.json
 ```
 
 **Settings → Save Current Settings to → Techie Mode Preset** saves your current settings to:
 
 ```
-~/Documents/neight/techie_mode.json
+~/Documents/Neight/techie_mode.json
 ```
 
 The next time you select **Writer (சொல்வெளி) Mode** or **Techie (நுட்பர்) Mode**, Neight silently loads your saved preset instead of the built-in defaults. If the file is missing or unreadable for any reason, Neight falls back to its built-in defaults automatically — nothing breaks.
@@ -340,8 +340,8 @@ Two conditions apply:
 
 User mode presets (see [Save Presets](#save-presets-power-user-feature) above) are stored separately from `settings.json`:
 
-- `~/Documents/neight/writer_mode.json`
-- `~/Documents/neight/techie_mode.json`
+- `~/Documents/Neight/writer_mode.json`
+- `~/Documents/Neight/techie_mode.json`
 
 These files are plain JSON, survive app reinstallation, and can be copied between machines.
 
@@ -417,8 +417,8 @@ The safest way to preserve your carefully tuned settings across updates, reinsta
 Use **Settings → Save current settings to → Writer Mode Preset** or **Techie Mode Preset** to export your current configuration to:
 
 ```
-~/Documents/neight/writer_mode.json
-~/Documents/neight/techie_mode.json
+~/Documents/Neight/writer_mode.json
+~/Documents/Neight/techie_mode.json
 ```
 
 These files live in your `Documents` folder — completely separate from the app and from `settings.json`. They survive app deletion, reinstallation, and a factory reset of `settings.json`. They are plain JSON and can be backed up, copied between machines, or opened in any text editor.

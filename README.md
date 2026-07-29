@@ -170,7 +170,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 [ADVANCED.md](ADVANCED.md) covers the features aimed at power users who want to go beyond the defaults:
 
 - **Writer (சொல்வெளி) Mode** and **Techie (நுட்பர்) Mode** — full settings tables
-- **Save Presets** — save your own settings as the baseline for a mode, stored in `~/Documents/neight/`
+- **Save Presets** — save your own settings as the baseline for a mode, stored in `~/Documents/Neight/`
 - **Reading Time** — configurable Tamil and English reading speeds with per-script calculation
 - **Word Index Overlay** — number every word in your document; fully customizable appearance. The semi-transparent overlay is lovingly called the **butter paper effect** (like laying a translucent sheet over your manuscript to annotate word positions). See [ADVANCED.md](ADVANCED.md) for details.
 - **Language Switch configuration** — choose which two layouts to switch between

@@ -7,6 +7,21 @@ Anything untagged is cross-platform.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The Documents folder was spelled two different ways.** **[Both]** Saved
+  presets were written to `~/Documents/neight` while recovery copies used
+  `~/Documents/Neight`. On macOS and Windows the filesystem is case-insensitive
+  by default, so those were the same directory and the split was invisible — but
+  on a case-sensitive filesystem they were two separate folders. Both now use
+  `Neight`, from a single constant so they cannot drift apart again. Where the
+  old lowercase folder really is separate, presets found in it are copied
+  across once, never moved, and an existing preset is never overwritten.
+
+---
+
 ## 2026.073 — 2026-07-29
 
 Build tooling only — no application code changed, so nothing here affects the
