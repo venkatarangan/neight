@@ -54,7 +54,7 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - Opens and saves both `.txt` and `.md` files
 - **Find/Replace escape sequences** — click the ℹ button inside the Find/Replace bar to insert special characters like `\n` (newline), `\t` (tab), `\xHH` (hex byte), `\u0000` (Unicode codepoint) into search fields
 - **Triple-click** a word to instantly search for it in Google (the word is selected and your default browser opens)
-- **Zoom font size** with `Ctrl++` / `Ctrl+-` or `Ctrl+Scroll wheel`
+- **Zoom font size** with `Ctrl++` / `Ctrl+-`, `Ctrl+Scroll wheel`, or — on a macOS trackpad — pinch to zoom
 
 ### Tamil and bilingual writing
 
@@ -67,7 +67,7 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 
 - **Gutter line numbers** (`Ctrl+Shift+L`) — paragraph-level line numbers like a code editor
 - **Adjustable margins and line spacing** — five spacing presets (Condensed through Triple); viewport padding is added automatically so lines never clip at the window edge
-- **Auto-save** at configurable intervals (2, 5, 15, or 30 minutes) — writes are atomic, run on a background thread, and never cause a visible pause
+- **Auto-save** at configurable intervals (2, 5, 15 or 30 minutes, or off) — writes are atomic, run on a background thread, and never cause a visible pause
 - **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **File → Empty Recovery Folder** to delete old copies.
 - **Smart suggested filename** — when you press `Ctrl+S` on an unsaved document, the save dialog opens pre-filled with a name derived from the first words of your text (up to 4 words, max 100 characters). Accept it, edit it, or choose a different location — the dialog behaves exactly as usual.
 - **Continue where you left off** — reopens your last file at startup (toggleable under Settings)
@@ -75,7 +75,7 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Auto-Hide Scrollbar** — scrollbar flashes briefly when you scroll, then disappears to keep the writing area clean
 - **Plain-text paste** (`Shift+Ctrl+V`) — strips formatting on paste
 - **New Window** — open a second instance for side-by-side writing
-- **Open With integration** — Neight appears in Finder's / Explorer's right-click **Open With** menu for `.txt` files
+- **Open With integration** — Neight appears in Finder's / Explorer's right-click **Open With** menu for `.txt`, `.md` and `.markdown` files. Markdown registers separately, so Explorer labels it *Markdown Document*. Windows has hash-protected the *default* handler since Windows 8, so Neight cannot silently claim it — **Help → Debug Info** says so plainly and links to the Default Apps page; on macOS the same dialog can set the handler directly.
 
 ### Status bar
 
@@ -150,12 +150,12 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 | Search with Google | Ctrl+E |
 | Plain-text Paste | Shift+Ctrl+V or Shift+Insert |
 | Increase / Decrease font size | Ctrl++ / Ctrl+- |
-| Zoom font with mouse | Ctrl+Scroll wheel |
+| Zoom font with mouse / trackpad | Ctrl+Scroll wheel, or pinch to zoom (macOS trackpad) |
 | Gutter Line Numbers | Ctrl+Shift+L |
 | Word Index Overlay | Ctrl+Shift+W |
 | Language Switch | Double Ctrl (Win/Linux) or Double ⌃ Control (macOS) |
 | Switch to layout 1 / 2 | Ctrl+, / Ctrl+. |
-| Markdown menu | Alt+M |
+| Markdown menu | Alt+M (Windows/Linux menu mnemonic; macOS menus don't use Alt) |
 | Markdown Preview (split view) | Ctrl+Shift+M (⌘⇧M on macOS) |
 | Refresh Preview | Ctrl+Shift+R |
 | Heading 1–6 | Ctrl+1 to Ctrl+6 |
@@ -210,13 +210,12 @@ Neight is a personal project, vibe-coded with AI assistance and brewed at [venka
 
 ## Future Ideas
 
-- Markdown live preview pane
 - Export to DOCX
 - A proper Windows installer
 - Page numbers in PDF footer
 - Print preview before PDF export
+- Drag and drop a file from Finder or Explorer to open it
 - Optional AI features for translation, rewriting, or lookup
-- ~~Integrate Tamil dictionary (like Tamil Nadu Government's Sorkuvai)~~
 
 ---
 
