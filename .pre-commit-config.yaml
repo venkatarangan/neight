@@ -5,6 +5,11 @@ repos:
       - id: check-byte-order-marker
       - id: mixed-line-ending
         args: [--fix=lf]
+        # .gitattributes deliberately checks .bat and .ps1 out as CRLF so they
+        # run natively on Windows.  Without this exclusion the hook rewrites
+        # them to LF in the working tree on every commit, fighting the checkout
+        # rule — which is exactly what happened to buildme.bat.
+        exclude: '\.(bat|ps1)$'
 
   - repo: local
     hooks:

@@ -1,6 +1,6 @@
 """Startup must never persist a font the user did not choose.
 
-Regression guard for the multi-window font loss in `knownbugs/Issues to fix.md`.
+Regression guard for the multi-window font loss fixed in 2026.070 (CHANGELOG.md).
 Applying settings used to emit `toggled()` from the checkable actions being
 synchronised, and those handlers saved the half-applied window — writing Qt's
 default font over the stored one, because the font is applied at the end of that

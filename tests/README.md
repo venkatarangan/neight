@@ -41,4 +41,5 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
 manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the
 calibration is not), Tamil/English keyboard switching, and the macOS file
-associations. See `knownbugs/MACOS-TODO-pending-validation.md`.
+associations. See the "Still needs a person" section of
+`knownbugs/MACOS-VALIDATION-RESULTS.md`.

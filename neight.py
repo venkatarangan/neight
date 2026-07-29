@@ -7203,7 +7203,8 @@ th {{ background-color: {table_head_bg}; }}
         handler saves the *partially applied* window state.  During startup that
         meant writing Qt's default font to settings.json, because the font is
         applied at the end of this method \u2014 which is how a second window could
-        come up with the wrong font (knownbugs/Issues to fix.md).
+        come up with the wrong font.  Guarded by
+        tests/test_startup_settings.py; see CHANGELOG.md under 2026.070.
 
         Deliberately excluded \u2014 handled by the caller:
           \u2022 default_directory  (machine-local path)

@@ -2,13 +2,14 @@
 
 **Run:** 2026-07-27 on macOS 26.5.2 (build 25F84) · Apple M4 · arm64
 **Environment:** Python 3.14.6 · PySide6 6.11.1 · Markdown 3.10.2 · Pygments 2.20.0
-**Covers:** [`MACOS-TODO-pending-validation.md`](MACOS-TODO-pending-validation.md) and the
-Part C decisions it left open
+**Covers:** the macOS validation TODO (Parts A, B and C), since removed
 **Starting point:** `74831d3` · **Ending point:** `42563d7`
 
 This records what was actually executed on real Apple hardware, what it found, and what
-still cannot be verified without a person at the keyboard. The companion TODO describes
-work that had *never* run on macOS; this file is the answer to it.
+still cannot be verified without a person at the keyboard. It answers a companion TODO
+document that described work which had *never* run on macOS; that TODO was deleted once
+this file superseded it, so the A/B/C item numbers below are retained purely as labels
+for the record.
 
 Note the environment drift from the Windows work, which was Python 3.12.10 / PySide6
 6.11.0. Both platforms are now pinned to **6.11.1**, which closes **C2**.
