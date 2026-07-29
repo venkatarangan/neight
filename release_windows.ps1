@@ -85,6 +85,29 @@ Write-Host "Tag     : $Tag"
 Write-Host "Asset   : $Exe"
 Write-Host ""
 
+# Repository rules require the tag to exist before an immutable release is
+# created. Fetch it when present; otherwise create it at the verified HEAD and
+# push it explicitly.
+$null = git fetch origin "refs/tags/${Tag}:refs/tags/${Tag}" 2>$null
+$TagCommit = git rev-list -n 1 $Tag 2>$null
+if ($LASTEXITCODE -eq 0) {
+    if ($TagCommit -ne $HeadCommit) {
+        Write-Error "Tag $Tag points to $TagCommit, not HEAD $HeadCommit."
+        exit 1
+    }
+} else {
+    git tag -a $Tag -m "Neight $Version"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not create tag $Tag."
+        exit 1
+    }
+    git push origin "refs/tags/$Tag"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not push tag $Tag."
+        exit 1
+    }
+}
+
 # ── Create or upload to existing release ─────────────────────────────────────
 
 # gh exits non-zero when the release doesn't exist; suppress the error
@@ -98,6 +121,10 @@ try {
 if ($releaseExists) {
     Write-Host "Release $Tag already exists - uploading asset..."
     gh release upload $Tag $Exe --clobber
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not upload Neight.exe to release $Tag."
+        exit 1
+    }
     Write-Host ""
     Write-Host "Done: Neight.exe uploaded to release $Tag"
 } else {
@@ -105,6 +132,10 @@ if ($releaseExists) {
     gh release create $Tag $Exe `
         --title "Neight $Version" `
         --notes-file release_install_notes.md
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not create release $Tag."
+        exit 1
+    }
     Write-Host ""
     Write-Host "Done: Release $Tag created with Neight.exe"
 }
@@ -115,6 +146,10 @@ $MacZip = "stable\Neight-mac-arm64-signed.zip"
 if (Test-Path $MacZip) {
     Write-Host "macOS artifact found - uploading to same release..."
     gh release upload $Tag $MacZip --clobber
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not upload the macOS artifact to release $Tag."
+        exit 1
+    }
     Write-Host "Done: Neight-mac-arm64-signed.zip uploaded to release $Tag"
 } else {
     Write-Host "Note: macOS artifact not found ($MacZip) - skipping."

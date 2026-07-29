@@ -95,6 +95,20 @@ echo "Tag     : $TAG"
 echo "Asset   : $SIGNED_ZIP"
 echo ""
 
+# Repository rules require the tag to exist before an immutable release is
+# created. Fetch it when present; otherwise create it at the verified HEAD and
+# push it explicitly.
+git fetch origin "refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null || true
+if TAG_COMMIT="$(git rev-list -n 1 "${TAG}" 2>/dev/null)"; then
+    if [ "${TAG_COMMIT}" != "$(git rev-parse HEAD)" ]; then
+        echo "Error: Tag ${TAG} points to ${TAG_COMMIT}, not HEAD $(git rev-parse HEAD)."
+        exit 1
+    fi
+else
+    git tag -a "${TAG}" -m "Neight ${VERSION}"
+    git push origin "refs/tags/${TAG}"
+fi
+
 # ── Create or upload to existing release ─────────────────────────────────────
 
 if gh release view "$TAG" &>/dev/null; then

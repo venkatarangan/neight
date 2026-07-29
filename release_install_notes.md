@@ -1,6 +1,6 @@
 ## What's in this update
 
-This is the corrected Windows `2026.075` release. It replaces the mismatched
+This is the corrected Windows `2026.076` release. It replaces the mismatched
 `v2026.074` Windows build with an executable whose embedded version and Git tag
 both match committed source. It was built in an isolated environment containing
 only runtime dependencies, so unrelated development packages are no longer

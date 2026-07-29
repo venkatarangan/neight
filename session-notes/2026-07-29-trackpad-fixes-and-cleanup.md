@@ -1,13 +1,13 @@
 # 2026-07-29 — Trackpad zoom, click placement, build publishing, repository cleanup, docs audit
 
 **Machine:** macOS 26.5.2 · Apple M4 · arm64 · Python 3.14.6 · PySide6 6.11.1
-**Version:** `2026.070` → `2026.075`
+**Version:** `2026.070` → `2026.076`
 **Original macOS range:** `4b08936` → `196ae11` (13 commits)
-**State at close:** `v2026.075` is the corrected Windows release;
+**State at close:** `v2026.076` is the corrected Windows release;
 `v2026.073` remains the current signed macOS release. See
 ["The `2026.075` extra build, and cleaning it up"](#the-2026075-extra-build-and-cleaning-it-up)
 for the earlier, unrelated use of the same version number, and
-["The Windows `v2026.074` mismatch and corrected `v2026.075` release"](#the-windows-v2026074-mismatch-and-corrected-v2026075-release)
+["The Windows `v2026.074` mismatch and corrected `v2026.076` release"](#the-windows-v2026074-mismatch-and-corrected-v2026076-release)
 for the final Windows release.
 
 ---
@@ -63,9 +63,10 @@ Nothing else needs configuring on Windows. Line endings are handled by
 **Resolved by the end of this note — kept as a record because it exposed a
 real release-script bug later fixed with the corrected Windows release.**
 
-> Later the same day, after the bad tag described here had been deleted,
-> `2026.075` was legitimately reused for a new committed Windows release. That
-> separate event is documented in the next section.
+> Later the same day, an attempt to reuse `2026.075` for the corrected Windows
+> release was rejected because GitHub's immutable-release tombstone permanently
+> reserved the deleted tag name. The corrected release advanced to `2026.076`;
+> that separate event is documented in the next section.
 
 Earlier in this session `buildme_mac_app.sh` had been run locally a couple of
 extra times outside any commit, bumping the working tree's `VERSION` to
@@ -96,14 +97,14 @@ git checkout -- neight.py            # working tree back to VERSION = "2026.073"
 **The underlying bug in `release_macos.sh` was not fixed at that point** — it
 still tagged from the working tree's `VERSION` rather than the committed one,
 so running it against an uncommitted version bump would reproduce this exact
-mismatch. It was fixed later in the Windows `2026.075` continuation below.
+mismatch. It was fixed later in the Windows `2026.076` continuation below.
 
 State at that point: `v2026.073` was the one real, correctly-named release —
 signed zip, 47.4 MB, live as "Latest" — and the working tree was clean.
 
 ---
 
-## The Windows `v2026.074` mismatch and corrected `v2026.075` release
+## The Windows `v2026.074` mismatch and corrected `v2026.076` release
 
 **Machine:** Windows 11 · Python 3.12.10 · PySide6 6.11.1 · PyInstaller 6.21.0
 
@@ -119,14 +120,22 @@ development-only packages from the build environment, including NumPy,
 OpenBLAS, process utilities, YAML and character-detection libraries. None is a
 Neight runtime dependency.
 
-The corrected `2026.075` Windows executable was built from a fresh Python 3.12
+The first correction was committed as `2026.075`, but GitHub rejected release
+creation: the earlier deleted immutable release permanently reserved
+`v2026.075`, even though no visible release or tag remained. That failed attempt
+also exposed a PowerShell error-handling bug — native `gh` failures did not stop
+the script, which printed a false success message. The script now checks every
+native exit code, and both release scripts explicitly create and push a tag at
+the verified commit before creating the immutable release.
+
+The corrected `2026.076` Windows executable was built from a fresh Python 3.12
 virtual environment containing only `requirements.txt` and
 `PyInstaller==6.21.0`. Its verified properties before release:
 
-- embedded application version: `2026.075`
-- size: 53,239,719 bytes
+- embedded application version: `2026.076`
+- size: 53,239,402 bytes
 - SHA-256:
-  `D0736435415CA2463D6FDCF1D1A288357C21132A1CD562E201C634D6EB651607`
+  `9868AD5F28E9DEA5934065D9C8CCE52B9770AC55F05FB1F41F2BB2B0FB174478`
 - no NumPy, Pillow, presentation, XML, process, YAML or charset-detection
   packages in the PyInstaller archive
 
@@ -143,7 +152,7 @@ Three release-path fixes landed with it:
    either release script runs, and calls for an isolated runtime-only
    environment for release builds.
 
-The bad `v2026.074` release remains as a historical record; `v2026.075`
+The bad `v2026.074` release remains as a historical record; `v2026.076`
 supersedes it rather than rewriting an already-published release.
 
 ---

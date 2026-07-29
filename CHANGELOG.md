@@ -7,7 +7,7 @@ Anything untagged is cross-platform.
 
 ---
 
-## 2026.075 — 2026-07-29
+## 2026.076 — 2026-07-29
 
 Corrects the Windows release provenance and makes release builds reproducible.
 
@@ -28,12 +28,18 @@ Corrects the Windows release provenance and makes release builds reproducible.
   **[Windows]** The `v2026.074` executable was built in a development
   environment and accidentally bundled unrelated packages including NumPy,
   OpenBLAS, process utilities, YAML and character-detection libraries. The
-  `2026.075` executable contains only Neight's runtime dependencies and
+  `2026.076` executable contains only Neight's runtime dependencies and
   PyInstaller support files.
 - **Release scripts now require a clean working tree and read `VERSION` from
   committed source.** **[Windows] [macOS]** This prevents a release tag from
   describing an uncommitted build while pointing at older source, which is what
   happened to `v2026.074`.
+- **Release scripts explicitly create and push a verified tag before creating
+  an immutable GitHub Release, and Windows now stops on every failed `gh`
+  command.** The first correction attempted to reuse deleted `v2026.075`, but
+  GitHub permanently reserves tag names used by immutable releases. The failed
+  command was reported correctly after this fix, and the release advanced to
+  `v2026.076`.
 - **The version incrementer now preserves existing line endings and uses
   console-safe output on Windows.** It previously updated the version and then
   reported failure because the legacy Windows console could not print a Unicode
