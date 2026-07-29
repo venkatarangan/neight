@@ -6,6 +6,7 @@ notice by hand.
 ```bash
 QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
 ```
 
 Each script exits non-zero on failure and prints failures as GitHub Actions
@@ -26,6 +27,18 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
   last line stays fully visible at the end of the document, which is where Tamil
   descenders and stacked vowel marks get clipped.
 
+- **`test_input_gestures.py`** — trackpad zoom and click gestures, where the
+  geometry was never wrong but the event bookkeeping was. Covers wheel and pinch
+  accumulation (reversing direction must respond immediately, an idle gap must
+  end the gesture, a pinch must move a few points and not the whole 6-100 pt
+  range, a dropped `EndNativeGesture` must not disable wheel zoom) and
+  triple-click-to-search. The click checks guard a feature that was inverted:
+  Qt delivers the second click of a double click as `MouseButtonDblClick`, not
+  `MouseButtonPress`, so the old press-counting handler never fired on a real
+  triple click and *did* fire on ordinary clicks used to move the caret around a
+  long document.
+
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
-manual: pinch-to-zoom feel, Tamil/English keyboard switching, and the macOS file
+manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the
+calibration is not), Tamil/English keyboard switching, and the macOS file
 associations. See `knownbugs/MACOS-TODO-pending-validation.md`.

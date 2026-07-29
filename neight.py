@@ -1426,8 +1426,12 @@ class CodeEditor(QPlainTextEdit):
         self._refreshing_wrap_layout = False
         self._line_numbers_visible = True
         self._text_margin_percent = 0
-        self._click_count = 0
-        self._last_click_ts = 0.0
+        # Triple-click detection.  Qt delivers the *second* click of a double
+        # click as MouseButtonDblClick, not MouseButtonPress, so counting presses
+        # can never reach three; the window is opened in mouseDoubleClickEvent
+        # instead and the next press inside it is the third click.
+        self._triple_click_deadline = 0.0
+        self._triple_click_pos = None
         self._word_index_visible = False
         self._word_index_top_margin = 20
         self._line_spacing_percent = 100.0
@@ -1454,8 +1458,10 @@ class CodeEditor(QPlainTextEdit):
         self._zoom_accum_angle = 0.0
         self._zoom_accum_pixels = 0.0
         self._zoom_accum_sign = 0
+        self._last_zoom_wheel_ts = 0.0
         self._native_zoom_active = False
         self._native_zoom_accum = 0.0
+        self._last_native_zoom_ts = 0.0
 
         # Auto-hide scrollbar
         self._auto_hide_scrollbar = False
@@ -1895,28 +1901,64 @@ class CodeEditor(QPlainTextEdit):
         if callable(handler):
             handler(cleaned)
 
-    def mousePressEvent(self, event):
+    @staticmethod
+    def _double_click_interval_s() -> float:
+        app = QApplication.instance()
+        interval_ms = app.doubleClickInterval() if app else QApplication.doubleClickInterval()
+        return interval_ms / 1000.0
+
+    def _clear_triple_click(self):
+        """Abandon any half-formed triple click.
+
+        Anything that is not the very next click of the same gesture — typing,
+        scrolling, losing focus, a different button — ends the sequence.  Without
+        this a click, some typing and another click could still be stitched
+        together into a "triple click" the user never made.
+        """
+        self._triple_click_deadline = 0.0
+        self._triple_click_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        # Qt turns the second click of a double click into MouseButtonDblClick,
+        # so this — not a third mousePressEvent — is what opens the window in
+        # which a genuine triple click can arrive.
         if event.button() == Qt.LeftButton:
-            app = QApplication.instance()
-            interval_ms = app.doubleClickInterval() if app else QApplication.doubleClickInterval()
-            interval = interval_ms / 1000.0
-            now = time.monotonic()
-            if now - self._last_click_ts <= interval:
-                self._click_count += 1
-            else:
-                self._click_count = 1
-            self._last_click_ts = now
-
-            if self._click_count == 3:
-                if self._handle_triple_click(event):
-                    event.accept()
-                    self._click_count = 0
-                    return
-                self._click_count = 0
+            self._triple_click_deadline = time.monotonic() + self._double_click_interval_s()
+            self._triple_click_pos = event.pos()
         else:
-            self._click_count = 0
+            self._clear_triple_click()
+        super().mouseDoubleClickEvent(event)
 
+    def mousePressEvent(self, event):
+        triple = False
+        if event.button() == Qt.LeftButton:
+            triple = self._is_triple_click(event)
+        self._clear_triple_click()
+
+        # Let Qt handle the press first so its own selection and drag-tracking
+        # state stays coherent; the search is layered on top of a normal click
+        # rather than replacing it.  The previous code returned early here, so
+        # QWidgetTextControl never saw the press at all.
         super().mousePressEvent(event)
+
+        if triple:
+            self._handle_triple_click(event)
+
+    def _is_triple_click(self, event) -> bool:
+        """Third click of a triple click: soon after, and close to, a double click.
+
+        Both tests matter.  Time alone is what made this misfire — with macOS's
+        500 ms interval, ordinary clicks to move the caret around a long document
+        were being counted as a triple click, selecting a word and opening a
+        browser.  The distance bound is Qt's own rule for the same gesture.
+        """
+        if not self._triple_click_deadline or self._triple_click_pos is None:
+            return False
+        if time.monotonic() > self._triple_click_deadline:
+            return False
+        app = QApplication.instance()
+        slop = app.startDragDistance() if app else QApplication.startDragDistance()
+        return (event.pos() - self._triple_click_pos).manhattanLength() <= slop
 
     def _handle_triple_click(self, event) -> bool:
         cursor = self.cursorForPosition(event.pos())
@@ -1964,38 +2006,60 @@ class CodeEditor(QPlainTextEdit):
     # One notch of a traditional mouse wheel.  A trackpad delivers many much
     # smaller deltas instead, which is why they have to be accumulated.
     _WHEEL_STEP = 120.0
-    # Pixel-delta equivalent of one zoom step.  Only used when the platform
-    # reports pixelDelta but no angleDelta.
-    _PIXEL_STEP = 50.0
+    # Pixel-delta equivalent of one zoom step, used for pixel-precise devices
+    # (trackpads, Magic Mouse).  Tune this if Ctrl+two-finger zoom feels wrong:
+    # larger is slower.
+    _PIXEL_STEP = 80.0
+    # Quiet time that ends a zoom gesture.  Carrying a partial step across a
+    # pause meant a zoom-out minutes later had to pay off leftover zoom-in
+    # travel before it did anything.
+    _ZOOM_GESTURE_IDLE_S = 0.25
 
     def _consume_zoom_steps(self, angle: int, pixels: int) -> int:
         """Accumulate wheel deltas and return whole zoom steps to apply.
 
-        A smooth trackpad reports deltas far smaller than one wheel notch.  The
-        previous integer division discarded them entirely — and because the old
-        code only fell back to pixelDelta when angleDelta was exactly zero, a
-        small non-zero angleDelta produced no zoom at all while still being
-        swallowed.  Keeping the remainder makes slow gestures accumulate into a
-        step instead of being lost.
+        A smooth trackpad reports deltas far smaller than one wheel notch, so the
+        remainder is carried between events and a slow gesture still accumulates
+        into a step instead of being discarded.
+
+        Two things the earlier version got wrong.  It compared the sign of the
+        *accumulator* rather than of the incoming delta, so a reversal was only
+        noticed once the accumulator had crossed zero — after zooming in, the
+        first several notches of zoom-out did nothing but pay off leftover
+        travel.  And it preferred angleDelta whenever it was non-zero, which on a
+        trackpad means the 120-unit mouse-notch scale is used for a device that
+        reports pixels.
         """
-        if angle:
-            source, step = "angle", self._WHEEL_STEP
-            self._zoom_accum_pixels = 0.0
-            self._zoom_accum_angle += angle
-            accum = self._zoom_accum_angle
-        elif pixels:
-            source, step = "pixels", self._PIXEL_STEP
-            self._zoom_accum_angle = 0.0
-            self._zoom_accum_pixels += pixels
-            accum = self._zoom_accum_pixels
+        now = time.monotonic()
+        if now - self._last_zoom_wheel_ts > self._ZOOM_GESTURE_IDLE_S:
+            self._reset_zoom_accumulator()
+        self._last_zoom_wheel_ts = now
+
+        # Prefer pixelDelta: a device that reports it is pixel-precise, and its
+        # step is tuned for that.  angleDelta is the mouse-wheel fallback.
+        if pixels:
+            source, step, delta = "pixels", self._PIXEL_STEP, float(pixels)
+        elif angle:
+            source, step, delta = "angle", self._WHEEL_STEP, float(angle)
         else:
             return 0
 
-        # Reversing direction mid-gesture must not be damped by leftover travel
-        # in the opposite direction.
-        if self._zoom_accum_sign and accum and (accum > 0) != (self._zoom_accum_sign > 0):
-            accum = float(angle if source == "angle" else pixels)
-        self._zoom_accum_sign = 1 if accum > 0 else -1 if accum < 0 else 0
+        # Reversing direction discards travel banked in the other direction, so
+        # the first reversed notch responds immediately.
+        sign = 1 if delta > 0 else -1
+        if self._zoom_accum_sign and sign != self._zoom_accum_sign:
+            self._zoom_accum_angle = 0.0
+            self._zoom_accum_pixels = 0.0
+        self._zoom_accum_sign = sign
+
+        if source == "pixels":
+            self._zoom_accum_angle = 0.0
+            self._zoom_accum_pixels += delta
+            accum = self._zoom_accum_pixels
+        else:
+            self._zoom_accum_pixels = 0.0
+            self._zoom_accum_angle += delta
+            accum = self._zoom_accum_angle
 
         steps = int(accum / step)
         remainder = accum - steps * step
@@ -2011,10 +2075,13 @@ class CodeEditor(QPlainTextEdit):
         self._zoom_accum_sign = 0
 
     def wheelEvent(self, event):
+        # Scrolling moves the text out from under the pointer, so a click after
+        # it is a new gesture, not the third of a triple click.
+        self._clear_triple_click()
         if event.modifiers() & Qt.ControlModifier:
             # A native pinch is already driving the zoom; ignore the wheel events
             # macOS also synthesises for the same gesture, or it zooms twice.
-            if self._native_zoom_active:
+            if self._native_pinch_in_progress():
                 event.accept()
                 return
             steps = self._consume_zoom_steps(event.angleDelta().y(), event.pixelDelta().y())
@@ -2039,6 +2106,31 @@ class CodeEditor(QPlainTextEdit):
                 return True
         return super().event(event)
 
+    # Accumulated pinch magnification per point of font size.  macOS reports a
+    # full comfortable pinch as a total magnification around 1.0, so this is
+    # roughly five points per gesture.  **This is the knob to turn if pinch zoom
+    # feels wrong: larger is slower.**  It was 0.08, which made the same gesture
+    # worth about fourteen points and ran the size into its limit.
+    _PINCH_MAGNIFICATION_PER_STEP = 0.20
+    # Most a single pinch event may move the size.  Events arrive continuously,
+    # so this costs nothing in normal use; it stops one outsized delta from
+    # jumping several points at once.
+    _PINCH_MAX_STEPS_PER_EVENT = 1
+    # A pinch with no End event is treated as finished after this long, so a
+    # dropped EndNativeGesture cannot disable Ctrl+wheel zoom for the session.
+    _NATIVE_ZOOM_IDLE_S = 0.5
+
+    def _native_pinch_in_progress(self) -> bool:
+        if not self._native_zoom_active:
+            return False
+        if time.monotonic() - self._last_native_zoom_ts > self._NATIVE_ZOOM_IDLE_S:
+            # EndNativeGesture never arrived.  Previously this latched on
+            # forever and every later Ctrl+wheel zoom was silently swallowed.
+            self._native_zoom_active = False
+            self._native_zoom_accum = 0.0
+            return False
+        return True
+
     def _handle_native_gesture(self, event) -> bool:
         """Handle macOS trackpad pinch-to-zoom.
 
@@ -2052,19 +2144,34 @@ class CodeEditor(QPlainTextEdit):
         if gesture == Qt.NativeGestureType.BeginNativeGesture:
             self._native_zoom_active = True
             self._native_zoom_accum = 0.0
+            self._last_native_zoom_ts = time.monotonic()
             return True
         if gesture == Qt.NativeGestureType.EndNativeGesture:
             self._native_zoom_active = False
             self._native_zoom_accum = 0.0
+            self._last_native_zoom_ts = 0.0
             return True
         if gesture == Qt.NativeGestureType.ZoomNativeGesture:
+            # A stalled pinch is a finished pinch; start fresh rather than
+            # adding to magnification banked before the gap.
+            if self._native_zoom_active and not self._native_pinch_in_progress():
+                self._native_zoom_accum = 0.0
             self._native_zoom_active = True
-            self._native_zoom_accum += float(event.value())
-            # ~8% accumulated pinch per point of font size: small enough to feel
-            # continuous, large enough not to race away on a fast gesture.
-            steps = int(self._native_zoom_accum / 0.08)
+            self._last_native_zoom_ts = time.monotonic()
+
+            value = float(event.value())
+            # Reversing the pinch discards magnification banked the other way, so
+            # pinching back in responds at once instead of first undoing travel.
+            if value and self._native_zoom_accum and (value > 0) != (self._native_zoom_accum > 0):
+                self._native_zoom_accum = 0.0
+            self._native_zoom_accum += value
+
+            per_step = self._PINCH_MAGNIFICATION_PER_STEP
+            steps = int(self._native_zoom_accum / per_step)
             if steps:
-                self._native_zoom_accum -= steps * 0.08
+                cap = self._PINCH_MAX_STEPS_PER_EVENT
+                steps = max(-cap, min(cap, steps))
+                self._native_zoom_accum -= steps * per_step
                 handler = getattr(self.window(), "_apply_font_size_delta", None)
                 if callable(handler):
                     handler(steps)
@@ -2072,6 +2179,8 @@ class CodeEditor(QPlainTextEdit):
         return False
 
     def keyPressEvent(self, event):
+        # Typing ends any pending triple click.
+        self._clear_triple_click()
         if event.modifiers() & Qt.ControlModifier:
             key = event.key()
             plus_keys = [Qt.Key_Plus, Qt.Key_Equal]
@@ -2109,6 +2218,7 @@ class CodeEditor(QPlainTextEdit):
                 handler()
 
     def focusOutEvent(self, event):
+        self._clear_triple_click()
         super().focusOutEvent(event)
         handler = getattr(self.window(), "_clear_word_highlight_on_blur", None)
         if callable(handler):

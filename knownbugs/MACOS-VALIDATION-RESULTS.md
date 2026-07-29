@@ -103,11 +103,11 @@ the widget and inspecting the output.
 
 | Item | Result | Evidence |
 |---|---|---|
-| A1 Pinch-to-zoom | **Partial** | Accumulator logic unit-tested (8 % per point, symmetric, duplicate-suppressed). A real trackpad has still never driven it. |
+| A1 Pinch-to-zoom | **Superseded** | The 8 %-per-point constant was about three times too fast — an ordinary pinch moved the font 14 points. Corrected on 2026-07-29; see [`TRACKPAD-ZOOM-AND-CLICK-FIXES.md`](TRACKPAD-ZOOM-AND-CLICK-FIXES.md). |
 | A2 Settings location | **Done** | Now `~/Library/Application Support/Neight/settings.json` after C1. Was previously beside the executable. |
 | A3 Multi-window font bug | **Pass** | Startup makes **0** writes against a stored non-default font; the bug would have written Qt's default. |
 | A4 Cross-window merge | **Pass** | Two windows changing font and margins independently: both changes survive in **both** close orders. |
-| A5 Slow trackpad zoom | **Pass** | Six 20-unit deltas accumulate to exactly 1 step (previously 0, event swallowed). Remainder carried; direction reversal not damped. |
+| A5 Slow trackpad zoom | **Partly wrong** | Six 20-unit deltas do accumulate to 1 step. But "direction reversal not damped" was incorrect — it was, and trackpads were being driven on the mouse-notch scale. Corrected on 2026-07-29; see [`TRACKPAD-ZOOM-AND-CLICK-FIXES.md`](TRACKPAD-ZOOM-AND-CLICK-FIXES.md). |
 | A6 Markdown preview | **Pass (rendering)** | Preview and PDF both produce `codehilite` markup with Pygments tokens, tables, ordered/unordered lists and Tamil; light and dark stylesheets differ. Interactive use still manual. |
 | A7 `.md` associations | **Not verified** | Needs the installed app and Finder. Left alone deliberately — see below. |
 | A8 Encoding and newline | **Pass** | UTF-8, UTF-8+BOM, CRLF, UTF-16±BOM, UTF-32 all detected correctly; no stray U+FEFF; already-correct files produce no conversion notice and round trip byte-identically. |
@@ -237,10 +237,9 @@ The cursor sweep is sized to run in about a second under the offscreen plugin.
   positional disagreement. Fixing it properly means recomputing against the actual
   last-visible line on every scroll, which is the layout surgery **B2** warns against
   attempting without a reason. Left alone on purpose.
-- **`_native_zoom_active` has no timeout.** It is set on a pinch and cleared only by
-  `EndNativeGesture`. If that event were ever dropped, Ctrl+wheel zoom would stay dead for
-  the rest of the session. Low likelihood, but it is a stuck state rather than a degraded
-  one.
+- ~~**`_native_zoom_active` has no timeout.**~~ Fixed on 2026-07-29 —
+  `_native_pinch_in_progress()` treats a pinch idle for 0.5 s as finished. See
+  [`TRACKPAD-ZOOM-AND-CLICK-FIXES.md`](TRACKPAD-ZOOM-AND-CLICK-FIXES.md).
 - **Module split, single-process windows, Large Document Mode** — still deferred, unchanged.
 
 ---
@@ -250,8 +249,11 @@ The cursor sweep is sized to run in about a second under the offscreen plugin.
 These cannot be automated on this machine and remain genuinely unverified:
 
 1. **Pinch-to-zoom on a real trackpad** (A1) — smoothness, no double-apply against the
-   wheel path, ordinary two-finger scrolling unaffected.
+   wheel path, ordinary two-finger scrolling unaffected. *The arithmetic was re-examined
+   on 2026-07-29 and was itself wrong; only calibration remains.*
 2. **Wheel accumulation feel** (A5) — the arithmetic is proven, the feel is not.
+   *Superseded: the arithmetic was not in fact proven — see
+   [`TRACKPAD-ZOOM-AND-CLICK-FIXES.md`](TRACKPAD-ZOOM-AND-CLICK-FIXES.md).*
 3. **Tamil/English keyboard switching** (A12) — double-⌃ Control, quick-switch, Anjal
    English option.
 4. **`.md` file associations** (A7) — needs `Neight.app` in `/Applications` plus Finder.
