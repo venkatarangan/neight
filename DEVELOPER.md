@@ -316,6 +316,7 @@ packaging/             — the PyInstaller specs the build scripts use:
                          overwrites a spec instead of using one.
 design/                — icon generators and architecture infographic source
 knownbugs/             — documented Qt-level bugs, validation runs and fix records
+session-notes/         — per-session handoff records (see "Session notes" above)
 tests/                 — regression suite, run in CI on Windows and macOS
 screenshots/           — screenshots used in documentation
 dist/                  — build output (gitignored — see "Why dist/ Isn't on GitHub")
@@ -329,7 +330,7 @@ an external code-signing workflow. See "Why `dist/` Isn't on GitHub" above.
 
 ### Session notes
 
-[`docs/session-notes/`](docs/session-notes/) holds a handoff record per working
+[`session-notes/`](session-notes/) holds a handoff record per working
 session — what changed, why, what was verified and how, and what was left open.
 Written for a person or an AI assistant starting cold on another machine. Start
 with the newest one; **if you are picking this repository up on Windows for the

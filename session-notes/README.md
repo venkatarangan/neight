@@ -14,10 +14,10 @@ says so — go by the newest file, and by these instead for anything current:
 
 | For | Read |
 |---|---|
-| What changed in each build | [`../../CHANGELOG.md`](../../CHANGELOG.md) |
-| How to build, release, and why `dist/` isn't on GitHub | [`../../DEVELOPER.md`](../../DEVELOPER.md) |
-| What the regression suite guards | [`../../tests/README.md`](../../tests/README.md) |
-| Open Qt-level bugs and validation runs | [`../../knownbugs/`](../../knownbugs/) |
+| What changed in each build | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| How to build, release, and why `dist/` isn't on GitHub | [`../DEVELOPER.md`](../DEVELOPER.md) |
+| What the regression suite guards | [`../tests/README.md`](../tests/README.md) |
+| Open Qt-level bugs and validation runs | [`../knownbugs/`](../knownbugs/) |
 
 ## Notes
 
