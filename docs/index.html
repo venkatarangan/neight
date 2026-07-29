@@ -850,12 +850,12 @@
       <a href="#install-mac" class="btn btn-primary">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.45c-.03-2.7 2.2-4 2.3-4.06-1.26-1.83-3.21-2.08-3.9-2.1-1.66-.17-3.24.97-4.09.97-.85 0-2.15-.95-3.54-.92-1.82.02-3.5 1.06-4.43 2.69-1.89 3.27-.48 8.11 1.36 10.77.9 1.3 1.97 2.76 3.37 2.71 1.35-.06 1.87-.87 3.5-.87 1.63 0 2.1.87 3.53.84 1.46-.02 2.38-1.32 3.27-2.62 1.04-1.5 1.46-2.95 1.48-3.03-.03-.01-2.84-1.09-2.87-4.34zM14.46 4.55c.75-.91 1.25-2.17 1.11-3.42-1.07.04-2.37.71-3.14 1.62-.69.8-1.3 2.09-1.13 3.31 1.19.09 2.4-.6 3.16-1.51z"/></svg>
         Download for macOS
-        <span class="btn-size">arm64 · 40 MB</span>
+        <span class="btn-size">arm64 · 47.4 MB</span>
       </a>
       <a href="#install-win" class="btn btn-secondary">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5L10.5 4.4v7.1H3V5.5zm0 13l7.5 1.1v-7.1H3v6zm8.5 1.2L21 21V12.5h-9.5v7.2zm0-15.4V11.5H21V3l-9.5 1.3z"/></svg>
         Download for Windows
-        <span class="btn-size">.exe · 51 MB</span>
+        <span class="btn-size">.exe · 71.5 MB</span>
       </a>
     </div>
     <div class="notice-banner notice-info">
@@ -929,8 +929,8 @@
           <li><span class="k">Platforms</span><span class="v">macOS · Windows</span></li>
           <li><span class="k">License</span><span class="v">MIT</span></li>
           <li><span class="k">Price</span><span class="v">$0</span></li>
-          <li><span class="k">Size on disk</span><span class="v">~40 – 51 MB</span></li>
-          <li><span class="k">Network use</span><span class="v">None by default</span></li>
+          <li><span class="k">Download size</span><span class="v">47.4 – 71.5 MB</span></li>
+          <li><span class="k">Network use</span><span class="v">Update check only by default</span></li>
           <li><span class="k">File types</span><span class="v">.txt · .md</span></li>
           <li><span class="k">Languages</span><span class="v">Tamil + English + any</span></li>
           <li><span class="k">Releases</span><span class="v"><a href="https://github.com/venkatarangan/neight/releases" style="color: var(--green-2); border-bottom: 0;">on GitHub →</a></span></li>
@@ -987,7 +987,7 @@
           <span class="install-glyph"></span>
           <div>
             <div class="install-name">macOS</div>
-            <div class="install-sub">macOS 12 Monterey or later · Apple Silicon (M1/M2/M3/M4) · signed build</div>
+            <div class="install-sub">macOS 12 Monterey or later · Apple Silicon (arm64) · signed build</div>
           </div>
         </div>
         <ol class="install-steps">
@@ -997,10 +997,10 @@
           <li>Open Applications and double-click Neight. It opens normally &mdash; no right-click-open, no Gatekeeper prompt.</li>
         </ol>
         <div class="install-note">
-          <b>Why only the signed build?</b> A well-wisher contributed an Apple Developer signature so the app installs without the usual unsigned-app warnings. Stick to that build. The macOS download is <b>Apple Silicon only</b> (M1, M2, M3, M4).
+          <b>Why only the signed build?</b> A well-wisher contributed an Apple Developer signature so the app installs without the usual unsigned-app warnings. Stick to that build. The macOS download is <b>Apple Silicon (arm64) only</b>.
         </div>
-        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-signed.zip" download>
-          ↓ Download signed Neight.app <span class="sz">arm64 · ~40 MB</span>
+        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/download/v2026.073/Neight-mac-arm64-signed.zip" download>
+          ↓ Download signed Neight.app <span class="sz">arm64 · 47.4 MB</span>
         </a>
       </article>
 
@@ -1020,10 +1020,10 @@
           <li>Optional &mdash; right-click <code>Neight.exe</code> and choose <b>Pin to taskbar</b> or <b>Create shortcut</b> to keep it handy.</li>
         </ol>
         <div class="install-note">
-          <b>Open With integration.</b> After the first launch, Neight will show up in the right-click <b>Open With</b> menu of <code>.txt</code> files in File Explorer.
+          <b>Open With integration.</b> Open <b>Help &rarr; Debug Info</b> and enable the <code>.txt</code> and/or Markdown <b>Open With</b> checkboxes before Neight will appear in File Explorer&rsquo;s right-click menu.
         </div>
         <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe" download>
-          ↓ Download Neight.exe <span class="sz">~51 MB</span>
+          ↓ Download Neight.exe <span class="sz">71.5 MB</span>
         </a>
       </article>
     </div>
@@ -1177,7 +1177,7 @@
         <tr><th>Markdown</th><td>Live split-view Preview and Refresh Preview, headings, bold/italic, lists (ordered, unordered, checkbox), quotes, code blocks, strikethrough, highlight, tables, links, images.</td></tr>
         <tr><th>Format</th><td>Font picker, Word Wrap.</td></tr>
         <tr><th>View</th><td>Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar items.</td></tr>
-        <tr><th>Settings</th><td>Continue where you left off, Appearance, Save current settings as Writer / Techie Mode Preset, Language Switch, Auto-Save Interval.</td></tr>
+        <tr><th>Settings</th><td>Continue where you left off, Check for Updates on Launch, Appearance, Save current settings as Writer / Techie Mode Preset, Language Switch, Auto-Save Interval.</td></tr>
         <tr><th>Help</th><td>Writer (<span class="tamil">சொல்வெளி</span>) Mode, Techie (<span class="tamil">நுட்பர்</span>) Mode, Check for Updates, About, Debug Info.</td></tr>
       </tbody>
     </table>
@@ -1221,7 +1221,7 @@
     <div class="faq-list">
       <details class="faq-item">
         <summary>Will Neight work on Intel Macs?</summary>
-        <div class="faq-body">Not today. The signed macOS build is <b>Apple Silicon only</b> (M1, M2, M3, M4). If you&rsquo;re on an Intel Mac, the Windows build runs fine under Parallels or similar, or you can build from source &mdash; but there isn&rsquo;t a ready-to-run Intel binary.</div>
+        <div class="faq-body">Not today. The signed macOS build is <b>Apple Silicon (arm64) only</b>. If you&rsquo;re on an Intel Mac, the Windows build runs fine under Parallels or similar, or you can build from source &mdash; but there isn&rsquo;t a ready-to-run Intel binary.</div>
       </details>
       <details class="faq-item">
         <summary>Does it work offline?</summary>
@@ -1249,7 +1249,7 @@
       </details>
       <details class="faq-item">
         <summary>How do I uninstall it?</summary>
-        <div class="faq-body">On macOS, drag <code>Neight.app</code> from Applications to the Trash. On Windows, just delete <code>Neight.exe</code>. There is no installer, no registry, no leftover files. (If you want to be thorough, the only thing Neight writes outside itself is <code>~/Documents/Neight/</code> &mdash; safe to delete.)</div>
+        <div class="faq-body">On macOS, drag <code>Neight.app</code> from Applications to the Trash, then optionally remove <code>~/Library/Application Support/Neight/</code> and <code>~/Documents/Neight/</code>. On Windows, first untick any <b>Open With</b> checkboxes under <b>Help &rarr; Debug Info</b>; this removes Neight&rsquo;s optional registry entries. Then delete <code>Neight.exe</code>. Settings may remain beside the executable or under <code>%LOCALAPPDATA%\Neight\</code>; presets and recovery files may remain under <code>%USERPROFILE%\Documents\Neight\</code>. Neight uses no installer or service entries.</div>
       </details>
       <details class="faq-item">
         <summary>Does Neight work on iPhone or Android?</summary>

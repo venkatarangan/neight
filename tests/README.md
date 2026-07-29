@@ -4,6 +4,7 @@ Regression checks for the behaviour that is easy to break silently and hard to
 notice by hand.
 
 ```bash
+QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
@@ -12,6 +13,11 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
 Each script exits non-zero on failure and prints failures as GitHub Actions
 annotations, so `.github/workflows/checks.yml` runs them directly. They are
 plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
+
+- **`test_startup_settings.py`** — loading preferences at startup must never
+  persist a font the user did not choose. It inspects every settings write and
+  confirms that the stored font is actually applied, guarding the multi-window
+  startup regression fixed in 2026.070.
 
 - **`test_text_integrity.py`** — opening and saving must never alter the user's
   characters. Covers byte-identical round trips, encoding and newline detection

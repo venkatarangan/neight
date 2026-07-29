@@ -17,22 +17,70 @@ Neight includes a built-in debug info panel (**Help → Debug Info…**). It sho
 
 ## Running from Source
 
+Clone the repository, create a virtual environment, and install only the
+runtime dependencies.
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/venkatarangan/neight.git
+cd neight
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python neight.py
+```
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/venkatarangan/neight.git
 cd neight
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-pre-commit install
+python -m pip install -r requirements.txt
 python neight.py
+```
+
+## Building from Source
+
+Developers who intend to build distributables or contribute changes should
+install both the runtime and development dependencies in a virtual environment.
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/venkatarangan/neight.git
+cd neight
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+pre-commit install
+```
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/venkatarangan/neight.git
+cd neight
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+pre-commit install
 ```
 
 > **Important:** `pre-commit install` activates the git hooks defined in `.pre-commit-config.yaml`, including the Tamil spelling guard. Run it once after every fresh clone. Without it the hook is silently inactive. See [Tamil Text Safeguards](#tamil-text-safeguards) for details.
 
-### Requirements
+## Requirements
 
 - Python 3.10+ (built and tested on 3.12)
-- PySide6 / shiboken6 6.11.0 (Qt 6) — pinned
+- PySide6 / shiboken6 6.11.1 (Qt 6) — pinned
 - Markdown 3.10.2 — pinned
+- Pygments 2.20.0 — pinned
 
 Runtime dependencies are in [requirements.txt](requirements.txt), pinned so a
 release can be reproduced. A Qt minor release can change text layout, cursor
@@ -42,11 +90,6 @@ deliberately and re-run the cross-platform checks.
 Build and design tools are separate, in [requirements-dev.txt](requirements-dev.txt):
 `pyinstaller` (distributables), `pillow` (design asset generation only — not
 imported by the application), and `pre-commit` (repository hooks).
-
-```bash
-pip install -r requirements.txt                          # to run Neight
-pip install -r requirements.txt -r requirements-dev.txt  # to build or contribute
-```
 
 > Neight uses **PySide6 exclusively**. All PyQt5 references have been removed. There is no Qt5 fallback.
 
@@ -66,6 +109,8 @@ What it does:
 1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
 2. Runs PyInstaller from the checked-in spec: `pyinstaller packaging\Neight.windows.spec`
 3. Produces `dist\Neight.exe`
+4. Publishes `dist\Neight.exe` to the `dist-latest` branch on a best-effort
+   basis without changing the working tree
 
 After a successful build the script prints a reminder:
 
@@ -85,10 +130,12 @@ chmod +x buildme_mac_app.sh
 
 What it does:
 1. Runs `python3 increment_version.py` to bump `VERSION` in `neight.py`
-2. Cleans `build/`, `dist/Neight.app`, and `__pycache__`
+2. Cleans `build/`, `dist/Neight`, `dist/Neight.app`, and Python test caches
 3. Runs `pyinstaller packaging/Neight.macos.spec` (the checked-in spec preserves `BUNDLE`, `info_plist`, `argv_emulation`, and file-type associations)
 4. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
 5. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
+6. Publishes the unsigned zip to the `dist-latest` branch on a best-effort
+   basis without changing the working tree
 
 After a successful build the script prints the next steps for creating a signed release.
 
@@ -103,6 +150,13 @@ Releases are published using the [GitHub CLI (`gh`)](https://cli.github.com). In
 ```bash
 gh auth login
 ```
+
+> **Commit the version bump before releasing.** The build scripts update
+> `VERSION` in the working tree, while GitHub creates a new release tag at the
+> current `HEAD` commit. Review the build, update the release notes, commit the
+> new version directly to `main`, and push it before running either release
+> script. Otherwise the tag name can describe the newly built version while
+> pointing to source that still contains the previous version.
 
 ### Windows release
 
@@ -263,12 +317,18 @@ Sentence count is calculated from sentence-ending punctuation rather than gramma
 
 ### macOS Open With
 
-Neight's macOS app bundle declares support for `.txt` and `.text` files via its `Info.plist`. This means Finder's **Open With** menu lists Neight automatically — no manual configuration required.
+Neight's macOS app bundle declares support for plain-text (`.txt`, `.text`) and
+Markdown (`.md`, `.markdown`) files via its `Info.plist`. This means Finder's
+**Open With** menu lists Neight automatically — no manual configuration
+required.
 
 **How it works:**
 
-- Right-click any `.txt` or `.text` file in Finder and choose **Open With → Neight**.
-- To make Neight the default for `.txt` files, choose **Open With → Other…**, select Neight, and tick **Always Open With**.
+- Right-click any supported plain-text or Markdown file in Finder and choose
+  **Open With → Neight**.
+- To make Neight the default for a file type, choose **Open With → Other…**,
+  select Neight, and tick **Always Open With**. For Markdown, **Help → Debug
+  Info** can also set Neight as the default through Launch Services.
 - When Neight receives a file this way, macOS sends an Apple Event (`QFileOpenEvent`) rather than passing the path through command-line arguments. Neight handles this transparently — the file opens exactly as if you had used **File → Open** from inside the app.
 - Files received via **Open With** before the main window is ready are buffered and opened as soon as the window appears, so nothing is lost even during a cold launch.
 
@@ -379,12 +439,16 @@ Three layers of protection have been added to this project:
 
 2. **GitHub Actions workflow** (`.github/workflows/tamil-guard.yml`) — runs on every push and pull request. Uses `grep -P` (PCRE) to check all `.py` and `.html` files. If the corrupted form is found, the build fails with an explicit error message.
 
+3. **Copilot repository instructions** (`.github/copilot-instructions.md`) —
+   tell AI coding tools not to retype, autocomplete, or modify Tamil strings,
+   preventing corruption before either automated guard needs to catch it.
+
 ### Setup after cloning
 
-After cloning the repo, install and activate the pre-commit hook:
+After installing the development dependencies as described under
+[Building from Source](#building-from-source), activate the hook:
 
 ```bash
-pip install pre-commit
 pre-commit install
 ```
 
@@ -396,8 +460,11 @@ This is required for the hook to run on `git commit`. Without it, the hook is in
 
 All source files must be saved as **UTF-8 without BOM**. The pre-commit hook enforces this via `check-byte-order-marker`, but the editor must also be configured correctly:
 
-- VS Code: `"files.encoding": "utf8"` and `"files.autoGuessEncoding": false` are set in `.vscode/settings.json` for this project.
-- Other editors: ensure UTF-8 (no BOM) is the default encoding for the workspace.
+- The tracked `.editorconfig` sets UTF-8 and LF for the repository.
+- In VS Code, set `"files.encoding": "utf8"` and
+  `"files.autoGuessEncoding": false` in your user or workspace settings.
+- In other editors, ensure UTF-8 without BOM is the default encoding for the
+  workspace.
 
 Saving a file in a different encoding (UTF-16, Latin-1, etc.) will corrupt Tamil characters silently and the pre-commit hook will catch it on the next commit.
 

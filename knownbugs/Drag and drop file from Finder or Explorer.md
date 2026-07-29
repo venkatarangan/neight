@@ -10,7 +10,8 @@ The `QFileOpenEvent` path already implemented in `NeightApplication.event()` is 
 
 ## Expected Behavior
 
-Dragging a `.txt` or `.md` file onto the editor window should open the file, the same way "Open With" or `File → Open` does.
+Dragging a `.txt`, `.md`, or `.markdown` file onto the editor window should
+open the file, the same way "Open With" or `File → Open` does.
 
 ## Proposed Fix
 
@@ -20,13 +21,16 @@ Override two methods in the `CodeEditor` class (the `QPlainTextEdit` subclass):
 
 - Check if MIME data contains `hasUrls()` (a file drag, not a text drag)
 - Extract the first URL and convert it to a local file path
-- Accept only if the extension is `.txt` or `.md` (case-insensitive) — call `event.acceptProposedAction()`
+- Accept only if the extension is `.txt`, `.md`, or `.markdown`
+  (case-insensitive) — call `event.acceptProposedAction()`
 - For any other file type, silently call `event.ignore()` (no status message while dragging)
 
 ### `dropEvent`
 
 - Extract the first URL from the MIME data (multiple files: only the first is used, rest are ignored silently)
-- Extension check: only `.txt` or `.md`. If anything else → show a brief status bar message e.g. `"Drop ignored — only .txt and .md files are supported"` and return. No popup dialog.
+- Extension check: only `.txt`, `.md`, or `.markdown`. If anything else, show
+  a brief status bar message explaining that only supported text and Markdown
+  files can be dropped, then return. No popup dialog.
 - **Unsaved changes**: call the existing `_maybe_save_changes()` on the parent `Notepad` window. This shows the existing Yes / No / Cancel dialog — intentional, because silently discarding unsaved work on an accidental drop would be a worse outcome than the dialog. If the user cancels → abort the drop.
 - Call `_open_file_path(path, notify_errors=False, show_status=True)`:
   - `notify_errors=False` suppresses all `QMessageBox` popups for file errors (too large, binary, unreadable)
@@ -35,7 +39,8 @@ Override two methods in the `CodeEditor` class (the `QPlainTextEdit` subclass):
 
 ### Where to insert
 
-Right after `insertFromMimeData` (currently around line 1670), still inside the `CodeEditor` class, before the `FindReplaceDialog` class definition.
+Right after `insertFromMimeData`, still inside the `CodeEditor` class and before
+the `FindReplaceDialog` class definition.
 
 ### What is NOT changed
 

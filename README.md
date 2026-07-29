@@ -6,7 +6,9 @@
 
 ![Neight main editor](screenshots/neight-1.png)
 
-**Neight does not use any AI models, call any external services, or send telemetry.** Everything runs locally on your machine.
+**Neight does not use any AI models or send telemetry.** Its only automatic
+network call checks GitHub for the availability of a newer version. That check
+does not share any text, documents, or other data you create.
 
 ---
 
@@ -14,8 +16,8 @@
 
 ### Download
 
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~51 MB)
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-signed.zip) (~40 MB, recommended)
+- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~71.5 MB)
+- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/download/v2026.073/Neight-mac-arm64-signed.zip) (~47.4 MB, recommended)
 
 ### Install on Windows
 
@@ -75,7 +77,14 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Auto-Hide Scrollbar** — scrollbar flashes briefly when you scroll, then disappears to keep the writing area clean
 - **Plain-text paste** (`Shift+Ctrl+V`) — strips formatting on paste
 - **New Window** — open a second instance for side-by-side writing
-- **Open With integration** — Neight appears in Finder's / Explorer's right-click **Open With** menu for `.txt`, `.md` and `.markdown` files. Markdown registers separately, so Explorer labels it *Markdown Document*. Windows has hash-protected the *default* handler since Windows 8, so Neight cannot silently claim it — **Help → Debug Info** says so plainly and links to the Default Apps page; on macOS the same dialog can set the handler directly.
+- **Open With integration** — the macOS app bundle appears in Finder's
+  **Open With** menu for `.txt`, `.md` and `.markdown` files. On Windows, open
+  **Help → Debug Info** and enable the `.txt` and/or Markdown **Open With**
+  checkboxes first; Markdown registers separately, so Explorer labels it
+  *Markdown Document*. Windows has hash-protected the *default* handler since
+  Windows 8, so Neight cannot silently claim it — Debug Info links to the
+  Default Apps page. On macOS, the same dialog can set the Markdown handler
+  directly.
 
 ### Status bar
 
@@ -129,7 +138,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 | **Markdown** | Preview, Refresh Preview, and all Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Word Wrap |
 | **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
-| **Settings** | Continue where you left off, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
+| **Settings** | Continue where you left off, Check for Updates on Launch, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
 | **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Check for Updates, About, Debug Info |
 
 ---
@@ -255,4 +264,3 @@ Neight is provided **AS IS**, without warranties of any kind, express or implied
 Neight is not affiliated with, endorsed by, or sponsored by Google, Sorkuvai, the Government of Tamil Nadu, or any other third-party service or brand referenced by this project. Neight only opens those public services by passing user-selected query text through configured URL prefixes. All third-party names, trademarks, service marks, logos, and copyrights remain the property of their respective owners.
 
 You are responsible for validating whether it is suitable for your own workflow.
-

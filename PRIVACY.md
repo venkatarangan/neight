@@ -1,6 +1,6 @@
 # Privacy Policy for Neight
 
-**Last updated: April 28, 2026**
+**Last updated: July 29, 2026**
 
 ## Overview
 
@@ -26,25 +26,49 @@ This has been verified by a code review of the application source. There are no 
 
 Neight stores the following information **locally on your device only**:
 
-- **Settings file** (`settings.json` or `config.json`) — stores your preferences such as font name, font size, word wrap preference, and autosave interval. This file is stored on your Mac and never leaves your device.
+- **Settings file** (`settings.json`) — stores preferences such as font,
+  appearance, word wrap, autosave interval, window size, and the last-opened
+  file path. On Windows it is normally beside `Neight.exe`, with
+  `%LOCALAPPDATA%\Neight\settings.json` used when that folder is not writable.
+  On macOS it is stored at
+  `~/Library/Application Support/Neight/settings.json`.
+- **Saved documents** — are written only to locations you choose. When
+  autosave is enabled, Neight updates the chosen document at the selected
+  interval.
+- **Presets and recovery copies** — are stored in
+  `%USERPROFILE%\Documents\Neight\` on Windows and
+  `~/Documents/Neight/` on macOS. Recovery copies contain only unsaved text
+  from the current document and are removed during normal save, open, new-file,
+  and close operations.
+- **Autosave diagnostic logs** — are created beside `settings.json` only when
+  an autosave write fails or its watchdog reports a problem.
 
-No data from this file is ever transmitted anywhere.
+None of these files is transmitted by Neight.
 
 ---
 
 ## Network Access
 
-Your text is never transmitted anywhere. Neight has no servers, no account system, and no analytics. There are exactly three situations in which it touches the network.
+Neight never transmits documents automatically. It has no servers, account
+system, analytics, or telemetry. Network access occurs only for the actions
+below.
 
 ### In response to something you do
 
-1. **"Search with Google"** — when you select text and choose to search Google, Neight constructs a Google search URL and opens it in your default web browser. No data passes through Neight's servers; the request goes directly from your browser to Google. Google's own privacy policy applies to that search.
+1. **"Search with Google"** — when you select text and choose to search Google, Neight constructs a Google search URL and opens it in your default web browser. The selected text becomes part of that URL. No data passes through Neight's servers; the request goes directly from your browser to Google. Google's own privacy policy applies to that search.
 
-2. **URL validation** — when you use the "Insert Hyperlink" feature and ask the app to validate a URL, Neight makes a HEAD request to the URL you entered to check whether it is reachable. This request is made from your device directly to the target URL; no data is routed through any Neight server.
+2. **Sorkuvai lookup** — when you explicitly look up a selected word, Neight
+   opens the corresponding search URL in your default browser. The selected
+   word becomes part of that URL.
+
+3. **Markdown links** — clicking an external link in the Markdown preview
+   opens that address in your default browser.
+
+4. **URL validation** — when you use the "Insert Hyperlink" feature and ask the app to validate a URL, Neight makes a HEAD request to the URL you entered to check whether it is reachable. This request is made from your device directly to the target URL; no data is routed through any Neight server.
 
 ### Automatically, unless you turn it off
 
-3. **Update check on launch** — about five seconds after the window appears, Neight asks the GitHub Releases API whether a newer version has been published.
+5. **Update check on launch** — about five seconds after the window appears, Neight asks the GitHub Releases API whether a newer version has been published.
 
    - **What is sent:** an ordinary HTTPS GET request to `https://api.github.com/repos/venkatarangan/neight/releases/latest`, carrying only what any HTTPS request carries — your IP address and a `User-Agent` of `Neight-UpdateChecker/1.0`. No document text, no file names, no settings, no identifier of any kind.
    - **What is received:** the latest published release tag.

@@ -351,7 +351,11 @@ Recovery copies of unsaved documents (see [Recovery Copies for Unsaved Documents
 
 - `~/Documents/Neight/recovery-<PID>-<random>.txt`
 
-This folder is separate from the settings and preset folders. Files here are cleaned up automatically during normal use. Use **File → Empty Recovery Folder** to delete any leftovers.
+Recovery files share the correctly capitalized `~/Documents/Neight/` directory
+with preset files; they are separate from `settings.json`. This exact
+capitalization also applies on macOS, where paths can be case-sensitive. Files
+here are cleaned up automatically during normal use. Use **File → Empty
+Recovery Folder** to delete any leftovers.
 
 ---
 
