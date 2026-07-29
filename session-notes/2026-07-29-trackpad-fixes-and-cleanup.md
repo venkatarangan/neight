@@ -493,14 +493,65 @@ longer public.
 
 ---
 
+## Final documentation and fresh-clone macOS follow-up
+
+The download-size labels in `README.md` and `docs/index.html` were updated to
+the binary values normally shown by Finder and File Explorer:
+
+- Windows: 53,239,402 bytes, displayed as 50.8 MB
+- macOS: 47,447,348 bytes, displayed as 45.2 MB
+
+This was committed and pushed as `60c4d87`. During link validation, the
+Windows Latest-release URL returned 200, but the existing signed macOS URL for
+`v2026.073` returned 404. That release is no longer present. The newest signed
+macOS asset currently visible in GitHub Releases is the older `v2026.065`
+asset, which is 40,524,082 bytes. The website and README link were not silently
+redirected to that older build.
+
+The clean-clone macOS build path was then tightened and pushed as `b3b9810`:
+
+- added `requirements-build.txt`, containing the pinned PyInstaller 6.21.0 and
+  PyInstaller hooks 2026.6 used for a minimal distributable-build environment;
+- made `requirements-dev.txt` include that build requirements file, preserving
+  the existing full developer setup;
+- documented an exact fresh-clone Apple Silicon workflow using a dedicated
+  `.venv-build`, which is now gitignored;
+- made `buildme_mac_app.sh` reject Intel hosts and builds outside an activated
+  virtual environment;
+- made the script invoke versioning and PyInstaller through the same active
+  Python interpreter, preventing a global `pyinstaller` from being selected;
+- corrected the stale spec comment: the macOS spec had already been validated
+  from a clean Apple Silicon clone, including launch, bundle version, document
+  types and code-signature verification.
+
+The dependency set resolved to the intended pinned versions, all 626 regression
+checks passed, and the GitHub Windows/macOS checks, Tamil spelling guard and
+Pages deployment all passed for `b3b9810`. The new safeguards were reviewed on
+Windows; the underlying spec and app had previously been built from a genuinely
+clean clone on Apple Silicon, but this final script revision was not itself
+executed on Mac hardware during the follow-up.
+
+The resulting app from `buildme_mac_app.sh` is deliberately ad-hoc signed and
+unsigned for distribution. An Apple Developer signature and notarization are
+still required before publishing an end-user macOS release.
+
+---
+
 ## Open items
 
-1. **Pinch-zoom calibration on a real trackpad** — the only genuinely unverified
+1. **Publish a current signed and notarized Apple Silicon build.** Add it to
+   the current GitHub release, then update the README and website macOS URL and
+   size from the uploaded asset. The present `v2026.073` URL returns 404.
+2. **Run the final fresh-clone commands on Apple Silicon once more.** The app
+   and spec were previously validated from a clean Mac clone, but the new
+   virtual-environment and architecture guards in `b3b9810` were added from
+   Windows and should receive one final end-to-end Mac run.
+3. **Pinch-zoom calibration on a real trackpad** — the only genuinely unverified
    *application behaviour* from this session. Tune `_PINCH_MAGNIFICATION_PER_STEP`.
-2. **`buildme.bat`'s automatic `dist-latest` publish step has still not been
+4. **`buildme.bat`'s automatic `dist-latest` publish step has still not been
    exercised end to end.** The corrected Windows artifact was built directly
    from the checked-in spec in an isolated environment.
-3. Carried forward from July, unchanged: drag-and-drop from Finder (not
+5. Carried forward from July, unchanged: drag-and-drop from Finder (not
    implemented), Tamil/English keyboard switching and `.md` associations (need
    manual verification), bottom-line snapping for mixed-script documents
    (cosmetic), and the Qt Tamil navigation quirk (upstream).
@@ -528,5 +579,8 @@ longer public.
 | `9fac6dc` | Release 2026.075 with reproducible Windows build |
 | `46d0d2a` | Advance corrected Windows release to 2026.076 |
 | `2c819b0` | Fix Windows release tag probing |
+| `9ce7088` | Record final 2026.076 release state |
+| `60c4d87` | Update published binary sizes |
+| `b3b9810` | Make macOS builds reproducible from a fresh clone |
 
 37 files changed · 1,743 insertions · 3,367 deletions
