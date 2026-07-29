@@ -73,6 +73,76 @@ echo "App bundle: dist/Neight.app"
 echo "Release zip: dist/${ZIP_NAME}"
 echo "========================================"
 echo ""
+
+# ── Publish the unsigned build to the 'dist-latest' branch ──────────────────
+#
+# dist/ is gitignored on main on purpose (see knownbugs/MACOS-VALIDATION-RESULTS.md,
+# decision C4) so ordinary clones stay small.  An external code-signing workflow
+# still needs to fetch the unsigned build over a plain raw.githubusercontent.com
+# URL, which only works for a file that is actually committed to *some* branch.
+# dist-latest is that branch: unrelated to main's history, holding only the
+# current Mac and Windows artifacts.  It is force-pushed as a single amended
+# commit every time so it never accumulates old binaries — always exactly one
+# commit, always just replaced.  A Windows build publishing here later adds its
+# own file alongside this one without touching it; this step only ever touches
+# the macOS artifact.
+#
+# Runs in a throwaway temporary clone so the real working tree (checked out on
+# main) is never touched.  Best-effort: a failure here (no network, no remote,
+# nothing configured) is reported but does not fail the build — the app is
+# already built and signed at this point regardless.
+DIST_LATEST_BRANCH="dist-latest"
+
+publish_to_dist_latest() {
+    local artifact_path="$1"
+    local artifact_name
+    artifact_name="$(basename "${artifact_path}")"
+    local repo_root
+    repo_root="$(pwd)"
+    local remote_url
+    remote_url="$(git config --get remote.origin.url || true)"
+
+    if [ -z "${remote_url}" ]; then
+        echo "  No 'origin' remote configured; skipping."
+        return 1
+    fi
+
+    local stage
+    stage="$(mktemp -d "${TMPDIR:-/tmp}/neight-dist-latest.XXXXXX")"
+    (
+        cd "${stage}"
+        git init -q
+        git remote add origin "${remote_url}"
+        if git fetch -q origin "${DIST_LATEST_BRANCH}" 2>/dev/null; then
+            git checkout -q -b "${DIST_LATEST_BRANCH}" "origin/${DIST_LATEST_BRANCH}"
+        else
+            git checkout -q --orphan "${DIST_LATEST_BRANCH}"
+        fi
+        mkdir -p dist
+        cp "${repo_root}/${artifact_path}" "dist/${artifact_name}"
+        git add dist
+        # No prior commit to amend on the very first run (the orphan branch has
+        # none yet) -- fall back to a plain commit only in that case, so the
+        # branch is left with exactly one commit either way.
+        git commit -q --amend --no-edit >/dev/null 2>&1 \
+            || git commit -q -m "Latest unsigned build artifacts"
+        git push -q --force origin "HEAD:${DIST_LATEST_BRANCH}"
+    )
+    local rc=$?
+    rm -rf "${stage}"
+    return ${rc}
+}
+
+echo "Publishing unsigned build to the '${DIST_LATEST_BRANCH}' branch..."
+if publish_to_dist_latest "dist/${ZIP_NAME}"; then
+    echo "Published ${ZIP_NAME} to '${DIST_LATEST_BRANCH}'."
+    echo "Raw URL: https://raw.githubusercontent.com/venkatarangan/neight/${DIST_LATEST_BRANCH}/dist/${ZIP_NAME}"
+else
+    echo "Warning: could not publish to '${DIST_LATEST_BRANCH}' (see above)."
+    echo "The local build in dist/ is unaffected; re-run this script to retry."
+fi
+echo ""
+
 echo "Friend install instructions (unsigned app):"
 echo "1) Download and unzip ${ZIP_NAME}"
 echo "2) Drag Neight.app to Applications"
