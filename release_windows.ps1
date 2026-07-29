@@ -88,9 +88,22 @@ Write-Host ""
 # Repository rules require the tag to exist before an immutable release is
 # created. Fetch it when present; otherwise create it at the verified HEAD and
 # push it explicitly.
-$null = git fetch origin "refs/tags/${Tag}:refs/tags/${Tag}" 2>$null
-$TagCommit = git rev-list -n 1 $Tag 2>$null
+$RemoteTag = @(git ls-remote --tags origin "refs/tags/$Tag")
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Could not inspect remote tag $Tag."
+    exit 1
+}
+if ($RemoteTag.Count -gt 0) {
+    git fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Could not fetch existing tag $Tag."
+        exit 1
+    }
+}
+
+git show-ref --verify --quiet "refs/tags/$Tag"
 if ($LASTEXITCODE -eq 0) {
+    $TagCommit = git rev-list -n 1 $Tag
     if ($TagCommit -ne $HeadCommit) {
         Write-Error "Tag $Tag points to $TagCommit, not HEAD $HeadCommit."
         exit 1

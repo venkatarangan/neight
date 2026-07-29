@@ -126,7 +126,10 @@ creation: the earlier deleted immutable release permanently reserved
 also exposed a PowerShell error-handling bug — native `gh` failures did not stop
 the script, which printed a false success message. The script now checks every
 native exit code, and both release scripts explicitly create and push a tag at
-the verified commit before creating the immutable release.
+the verified commit before creating the immutable release. A second dry run
+found that Windows PowerShell treats a failed fetch for an expected absent tag
+as a terminating error; the final script probes with `git ls-remote` first and
+fetches only when the tag exists.
 
 The corrected `2026.076` Windows executable was built from a fresh Python 3.12
 virtual environment containing only `requirements.txt` and

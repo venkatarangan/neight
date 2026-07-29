@@ -38,8 +38,9 @@ Corrects the Windows release provenance and makes release builds reproducible.
   an immutable GitHub Release, and Windows now stops on every failed `gh`
   command.** The first correction attempted to reuse deleted `v2026.075`, but
   GitHub permanently reserves tag names used by immutable releases. The failed
-  command was reported correctly after this fix, and the release advanced to
-  `v2026.076`.
+  command was reported correctly after this fix. The Windows script also probes
+  for an existing remote tag without treating an expected missing tag as a
+  PowerShell error. The release advanced to `v2026.076`.
 - **The version incrementer now preserves existing line endings and uses
   console-safe output on Windows.** It previously updated the version and then
   reported failure because the legacy Windows console could not print a Unicode
