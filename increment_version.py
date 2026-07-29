@@ -49,8 +49,9 @@ def update_version_in_file(file_path: Path) -> tuple[str, str]:
         print(f"Error: File not found: {file_path}")
         sys.exit(1)
     
-    # Read the file
-    content = file_path.read_text(encoding='utf-8')
+    # newline="" preserves the file's existing line endings on every platform.
+    with file_path.open("r", encoding="utf-8", newline="") as file:
+        content = file.read()
     
     # Find the VERSION line
     version_pattern = r'^VERSION = "(\d{4}\.\d{3})"'
@@ -73,8 +74,8 @@ def update_version_in_file(file_path: Path) -> tuple[str, str]:
         flags=re.MULTILINE
     )
     
-    # Write back to file
-    file_path.write_text(new_content, encoding='utf-8')
+    with file_path.open("w", encoding="utf-8", newline="") as file:
+        file.write(new_content)
     
     return old_version, new_version
 
@@ -89,7 +90,7 @@ def main():
 
     try:
         old_version, new_version = update_version_in_file(neight_file)
-        print(f"✓ Version updated: {old_version} → {new_version}")
+        print(f"Version updated: {old_version} -> {new_version}")
         return 0
     except Exception as e:
         print(f"Error: {e}")

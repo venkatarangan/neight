@@ -105,6 +105,12 @@ The standard build script increments the version number automatically and then r
 buildme.bat
 ```
 
+For a release build, use a fresh virtual environment containing
+`requirements.txt` plus the pinned PyInstaller version. Do not build a release
+from the general development environment: optional design and presentation
+packages can be discovered by PyInstaller hooks and silently added to the
+executable even though Neight never imports them.
+
 What it does:
 1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
 2. Runs PyInstaller from the checked-in spec: `pyinstaller packaging\Neight.windows.spec`

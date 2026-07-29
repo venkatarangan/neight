@@ -1,12 +1,14 @@
 # 2026-07-29 — Trackpad zoom, click placement, build publishing, repository cleanup, docs audit
 
 **Machine:** macOS 26.5.2 · Apple M4 · arm64 · Python 3.14.6 · PySide6 6.11.1
-**Version:** `2026.070` → `2026.073` committed, released, and current
-**Range:** `4b08936` → `196ae11` (13 commits)
-**State at close:** `main` clean and in sync with GitHub, all CI green, site deployed,
-working tree clean. `v2026.073` is the published GitHub Release. See
+**Version:** `2026.070` → `2026.075`
+**Original macOS range:** `4b08936` → `196ae11` (13 commits)
+**State at close:** `v2026.075` is the corrected Windows release;
+`v2026.073` remains the current signed macOS release. See
 ["The `2026.075` extra build, and cleaning it up"](#the-2026075-extra-build-and-cleaning-it-up)
-for a real bug this session's local builds exposed in `release_macos.sh`.
+for the earlier, unrelated use of the same version number, and
+["The Windows `v2026.074` mismatch and corrected `v2026.075` release"](#the-windows-v2026074-mismatch-and-corrected-v2026075-release)
+for the final Windows release.
 
 ---
 
@@ -59,7 +61,11 @@ Nothing else needs configuring on Windows. Line endings are handled by
 ## The `2026.075` extra build, and cleaning it up
 
 **Resolved by the end of this note — kept as a record because it exposed a
-real, still-present bug in `release_macos.sh`.**
+real release-script bug later fixed with the corrected Windows release.**
+
+> Later the same day, after the bad tag described here had been deleted,
+> `2026.075` was legitimately reused for a new committed Windows release. That
+> separate event is documented in the next section.
 
 Earlier in this session `buildme_mac_app.sh` had been run locally a couple of
 extra times outside any commit, bumping the working tree's `VERSION` to
@@ -87,15 +93,58 @@ git tag -d v2026.075                 # local tag
 git checkout -- neight.py            # working tree back to VERSION = "2026.073"
 ```
 
-**The underlying bug in `release_macos.sh` is not fixed** — it still tags
-from the working tree's `VERSION` rather than the committed one, so running it
-against an uncommitted version bump will reproduce this exact mismatch. Worth
-fixing before it happens again: either refuse to run with a dirty working
-tree, or read `VERSION` from `git show HEAD:neight.py` instead of the file on
-disk.
+**The underlying bug in `release_macos.sh` was not fixed at that point** — it
+still tagged from the working tree's `VERSION` rather than the committed one,
+so running it against an uncommitted version bump would reproduce this exact
+mismatch. It was fixed later in the Windows `2026.075` continuation below.
 
-State now: `v2026.073` is the one real, correctly-named release — signed zip,
-47.4 MB, live as "Latest" — and the working tree is clean.
+State at that point: `v2026.073` was the one real, correctly-named release —
+signed zip, 47.4 MB, live as "Latest" — and the working tree was clean.
+
+---
+
+## The Windows `v2026.074` mismatch and corrected `v2026.075` release
+
+**Machine:** Windows 11 · Python 3.12.10 · PySide6 6.11.1 · PyInstaller 6.21.0
+
+The Windows `v2026.074` release repeated the same provenance failure found
+earlier on macOS. Its tag pointed at commit `e1d7f38`, where committed
+`neight.py` still contained `VERSION = "2026.073"`, while the uploaded
+executable displayed `2026.074`. The executable had therefore been built from
+an uncommitted version bump and then tagged at older source.
+
+The released executable was also unexpectedly large: 71,529,744 bytes. A
+recursive PyInstaller archive comparison showed that it had picked up
+development-only packages from the build environment, including NumPy,
+OpenBLAS, process utilities, YAML and character-detection libraries. None is a
+Neight runtime dependency.
+
+The corrected `2026.075` Windows executable was built from a fresh Python 3.12
+virtual environment containing only `requirements.txt` and
+`PyInstaller==6.21.0`. Its verified properties before release:
+
+- embedded application version: `2026.075`
+- size: 53,239,719 bytes
+- SHA-256:
+  `D0736435415CA2463D6FDCF1D1A288357C21132A1CD562E201C634D6EB651607`
+- no NumPy, Pillow, presentation, XML, process, YAML or charset-detection
+  packages in the PyInstaller archive
+
+Three release-path fixes landed with it:
+
+1. `release_windows.ps1` and `release_macos.sh` now refuse to release when
+   tracked files are dirty and read the version from `git show HEAD:neight.py`,
+   so the tag and source cannot diverge this way again.
+2. `increment_version.py` preserves the source file's existing line endings
+   and uses ASCII console output. On Windows it previously wrote the version,
+   converted the working copy to CRLF, then returned failure because the
+   console could not encode its Unicode success mark.
+3. `DEVELOPER.md` now requires committing and pushing the version bump before
+   either release script runs, and calls for an isolated runtime-only
+   environment for release builds.
+
+The bad `v2026.074` release remains as a historical record; `v2026.075`
+supersedes it rather than rewriting an already-published release.
 
 ---
 
@@ -424,14 +473,10 @@ longer public.
 
 1. **Pinch-zoom calibration on a real trackpad** — the only genuinely unverified
    *application behaviour* from this session. Tune `_PINCH_MAGNIFICATION_PER_STEP`.
-2. **`release_macos.sh` tags from the working tree's `VERSION`, not the
-   committed one.** This is what produced the `v2026.075` mismatch above. Fix
-   by refusing to run with a dirty working tree, or by reading `VERSION` from
-   `git show HEAD:neight.py` rather than the file on disk.
-3. **Windows build has never run** with the new `dist-latest` publish step. The
-   logic mirrors the macOS version, which was verified end to end, but the batch
-   implementation itself is untested.
-4. Carried forward from July, unchanged: drag-and-drop from Finder (not
+2. **`buildme.bat`'s automatic `dist-latest` publish step has still not been
+   exercised end to end.** The corrected Windows artifact was built directly
+   from the checked-in spec in an isolated environment.
+3. Carried forward from July, unchanged: drag-and-drop from Finder (not
    implemented), Tamil/English keyboard switching and `.md` associations (need
    manual verification), bottom-line snapping for mixed-script documents
    (cosmetic), and the Qt Tamil navigation quirk (upstream).

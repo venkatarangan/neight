@@ -7,7 +7,9 @@ Anything untagged is cross-platform.
 
 ---
 
-## Unreleased
+## 2026.075 — 2026-07-29
+
+Corrects the Windows release provenance and makes release builds reproducible.
 
 ### Fixed
 
@@ -19,6 +21,24 @@ Anything untagged is cross-platform.
   `Neight`, from a single constant so they cannot drift apart again. Where the
   old lowercase folder really is separate, presets found in it are copied
   across once, never moved, and an existing preset is never overwritten.
+
+### Infrastructure
+
+- **The Windows executable is built from a clean, runtime-only environment.**
+  **[Windows]** The `v2026.074` executable was built in a development
+  environment and accidentally bundled unrelated packages including NumPy,
+  OpenBLAS, process utilities, YAML and character-detection libraries. The
+  `2026.075` executable contains only Neight's runtime dependencies and
+  PyInstaller support files.
+- **Release scripts now require a clean working tree and read `VERSION` from
+  committed source.** **[Windows] [macOS]** This prevents a release tag from
+  describing an uncommitted build while pointing at older source, which is what
+  happened to `v2026.074`.
+- **The version incrementer now preserves existing line endings and uses
+  console-safe output on Windows.** It previously updated the version and then
+  reported failure because the legacy Windows console could not print a Unicode
+  checkmark; its normal text write also converted the source working copy to
+  CRLF.
 
 ---
 

@@ -18,8 +18,40 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Error "Git is not installed or not available on PATH."
+    exit 1
+}
+
 if (-not (gh auth status 2>$null)) {
     Write-Error "Not authenticated with GitHub. Run: gh auth login"
+    exit 1
+}
+
+$null = git rev-parse --is-inside-work-tree 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Run this script from inside the Neight Git repository."
+    exit 1
+}
+
+$TrackedChanges = @(git status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Could not inspect the Git working tree."
+    exit 1
+}
+if ($TrackedChanges.Count -gt 0) {
+    Write-Error "Tracked files have uncommitted changes. Commit and push the version bump before releasing."
+    exit 1
+}
+
+$HeadCommit = git rev-parse HEAD
+$UpstreamCommit = git rev-parse '@{u}' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "The current branch has no upstream. Push main before releasing."
+    exit 1
+}
+if ($HeadCommit -ne $UpstreamCommit) {
+    Write-Error "HEAD does not match the upstream branch. Push main and confirm it is synchronized before releasing."
     exit 1
 }
 
@@ -29,15 +61,19 @@ if (-not (Test-Path $Exe)) {
     exit 1
 }
 
-# ── Read version from neight.py ──────────────────────────────────────────────
+# ── Read version from committed source ──────────────────────────────────────
 
-$match = Select-String -Path "neight.py" -Pattern '^VERSION = "(\d{4}\.\d{3})"' |
-         Select-Object -First 1
-if (-not $match) {
-    Write-Error "Could not find VERSION in neight.py"
+$CommittedSource = git show HEAD:neight.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Could not read neight.py from the current commit."
     exit 1
 }
-$Version = $match.Matches[0].Groups[1].Value
+$match = [regex]::Match(($CommittedSource -join "`n"), '(?m)^VERSION = "(\d{4}\.\d{3})"')
+if (-not $match.Success) {
+    Write-Error "Could not find VERSION in committed neight.py"
+    exit 1
+}
+$Version = $match.Groups[1].Value
 $Tag     = "v$Version"
 
 Write-Host "========================================"

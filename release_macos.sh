@@ -23,8 +23,35 @@ if ! command -v gh &>/dev/null; then
     exit 1
 fi
 
+if ! command -v git &>/dev/null; then
+    echo "Error: Git is not installed or not available on PATH."
+    exit 1
+fi
+
 if ! gh auth status &>/dev/null; then
     echo "Error: Not authenticated with GitHub. Run: gh auth login"
+    exit 1
+fi
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Error: Run this script from inside the Neight Git repository."
+    exit 1
+fi
+
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "Error: Tracked files have uncommitted changes."
+    echo "Commit and push the version bump before releasing."
+    exit 1
+fi
+
+UPSTREAM_COMMIT="$(git rev-parse '@{u}' 2>/dev/null || true)"
+if [ -z "${UPSTREAM_COMMIT}" ]; then
+    echo "Error: The current branch has no upstream. Push main before releasing."
+    exit 1
+fi
+if [ "$(git rev-parse HEAD)" != "${UPSTREAM_COMMIT}" ]; then
+    echo "Error: HEAD does not match the upstream branch."
+    echo "Push main and confirm it is synchronized before releasing."
     exit 1
 fi
 
@@ -42,18 +69,18 @@ if [ ! -f "$SIGNED_ZIP" ]; then
     exit 1
 fi
 
-# ── Read version from neight.py ──────────────────────────────────────────────
+# ── Read version from committed source ──────────────────────────────────────
 
-VERSION=$(python3 - <<'EOF'
+VERSION=$(git show HEAD:neight.py | python3 -c '
 import re
-content = open("neight.py", encoding="utf-8").read()
+import sys
+content = sys.stdin.read()
 m = re.search(r'^VERSION = "(\d{4}\.\d{3})"', content, re.MULTILINE)
 print(m.group(1) if m else "")
-EOF
-)
+')
 
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not read VERSION from neight.py"
+    echo "Error: Could not read VERSION from committed neight.py"
     exit 1
 fi
 
