@@ -71,13 +71,7 @@ fi
 
 # ── Read version from committed source ──────────────────────────────────────
 
-VERSION=$(git show HEAD:neight.py | python3 -c '
-import re
-import sys
-content = sys.stdin.read()
-m = re.search(r'^VERSION = "(\d{4}\.\d{3})"', content, re.MULTILINE)
-print(m.group(1) if m else "")
-')
+VERSION=$(git show HEAD:neight.py | sed -n -E 's/^VERSION = "([0-9]{4}\.[0-9]{3})".*/\1/p' | head -n1)
 
 if [ -z "$VERSION" ]; then
     echo "Error: Could not read VERSION from committed neight.py"
