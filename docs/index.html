@@ -981,7 +981,12 @@
     </div>
 
     <div class="install-grid">
-      <!-- macOS -->
+      <!-- macOS: pinned to v2026.077, the newest release with a signed mac
+           asset. GitHub's immutable-releases lock means the mac and Windows
+           builds can end up in different release tags (mac and Windows are
+           built/signed on separate machines at separate times), so this
+           can't use releases/latest/download like the Windows link does.
+           Update this tag whenever a newer signed mac build ships. -->
       <article class="install-card mac" id="install-mac">
         <div class="install-head">
           <span class="install-glyph"></span>
@@ -999,7 +1004,7 @@
         <div class="install-note">
           <b>Why only the signed build?</b> A well-wisher contributed an Apple Developer signature so the app installs without the usual unsigned-app warnings. Stick to that build. The macOS download is <b>Apple Silicon (arm64) only</b>.
         </div>
-        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-signed.zip" download>
+        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip" download>
           ↓ Download signed Neight.app <span class="sz">arm64 · 45.2 MB</span>
         </a>
       </article>

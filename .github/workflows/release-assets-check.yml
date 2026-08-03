@@ -1,14 +1,26 @@
 name: Release assets check
 
-# Guards against exactly the bug fixed in commit 602fc84: the website and
-# README link to https://github.com/.../releases/latest/download/<file>,
-# which silently 404s for a platform whenever the "latest" release is
-# missing that platform's asset (e.g. a signed macOS build published before
-# the Windows build lands in the same release, or vice versa). Since the two
-# release scripts run on separate machines at separate times and asset
-# uploads don't fire a new "release" webhook event, a schedule is what
-# actually catches the gap — checking only at publish time would miss the
-# asset that gets added an hour (or a day) later.
+# Guards against the download links on the website/README 404ing.
+#
+# Windows link uses https://github.com/.../releases/latest/download/Neight.exe
+# — checked against whatever release is currently "Latest".
+#
+# macOS link is pinned to an explicit tag (see MAC_RELEASE_TAG below) rather
+# than "latest/download", because GitHub enabled immutable releases on this
+# repo (2026-08): once a release is published its assets can never be added
+# to afterwards, so the mac and Windows builds — built/signed on separate
+# machines at separate times — can permanently end up split across two
+# release tags instead of landing in one shared release like before. The
+# pinned tag has to be updated by hand (in this workflow AND in
+# docs/index.html AND README.md) whenever a newer signed mac build ships.
+#
+# A schedule is what actually catches drift here — checking only at publish
+# time would miss an asset gap that surfaces later (e.g. this tag needing an
+# update after a new mac release), or the Latest release changing away from
+# Windows without a Windows asset.
+env:
+  MAC_RELEASE_TAG: v2026.077
+
 on:
   schedule:
     - cron: '0 6 * * *'
@@ -20,37 +32,45 @@ jobs:
   check-latest-release-assets:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify the Latest release has both platform assets
+      - name: Verify Windows (Latest) and macOS (pinned tag) assets exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          TAG=$(gh release view --repo "$REPO" --json tagName -q .tagName)
-          ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name')
+          LATEST_TAG=$(gh release view --repo "$REPO" --json tagName -q .tagName)
+          LATEST_ASSETS=$(gh release view "$LATEST_TAG" --repo "$REPO" --json assets -q '.assets[].name')
 
-          echo "Latest release: $TAG"
+          echo "Latest release: $LATEST_TAG"
           echo "Assets:"
-          echo "$ASSETS"
+          echo "$LATEST_ASSETS"
 
           missing=0
 
-          if ! echo "$ASSETS" | grep -qx "Neight.exe"; then
-            echo "::error::Latest release ($TAG) is missing Neight.exe — the Windows download link on the website/README will 404."
+          if ! echo "$LATEST_ASSETS" | grep -qx "Neight.exe"; then
+            echo "::error::Latest release ($LATEST_TAG) is missing Neight.exe — the Windows download link on the website/README will 404."
             missing=1
           fi
 
-          if ! echo "$ASSETS" | grep -qx "Neight-mac-arm64-signed.zip"; then
-            echo "::error::Latest release ($TAG) is missing Neight-mac-arm64-signed.zip — the macOS download link on the website/README will 404."
+          MAC_ASSETS=$(gh release view "$MAC_RELEASE_TAG" --repo "$REPO" --json assets -q '.assets[].name')
+
+          echo "macOS-pinned release: $MAC_RELEASE_TAG"
+          echo "Assets:"
+          echo "$MAC_ASSETS"
+
+          if ! echo "$MAC_ASSETS" | grep -qx "Neight-mac-arm64-signed.zip"; then
+            echo "::error::Pinned mac release ($MAC_RELEASE_TAG) is missing Neight-mac-arm64-signed.zip — the macOS download link on the website/README will 404."
             missing=1
           fi
 
           if [ "$missing" -ne 0 ]; then
             echo ""
             echo "Fix: run the missing platform's release script (release_macos.sh"
-            echo "or release_windows.ps1) so both assets are attached to $TAG."
+            echo "or release_windows.ps1), then update MAC_RELEASE_TAG here (and the"
+            echo "matching links in docs/index.html and README.md) if a new mac build"
+            echo "shipped in a different release than Windows."
             exit 1
           fi
 
-          echo "OK: $TAG has both required assets."
+          echo "OK: Windows asset on Latest ($LATEST_TAG), mac asset on pinned tag ($MAC_RELEASE_TAG)."

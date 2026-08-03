@@ -17,7 +17,7 @@ does not share any text, documents, or other data you create.
 ### Download
 
 - **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~50.8 MB)
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/latest/download/Neight-mac-arm64-signed.zip) (~45.2 MB, recommended)
+- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip) (~45.2 MB, recommended) — pinned to v2026.077, the newest release with a signed mac build; mac and Windows can land in different release tags since they're built on separate machines, so this can't use `releases/latest/download` like the Windows link. Update the tag when a newer signed mac build ships.
 
 ### Install on Windows
 
