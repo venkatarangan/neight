@@ -89,11 +89,42 @@ I'd lean towards **Option A** since it keeps one release per shipped version
 instead of the fragmented history this repo already has, but it's the
 maintainer's call.
 
+## Website macOS download link was also broken — now fixed, plus a CI guard
+
+Separately, `https://neight.app/#install-mac` turned out to be broken: both
+`docs/index.html` and `README.md` hardcoded the macOS download link to
+`releases/download/v2026.073/Neight-mac-arm64-signed.zip` — the exact release
+whose asset went missing (see the "gap" note above). That 404 was already a
+known open item from the July session notes and had never been fixed.
+
+Fixed in `602fc84`: both links now use
+`releases/latest/download/Neight-mac-arm64-signed.zip`, the same pattern the
+Windows link already used. This makes the link self-updating — it always
+resolves to whatever the current "Latest" release is, so it doesn't need a
+manual edit on every version bump.
+
+That said, the link is only as good as the release it points at: it 404s for
+a platform whenever the Latest release is missing that platform's asset —
+which is exactly the situation right now (`v2026.077` is macOS-only). To
+catch that automatically, `f087d09` added
+`.github/workflows/release-assets-check.yml`: it checks the Latest release
+for both `Neight.exe` and `Neight-mac-arm64-signed.zip`, running daily, on
+`workflow_dispatch`, and best-effort on `release: published`. It fails loudly
+(GitHub notifies on workflow failure) with a message naming exactly which
+asset is missing and which script to run to fix it.
+
+**This check is currently red** — expected, since `v2026.077` has no Windows
+exe yet. It'll go green as soon as `release_windows.ps1` (Option A above)
+attaches `Neight.exe` to the release Windows lands in. If it's still red
+after the Windows release, that's a real signal something didn't attach
+correctly — check it:
+https://github.com/venkatarangan/neight/actions/workflows/release-assets-check.yml
+
 ## Current repo state (as of this commit)
 
-- `main` @ `eab3327`, `VERSION = "2026.077"`, pushed, tag `v2026.077` exists.
+- `main` @ `f087d09`, `VERSION = "2026.077"`, pushed, tag `v2026.077` exists.
 - GitHub Release `v2026.077` = Latest, asset: `Neight-mac-arm64-signed.zip`
-  only (47,449,521 bytes, notarized).
+  only (47,449,521 bytes, notarized). Windows asset still missing — see above.
 - `stable/Neight-mac-arm64-signed.zip` locally = today's verified 2026.077
   build (gitignored, this Mac only).
 - `dist/Neight.exe.stale-2026.076-pre-077` = old unreleased Windows build,
@@ -101,3 +132,8 @@ maintainer's call.
 - `dist/2026-08-03.zip`, `dist/Neight-mac-arm64-unsigned.app.zip`,
   `dist/Neight.app`, `dist/Neight` — leftover build artifacts from this
   session, all gitignored, safe to clean up whenever.
+- `docs/index.html` and `README.md` macOS download links fixed to track
+  Latest instead of the dead `v2026.073` tag.
+- `.github/workflows/release-assets-check.yml` added — daily + on-demand +
+  release-publish check that both platform assets exist on the Latest
+  release.
