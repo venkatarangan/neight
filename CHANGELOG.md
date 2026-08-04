@@ -7,6 +7,58 @@ Anything untagged is cross-platform.
 
 ---
 
+## 2026.078 — 2026-08-03
+
+Windows-only release. No application code changed — this exists because the
+`v2026.077` release below could not be extended to hold a Windows build.
+
+### Infrastructure
+
+- **The Windows executable had to ship as its own version.** **[Windows]**
+  This repo has GitHub's immutable-releases setting enabled. `v2026.077`'s tag
+  had drifted behind `HEAD` by the time the Windows build ran, and both moving
+  the tag and uploading `Neight.exe` directly to the existing `v2026.077`
+  release were rejected by GitHub once a release is published, its tag and
+  asset list are frozen. `VERSION` was bumped to `2026.078` and released
+  separately instead; it is now the **Latest** release. Immutability has since
+  been turned off for future releases, but not retroactively — `v2026.077`
+  stays macOS-only forever.
+- **Website and README macOS links now pin to `v2026.077` explicitly.**
+  **[Both]** With "Latest" now Windows-only, the `releases/latest/download/…`
+  link (added below, in `2026.077`) stopped resolving to a macOS asset. The
+  Windows link keeps using `releases/latest/download`; the macOS link is a
+  manual pin that must be updated by hand whenever a newer signed macOS build
+  ships in a different release tag. `release-assets-check.yml` was updated to
+  match — Windows checked against Latest, macOS checked against the pinned tag.
+
+---
+
+## 2026.077 — 2026-08-03
+
+Signed, notarized macOS release. No application code changed.
+
+### Infrastructure
+
+- **First signed and notarized macOS build published as a release.**
+  **[macOS]** Developer ID signature and notarization contributed by Muthu
+  Nedumaran; verified with `codesign`, `spctl`, and `xcrun stapler validate`
+  before upload.
+- **Fixed the broken macOS download link on the website and README.**
+  **[Both]** Both had pointed at the `v2026.073` release asset, which no
+  longer exists (404). Switched to `releases/latest/download/…`, matching the
+  pattern the Windows link already used.
+- **Added a CI check that the Latest release has both platform assets.**
+  **[Both]** `release-assets-check.yml` runs daily, on demand, and
+  best-effort on publish; it flags a Latest release missing either platform's
+  asset instead of a user hitting a 404. (`v2026.078` above is the reason this
+  check exists — the split it warns about happened almost immediately.)
+- **Fixed `release_macos.sh`'s version extraction.** **[macOS]** A
+  single-quoted regex nested inside an outer single-quoted bash string broke
+  the version read, failing before any release could run. Replaced with a
+  plain `sed` extraction.
+
+---
+
 ## 2026.076 — 2026-07-29
 
 Corrects the Windows release provenance and makes release builds reproducible.

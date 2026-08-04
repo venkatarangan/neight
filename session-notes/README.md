@@ -28,3 +28,4 @@ file, and by these instead for anything current:
 | Date | Session |
 |---|---|
 | 2026-07-29 | [Trackpad zoom, click placement, build publishing, repository cleanup, docs audit](2026-07-29-trackpad-fixes-and-cleanup.md) |
+| 2026-08-03 | [macOS 2026.077 signed release, and the Windows 2026.078 split forced by immutable releases](2026-08-03-macos-release-and-windows-handoff.md) |
