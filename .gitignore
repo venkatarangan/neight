@@ -11,6 +11,12 @@ __pycache__/
 dist/
 stable/
 
+# MSIX local test-signing certificate (build_msix.ps1 -Sign) — never commit
+# a private key, even a throwaway local test one.
+packaging/*.pfx
+packaging/*.cer
+packaging/*.pfx.password
+
 # Distribution / packaging
 .Python
 build/

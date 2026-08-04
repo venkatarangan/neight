@@ -218,6 +218,84 @@ Step 4 — Publish to GitHub:
 
 ---
 
+## Microsoft Store (MSIX) Packaging
+
+Neight's `.exe` triggers SmartScreen warnings for new users because it isn't
+signed by a certificate with an established reputation. Publishing through
+the Microsoft Store sidesteps that entirely — the Store re-signs every
+package with its own certificate on publish, so an end user never sees a
+SmartScreen prompt. Registration is free for an individual developer account
+(Microsoft dropped the old $19 fee).
+
+This packages the existing `Neight.exe` as a classic Win32 app under the
+**Desktop Bridge** (`EntryPoint="Windows.FullTrustApplication"`), not as a
+native UWP rewrite — no application source changes are needed.
+
+### One-time account setup (manual, only you can do this)
+
+1. Register a free individual developer account at
+   [partner.microsoft.com/dashboard](https://partner.microsoft.com/dashboard).
+   Identity verification can take a few days.
+2. **Apps and games → + New product → reserve the name** `Neight`.
+3. Open that app's **Product identity** page (under App management) and copy
+   the three values shown there — **Package/Identity/Name**,
+   **Package/Identity/Publisher**, **Package/Properties/PublisherDisplayName**
+   — into `packaging/msix_identity.json`, replacing the `REPLACE_ME`
+   placeholders exactly as shown. Do not guess these values; they must match
+   Partner Center's records byte-for-byte or the package will be rejected.
+
+### Building the package
+
+```powershell
+buildme.bat                # produces dist\Neight.exe, as usual
+build_msix.ps1              # produces dist\Neight.msix
+```
+
+`build_msix.ps1`:
+
+- refuses to run while `packaging/msix_identity.json` still has placeholder
+  values, or while the working tree has uncommitted changes (same provenance
+  discipline as `release_windows.ps1` — the packaged version must match what's
+  committed);
+- converts Neight's `VERSION` (`"2026.078"`) into the 4-part numeric version
+  MSIX requires (`2026.78.0.0`);
+- stages `Neight.exe` plus the logo assets from
+  `packaging/msix_assets/Assets/` (regenerate them from `neight.ico` any time
+  with `python design/gen_msix_assets.py`) and a rendered
+  `packaging/AppxManifest.xml.template` into `dist\msix_staging\`;
+- runs `makeappx.exe pack` (from the Windows SDK — installed with Visual
+  Studio, or standalone from the
+  [Windows SDK downloads page](https://developer.microsoft.com/windows/downloads/windows-sdk/))
+  to produce `dist\Neight.msix`.
+
+### Testing locally before submitting
+
+Fastest path — no signing needed, just enable **Settings → Privacy & security
+→ For developers → Developer Mode** once, then:
+
+```powershell
+Add-AppxPackage -Register dist\msix_staging\AppxManifest.xml
+```
+
+To test the actual signed `.msix` file (closer to what Partner Center will
+receive), run `build_msix.ps1 -Sign`. On first use this creates a throwaway
+local test certificate (`packaging\NeightTestCert.pfx`/`.cer`, gitignored —
+**never commit these**), signs the package with it, and prints the
+`Import-Certificate` / `Add-AppxPackage` commands to trust and install it.
+This certificate is for local testing only; it is never uploaded anywhere,
+and has no bearing on Store submission.
+
+### Submitting to the Store
+
+Partner Center → your app → **Packages** → upload `dist\Neight.msix`
+directly. Partner Center signs it with the Store's own certificate on
+publish, so the local test certificate above is not required for submission.
+Store listing content (description, screenshots, age rating) is filled in
+separately in Partner Center and isn't something a script can meaningfully
+automate.
+
+---
+
 ## Why `dist/` Isn't on GitHub
 
 `dist/` is gitignored on `main`, and has been since 2026-07-27. It didn't
@@ -388,12 +466,17 @@ requirements-build.txt — minimal pinned distributable build tooling
 requirements-dev.txt   — build, design and hook tooling
 buildme.bat            — Windows build script
 buildme_mac_app.sh     — macOS build script
+build_msix.ps1         — packages dist\Neight.exe as a Microsoft Store MSIX
+                         (see "Microsoft Store (MSIX) Packaging" above)
 packaging/             — the PyInstaller specs the build scripts use:
                          Neight.windows.spec (EXE) and Neight.macos.spec (BUNDLE).
                          These are build inputs, not generated output — do not
                          build with a bare `pyinstaller ... neight.py`, which
                          overwrites a spec instead of using one.
-design/                — icon generators and architecture infographic source
+                         Also: AppxManifest.xml.template, msix_identity.json
+                         and msix_assets/ for the MSIX package above.
+design/                — icon generators, MSIX asset generator, and
+                         architecture infographic source
 knownbugs/             — documented Qt-level bugs, validation runs and fix records
 session-notes/         — per-session handoff records (see "Session notes" above)
 tests/                 — regression suite, run in CI on Windows and macOS

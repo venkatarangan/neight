@@ -1,0 +1,7 @@
+{
+  "_instructions": "Fill these in after reserving the app name in Partner Center (partner.microsoft.com/dashboard -> Apps and games -> + New product -> MSIX or PC app -> reserve name 'Neight'). Partner Center's 'Product identity' page under App management shows the exact values for the three fields below -- copy them verbatim, do not guess. build_msix.ps1 refuses to run while PackageIdentityName still says REPLACE_ME.",
+  "PackageIdentityName": "REPLACE_ME",
+  "Publisher": "REPLACE_ME",
+  "PublisherDisplayName": "REPLACE_ME",
+  "AppDisplayName": "Neight"
+}
