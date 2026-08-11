@@ -80,7 +80,7 @@ app = BUNDLE(
     coll,
     name='Neight.app',
     icon='../neight.icns',
-    bundle_identifier='com.venkatarangan.neight',
+    bundle_identifier='com.murasu.neight',
     info_plist={
         'CFBundleName': 'Neight',
         'CFBundleDisplayName': 'Neight',
