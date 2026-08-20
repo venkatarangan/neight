@@ -9,9 +9,9 @@ Anything untagged is cross-platform.
 
 ## 2026.079 — 2026-08-20
 
-Distribution release. No application code changed — Neight is now available
-from the Microsoft Store, and the macOS build is being prepared for the Mac
-App Store.
+Distribution release. Neight is now available from the Microsoft Store, and
+the macOS build is being prepared for the Mac App Store — which is what forced
+the update checker's removal, the only application code change here.
 
 ### Infrastructure
 
@@ -31,6 +31,27 @@ App Store.
   Direct downloads from GitHub Releases are relabelled as a separate channel
   rather than the default, and the SmartScreen instructions are scoped to the
   direct `.exe` only.
+
+### Removed
+
+- **The update checker is gone.** **[Both]** Mac App Store review rejected the
+  build over the "Check for Updates" feature, and it had become redundant
+  anyway — Store installs update themselves on both platforms. Removed
+  entirely: the silent GitHub check five seconds after launch, the background
+  threads, the **●** badge on the Help menu, the **Settings → Check for
+  Updates on Launch** toggle, and the **Help → Check for Updates…** dialog.
+  **Help → Neight Releases on GitHub** replaces them — a plain link that opens
+  the releases page in your browser, for anyone running a direct download. The
+  app makes no request itself.
+- **Neight now makes no automatic network connections at all.** **[Both]** The
+  launch update check was the only one. Every remaining network use happens
+  because you clicked something: a Markdown link, a Google or Sorkuvai lookup,
+  **Validate URL**, or the new releases link. `PRIVACY.md` has been rewritten
+  to say so.
+
+  The `update_check_on_launch` key is no longer read or written. Existing
+  `settings.json` files and saved Writer/Techie presets may still contain it;
+  it is ignored and harmless.
 
 ---
 

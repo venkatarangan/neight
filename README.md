@@ -6,9 +6,9 @@
 
 ![Neight main editor](screenshots/neight-1.png)
 
-**Neight does not use any AI models or send telemetry.** Its only automatic
-network call checks GitHub for the availability of a newer version. That check
-does not share any text, documents, or other data you create.
+**Neight does not use any AI models or send telemetry.** It makes no automatic
+network calls at all — it never checks for updates or contacts any server on
+its own. Every network request happens because you clicked something.
 
 ---
 
@@ -83,7 +83,6 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **File → Empty Recovery Folder** to delete old copies.
 - **Smart suggested filename** — when you press `Ctrl+S` on an unsaved document, the save dialog opens pre-filled with a name derived from the first words of your text (up to 4 words, max 100 characters). Accept it, edit it, or choose a different location — the dialog behaves exactly as usual.
 - **Continue where you left off** — reopens your last file at startup (toggleable under Settings)
-- **Automatic update check** — about five seconds after launch Neight silently asks GitHub whether a newer version exists. If one does, a small **●** badge appears on the **Help** menu and a brief status bar message is shown — no pop-up, no interruption. Nothing but an ordinary HTTPS request is sent, and a failure is ignored silently. Turn it off with **Settings → Check for Updates on Launch**; use **Help → Check for Updates…** to check manually at any time.
 - **Auto-Hide Scrollbar** — scrollbar flashes briefly when you scroll, then disappears to keep the writing area clean
 - **Plain-text paste** (`Shift+Ctrl+V`) — strips formatting on paste
 - **New Window** — open a second instance for side-by-side writing
@@ -113,7 +112,7 @@ All Markdown features live in the **Markdown** menu:
 
 The preview uses the same renderer as **Export Markdown to PDF**, so what you see is what the PDF will contain. On a very large document it stops re-rendering as you type and switches to **Markdown → Refresh Preview** (`Ctrl+Shift+R`), so typing never stalls.
 
-> **Privacy note:** URL validation makes a single HEAD request only when you explicitly click **Validate URL**. Your text never leaves your device. The only request Neight makes on its own is the launch update check described above, which can be switched off in **Settings → Check for Updates on Launch**. See [PRIVACY.md](PRIVACY.md).
+> **Privacy note:** URL validation makes a single HEAD request only when you explicitly click **Validate URL**. Your text never leaves your device, and Neight makes no network request on its own. See [PRIVACY.md](PRIVACY.md).
 
 ### PDF export
 
@@ -148,8 +147,8 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 | **Markdown** | Preview, Refresh Preview, and all Markdown insertion shortcuts — headings, lists, formatting, links, tables |
 | **Format** | Font, Word Wrap |
 | **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
-| **Settings** | Continue where you left off, Check for Updates on Launch, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
-| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Check for Updates, About, Debug Info |
+| **Settings** | Continue where you left off, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
+| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Neight Releases on GitHub, About, Debug Info |
 
 ---
 

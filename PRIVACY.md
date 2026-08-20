@@ -1,6 +1,6 @@
 # Privacy Policy for Neight
 
-**Last updated: July 29, 2026**
+**Last updated: August 20, 2026**
 
 ## Overview
 
@@ -66,17 +66,14 @@ below.
 
 4. **URL validation** — when you use the "Insert Hyperlink" feature and ask the app to validate a URL, Neight makes a HEAD request to the URL you entered to check whether it is reachable. This request is made from your device directly to the target URL; no data is routed through any Neight server.
 
-### Automatically, unless you turn it off
+5. **Neight Releases page** — choosing **Help → Neight Releases on GitHub** opens that page in your default browser. Neight itself makes no request; it simply hands the address to your browser.
 
-5. **Update check on launch** — about five seconds after the window appears, Neight asks the GitHub Releases API whether a newer version has been published.
+### Automatically
 
-   - **What is sent:** an ordinary HTTPS GET request to `https://api.github.com/repos/venkatarangan/neight/releases/latest`, carrying only what any HTTPS request carries — your IP address and a `User-Agent` of `Neight-UpdateChecker/1.0`. No document text, no file names, no settings, no identifier of any kind.
-   - **What is received:** the latest published release tag.
-   - **Timing and failure:** once per launch, with a 10-second timeout. If it fails for any reason it is silently ignored — no dialog, no retry.
-   - **What you see:** nothing at all unless a newer version exists, in which case a dot appears next to the Help menu.
-   - **How to turn it off:** **Settings → Check for Updates on Launch**. With it unchecked, Neight makes no network connection unless you explicitly ask it to, including via **Help → Check for Updates**.
-
-Apart from these, Neight makes no background or automatic network connections.
+Nothing. **Neight makes no automatic or background network connections at all.**
+Every network use is in the list above, and every item on that list happens only
+because you clicked something. Neight does not check for updates, does not phone
+home, and does not contact any server on its own — at launch or at any other time.
 
 ---
 

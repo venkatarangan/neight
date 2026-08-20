@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QPalette, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QThread, QLockFile
+from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QLockFile
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -2479,95 +2479,6 @@ class FindReplaceDialog(QDialog):
 
 
 # ---------------------
-# Update checker
-# ---------------------
-_RELEASES_API_URL = "https://api.github.com/repos/venkatarangan/neight/releases/latest"
-
-def _parse_version(v: str):
-    """Parse a YYYY.NNN version string into a comparable (year, day) int tuple.
-
-    Falls back to (0, 0) for any malformed input so comparisons remain safe.
-    """
-    try:
-        parts = v.split(".")
-        if len(parts) == 2:
-            return (int(parts[0]), int(parts[1]))
-    except (ValueError, AttributeError):
-        pass
-    return (0, 0)
-
-class _UpdateCheckWorker(QThread):
-    """Fetches the latest published release tag from GitHub in a background thread."""
-    result_ready = Signal(str, str)  # (latest_version, error_message)
-
-    def run(self):
-        # ── Network request ──────────────────────────────────────────────────
-        raw = None
-        try:
-            req = urllib.request.Request(
-                _RELEASES_API_URL,
-                headers={
-                    "User-Agent": "Neight-UpdateChecker/1.0",
-                    "Accept": "application/vnd.github+json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 403:
-                self.result_ready.emit(
-                    "", "GitHub API rate limit reached. Please try again in a few minutes."
-                )
-            elif exc.code == 404:
-                self.result_ready.emit(
-                    "", "Release information not found on GitHub (HTTP 404)."
-                )
-            else:
-                self.result_ready.emit("", f"HTTP error {exc.code}: {exc.reason}")
-            return
-        except urllib.error.URLError as exc:
-            self.result_ready.emit("", f"Network error: {exc.reason}")
-            return
-        except OSError as exc:
-            self.result_ready.emit("", f"Connection error: {exc}")
-            return
-        except Exception as exc:
-            self.result_ready.emit("", str(exc))
-            return
-
-        # ── Parse response ───────────────────────────────────────────────────
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, ValueError) as exc:
-            self.result_ready.emit("", f"Unexpected response from GitHub: {exc}")
-            return
-
-        if not isinstance(data, dict):
-            self.result_ready.emit("", "Unexpected response format from GitHub.")
-            return
-
-        # GitHub returns {"message": "..."} on API errors (e.g. rate-limited
-        # via an auth header) even with a 200 status code.
-        api_message = data.get("message", "")
-        if api_message and not data.get("tag_name"):
-            self.result_ready.emit("", f"GitHub API error: {api_message}")
-            return
-
-        tag_name = data.get("tag_name", "")
-        if not isinstance(tag_name, str) or not tag_name:
-            self.result_ready.emit("", "No release tag found in GitHub response.")
-            return
-
-        # Strip a single leading 'v' prefix (e.g. "v2026.045" → "2026.045").
-        tag = tag_name[1:] if tag_name.startswith("v") else tag_name
-        if not tag:
-            self.result_ready.emit("", "Could not parse release version from GitHub.")
-            return
-
-        self.result_ready.emit(tag, "")
-
-
-# ---------------------
 # Main window
 # ---------------------
 class Notepad(QMainWindow):
@@ -2696,7 +2607,6 @@ class Notepad(QMainWindow):
         self._word_highlight_selections = []
         self._current_highlight_word = None
         self._base_extra_selections = []
-        self._pending_update_version = None
 
         self.current_path = None
         self._recovery_path: Optional[Path] = None
@@ -3028,14 +2938,6 @@ class Notepad(QMainWindow):
             "Uncheck to always start with a new empty file."
         )
 
-        self.update_check_act = QAction("Check for Updates on Launch", self, checkable=True)
-        self.update_check_act.setChecked(True)  # default; overridden by _load_preferences
-        self.update_check_act.setToolTip(
-            "Asks GitHub once, a few seconds after launch, whether a newer release exists.\n"
-            "Nothing about you or your text is sent — only an ordinary HTTPS request.\n"
-            "Uncheck to make Neight contact the network only when you ask it to."
-        )
-
         # Scroll bar
         self.auto_hide_scrollbar_act = QAction("Auto-Hide Scrollbar", self, checkable=True)
         self.auto_hide_scrollbar_act.setChecked(False)
@@ -3051,7 +2953,11 @@ class Notepad(QMainWindow):
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
-        self.check_updates_act = QAction("Check for Updates...", self)
+        self.releases_act = QAction("Neight Releases on GitHub", self)
+        self.releases_act.setToolTip(
+            "Opens the Neight releases page in your web browser.\n"
+            "Neight never checks for updates on its own."
+        )
         self.view_recovery_folder_act = QAction("View Recovery Folder", self)
         self.view_recovery_folder_act.setToolTip(
             "Open the Neight recovery folder in Finder (macOS) or Explorer (Windows)."
@@ -3227,7 +3133,6 @@ class Notepad(QMainWindow):
 
         settings_menu = menubar.addMenu("&Settings")
         settings_menu.addAction(self.reopen_last_act)
-        settings_menu.addAction(self.update_check_act)
         settings_menu.addSeparator()
         settings_menu.addAction(self.appearance_act)
         save_preset_menu = settings_menu.addMenu("Save Current Settings to")
@@ -3249,7 +3154,7 @@ class Notepad(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.debug_info_act)
         help_menu.addSeparator()
-        help_menu.addAction(self.check_updates_act)
+        help_menu.addAction(self.releases_act)
         help_menu.addAction(self.about_act)
 
     def _connect_signals(self):
@@ -3358,7 +3263,6 @@ class Notepad(QMainWindow):
         # Settings
         self.appearance_act.triggered.connect(self._show_appearance_dialog)
         self.reopen_last_act.toggled.connect(self._on_reopen_last_toggled)
-        self.update_check_act.toggled.connect(self._on_update_check_toggled)
         self.keyboards_act.triggered.connect(self._show_keyboards_dialog)
 
         # Scroll bar
@@ -3373,7 +3277,7 @@ class Notepad(QMainWindow):
         # Help
         self.about_act.triggered.connect(self.show_about)
         self.debug_info_act.triggered.connect(self._show_debug_info)
-        self.check_updates_act.triggered.connect(self._check_for_updates)
+        self.releases_act.triggered.connect(self._open_releases_page)
         self.view_recovery_folder_act.triggered.connect(self._view_recovery_folder)
         self.empty_recovery_act.triggered.connect(self._empty_recovery_folder)
         self.solveli_act.triggered.connect(self._apply_solveli_preset)
@@ -3406,50 +3310,6 @@ class Notepad(QMainWindow):
         if getattr(self, "_restore_maximized", False):
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
             self._restore_maximized = False
-        # Schedule a silent background update check 5 s after first show, so
-        # startup is never delayed.  Skipped entirely when the user has turned
-        # the launch check off, in which case Neight makes no network request
-        # unless explicitly asked (Settings › Check for Updates on Launch).
-        if (getattr(self, "_update_check_on_launch", True)
-                and not getattr(self, "_startup_update_check_scheduled", False)):
-            self._startup_update_check_scheduled = True
-            QTimer.singleShot(5000, self._run_startup_update_check)
-
-    def _on_update_check_toggled(self, checked: bool) -> None:
-        self._update_check_on_launch = bool(checked)
-        self._save_preferences()
-        self.status.showMessage(
-            "Update check on launch: on" if checked
-            else "Update check on launch: off — Neight will not contact the network on its own",
-            3000,
-        )
-
-    def _run_startup_update_check(self):
-        """Silent background check on startup — no UI feedback unless an update is found."""
-        if not getattr(self, "_update_check_on_launch", True):
-            return
-        self._startup_update_worker = _UpdateCheckWorker(self)
-        self._startup_update_worker.result_ready.connect(self._on_startup_update_result)
-        self._startup_update_worker.start()
-
-    def _on_startup_update_result(self, latest: str, error: str):
-        """Called on the UI thread when the startup update check finishes."""
-        if error or not latest or _parse_version(latest) <= _parse_version(VERSION):
-            return
-        # An update is available — annotate the Help menu title and menu item
-        # non-intrusively. No dialog, no interruption.
-        self._pending_update_version = latest
-        menubar = self.menuBar()
-        for act in menubar.actions():
-            if act.text() in ("&Help", "Help"):
-                act.setText("&Help  ●")
-                break
-        self.check_updates_act.setText(f"Check for Updates...  ({latest} available)")
-        # One brief status bar message that disappears as soon as the user types
-        self.status.showMessage(
-            f"Update available: {latest} — see Help menu", 8000
-        )
-
     def eventFilter(self, watched, event):
         """Application-level filter that detects Ctrl/Meta chord usage.
 
@@ -5770,56 +5630,16 @@ th {{ background-color: {table_head_bg}; }}
             msg.setIconPixmap(icon.pixmap(64, 64))
         msg.exec()
 
-    def _check_for_updates(self):
-        """Start a background check for a newer published version on GitHub."""
-        self.check_updates_act.setEnabled(False)
-        self._update_worker = _UpdateCheckWorker(self)
-        self._update_worker.result_ready.connect(self._on_update_check_result)
-        self._update_worker.start()
+    def _open_releases_page(self):
+        """Open the GitHub releases page in the user's browser.
 
-    def _on_update_check_result(self, latest: str, error: str):
-        self.check_updates_act.setEnabled(True)
-        if error:
-            # Clear badge on error — the check is inconclusive
-            self._clear_update_badge()
-            QMessageBox.warning(
-                self, "Check for Updates",
-                f"Could not check for updates.\n\n{error}"
-            )
-            return
-        if not latest or _parse_version(latest) <= _parse_version(VERSION):
-            # Up to date — clear any lingering badge
-            self._clear_update_badge()
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Check for Updates")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText(
-                f"You are running the latest version: <b>{VERSION}</b><br><br>"
-                f"<a href='https://github.com/venkatarangan/neight/releases/tag/v{VERSION}'>"
-                "View release page</a>"
-            )
-            msg.exec()
-        else:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Update Available")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText(
-                f"A new version is available: <b>{latest}</b><br><br>"
-                f"You are running: {VERSION}<br><br>"
-                f"<a href='https://github.com/venkatarangan/neight/releases/tag/v{latest}'>"
-                "Download from GitHub Releases</a>"
-            )
-            msg.exec()
-
-    def _clear_update_badge(self):
-        """Remove the update badge from the Help menu title and menu item text."""
-        self._pending_update_version = None
-        menubar = self.menuBar()
-        for act in menubar.actions():
-            if "Help" in act.text():
-                act.setText("&Help")
-                break
-        self.check_updates_act.setText("Check for Updates...")
+        Neight does not check for updates itself: Store installs update
+        automatically, and this is simply a link out for anyone running a
+        direct download.
+        """
+        QDesktopServices.openUrl(
+            QUrl("https://github.com/venkatarangan/neight/releases")
+        )
 
     def _show_debug_info(self):
         """Show a dialog with diagnostic information useful for bug reports."""
@@ -7240,12 +7060,12 @@ th {{ background-color: {table_head_bg}; }}
         self.editor.setLineNumbersVisible(bool(line_numbers_visible))
 
         # Keys below fall back to the CURRENT in-memory value rather than to a
-        # hardcoded literal, for the reason spelled out at update_check_on_launch
-        # near the end of this method: a saved Writer/Techie preset written before
-        # a setting existed does not carry its key, and a literal default would
-        # silently reset a choice the user had deliberately made.  Every attribute
-        # used as a fallback here is assigned in Notepad.__init__, so a fresh
-        # install with no settings file still lands on the documented default.
+        # hardcoded literal: a saved Writer/Techie preset written before a
+        # setting existed does not carry its key, and a literal default would
+        # silently reset a choice the user had deliberately made.  Every
+        # attribute used as a fallback here is assigned in Notepad.__init__, so
+        # a fresh install with no settings file still lands on the documented
+        # default.
 
         # Auto-hide scrollbar
         auto_hide_scrollbar = bool(data.get(
@@ -7414,16 +7234,6 @@ th {{ background-color: {table_head_bg}; }}
             self._toggle_markdown_preview(True)
         else:
             self.preview.setVisible(False)
-
-        # Automatic update check on launch (the app's only unprompted network use).
-        # Falls back to the CURRENT value, not to True: presets and preset files
-        # written before this setting existed do not carry the key, and defaulting
-        # to True there would silently re-enable network access for a user who had
-        # deliberately turned it off.
-        self._update_check_on_launch = bool(data.get(
-            "update_check_on_launch", getattr(self, "_update_check_on_launch", True)
-        ))
-        self._sync_action_checked(self.update_check_act, self._update_check_on_launch)
 
     # --- Preferences ---
     def _load_preferences(self):
@@ -7616,7 +7426,6 @@ th {{ background-color: {table_head_bg}; }}
                 "autosave_interval": autosave_interval,
                 "last_opened_file": last_opened_file,
                 "reopen_last_file_on_launch": self._restore_last_session,
-                "update_check_on_launch": getattr(self, '_update_check_on_launch', True),
                 "markdown_preview_visible": bool(getattr(self, '_markdown_preview_visible', False)),
                 "markdown_preview_split": list(getattr(self, '_preview_split_sizes', []) or []),
                 "appearance_theme_mode": self._normalize_theme_mode(
@@ -9004,12 +8813,6 @@ th {{ background-color: {table_head_bg}; }}
             self._clear_recovery_file()
             if not getattr(self, '_settings_reset_pending', False):
                 self._save_preferences()
-            # Stop any in-flight update-check threads so the process exits cleanly.
-            for _worker_attr in ("_startup_update_worker", "_update_worker"):
-                _worker = getattr(self, _worker_attr, None)
-                if _worker is not None and _worker.isRunning():
-                    _worker.quit()
-                    _worker.wait(2000)
             event.accept()
         else:
             event.ignore()

@@ -369,17 +369,18 @@ This is a Qt-level behavior, not specific to Neight. Detailed notes and reproduc
 
 ## Updating Neight
 
-### Automatic update notification
+Neight never checks for updates on its own — it makes no automatic network
+request of any kind. How you get a new version depends on where you installed
+it from:
 
-Five seconds after the window appears, Neight silently checks GitHub for a newer version in the background. If a new version is found:
+- **Microsoft Store (Windows)** — updates arrive automatically, like any other
+  Store app. Nothing to do.
+- **Mac App Store** — same, once that version ships.
+- **Direct download from GitHub Releases** — manual. **Help → Neight Releases
+  on GitHub** opens the releases page in your browser so you can see whether a
+  newer build exists; compare it against the version in **Help → About**.
 
-- A small **●** badge appears on the **Help** menu title.
-- The **Help → Check for Updates…** item is annotated with the available version number.
-- A brief message is shown in the status bar for a few seconds, then disappears as soon as you start typing.
-
-There is no pop-up dialog and no interruption to your work. Use **Help → Check for Updates…** at any time to trigger a manual check.
-
-### Installing an update
+### Installing an update (direct downloads)
 
 #### Windows
 
