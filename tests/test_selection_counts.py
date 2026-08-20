@@ -16,6 +16,7 @@ scripts with no event loop spinning.
 import pathlib
 import sys
 import tempfile
+import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -220,6 +221,69 @@ def main() -> None:
         neight._SCRIPT_MEMO_MAX_BYTES = real_cap
         neight._SCRIPT_MEMO.clear()
         neight._script_memo_bytes = 0
+
+    # --- Memo safety under concurrency -------------------------------------
+    # The counters run on the Qt main thread today, so this cannot happen now.
+    # It is asserted because the failure mode of getting it wrong later is
+    # silent: the byte budget is a non-atomic `+=`, so a counting thread would
+    # lose increments and quietly stop bounding memory.  Two invariants must
+    # survive regardless of how many threads call in -- answers stay correct
+    # (the function is pure and dict get/set are atomic), and the entry ceiling
+    # still bounds the memo even when the byte counter drifts low.
+    real_cap = neight._SCRIPT_MEMO_MAX_BYTES
+    real_max = neight._SCRIPT_MEMO_MAX_ENTRIES
+
+    def reference(word):
+        tamil = english = 0
+        for ch in word:
+            code = ord(ch)
+            if 0x0B80 <= code <= 0x0BFF:
+                tamil += 1
+            elif ("A" <= ch <= "Z") or ("a" <= ch <= "z"):
+                english += 1
+        if tamil == 0 and english == 0:
+            return "other"
+        return "tamil" if tamil > english else ("english" if english > tamil else "other")
+
+    try:
+        neight._SCRIPT_MEMO.clear()
+        neight._script_memo_bytes = 0
+        neight._SCRIPT_MEMO_MAX_BYTES = 1 << 30    # let the ceiling be what binds
+        neight._SCRIPT_MEMO_MAX_ENTRIES = 500
+        probes = [f"நினைவு{i}" if i % 2 else f"writing{i}" for i in range(4000)]
+        wrong = []
+
+        def hammer():
+            for word in probes:
+                if neight.Notepad._classify_word_script(word) != reference(word):
+                    wrong.append(word)
+
+        workers = [threading.Thread(target=hammer) for _ in range(4)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+
+        check(not wrong,
+              f"concurrent lookups must stay correct; {len(wrong)} wrong, e.g. {wrong[:3]}")
+        check(len(neight._SCRIPT_MEMO) <= neight._SCRIPT_MEMO_MAX_ENTRIES,
+              f"entry ceiling must hold under threads: {len(neight._SCRIPT_MEMO)} "
+              f"> {neight._SCRIPT_MEMO_MAX_ENTRIES}")
+    finally:
+        neight._SCRIPT_MEMO_MAX_BYTES = real_cap
+        neight._SCRIPT_MEMO_MAX_ENTRIES = real_max
+        neight._SCRIPT_MEMO.clear()
+        neight._script_memo_bytes = 0
+
+    # A cached False must not be mistaken for a cache miss -- the classic
+    # memoisation bug, which would silently recompute every space forever.
+    neight._WORD_CHAR_MEMO.clear()
+    for ch in " a?இ\t1":
+        neight._is_word_char_cached(ch)
+    cached_false = [k for k, v in neight._WORD_CHAR_MEMO.items() if v is False]
+    check(cached_false, "expected some characters to cache as False")
+    check(all(neight._is_word_char_cached(k) is False for k in cached_false),
+          "a cached False must be returned, not treated as a miss")
 
     sys.exit(report("Selection counts"))
 
