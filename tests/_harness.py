@@ -34,7 +34,18 @@ def report(title: str) -> int:
 
 def main(run) -> None:
     """Run ``run`` inside a Qt application and exit with the check result."""
+    import pathlib
+    import tempfile
+
     import neight
+
+    # Point settings at a throwaway file before the window exists.  Notepad
+    # persists preferences as a side effect of ordinary operation, so without
+    # this a test run rewrites the real settings of whoever executes it -- and
+    # then reads them back on the next run, making results depend on what the
+    # previous test happened to leave behind.
+    store = pathlib.Path(tempfile.mkdtemp()) / "settings.json"
+    neight.SettingsManager._determine_active_path = lambda self: store
 
     app = neight.NeightApplication(sys.argv)
     window = neight.Notepad(initial_file=None, restore_last_session=False)
