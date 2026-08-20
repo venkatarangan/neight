@@ -257,8 +257,8 @@ build_msix.ps1              # produces dist\Neight.msix
   values, or while the working tree has uncommitted changes (same provenance
   discipline as `release_windows.ps1` — the packaged version must match what's
   committed);
-- converts Neight's `VERSION` (`"2026.078"`) into the 4-part numeric version
-  MSIX requires (`2026.78.0.0`);
+- converts Neight's `VERSION` into the 4-part numeric version MSIX requires
+  (e.g. `"2026.081"` becomes `2026.81.0.0`);
 - stages `Neight.exe` plus the logo assets from
   `packaging/msix_assets/Assets/` (regenerate them from `neight.ico` any time
   with `python design/gen_msix_assets.py`) and a rendered

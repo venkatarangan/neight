@@ -7,7 +7,7 @@ Anything untagged is cross-platform.
 
 ---
 
-## 2026.080 — 2026-08-20
+## 2026.081 — 2026-08-20
 
 Neight is now available from the Microsoft Store, and the macOS build is being
 prepared for the Mac App Store — which is what forced the update checker's
