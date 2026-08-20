@@ -2478,6 +2478,25 @@ class FindReplaceDialog(QDialog):
         self.closed.emit()
 
 
+# Memo for the word-character test used by tokenisation (Notepad._is_word_char
+# and _extract_word_spans below).  The test is a pure function of a single
+# character, and a document draws on a few hundred distinct characters at most,
+# so this turns one unicodedata.category() call *per character of the document*
+# into one per distinct character.  Worth it because the tokeniser runs over the
+# whole document every 250 ms while typing, and again per block whenever the
+# Word Index Overlay rebuilds its cache.
+_WORD_CHAR_MEMO: dict = {}
+
+
+def _is_word_char_cached(ch, _memo=_WORD_CHAR_MEMO, _category=unicodedata.category):
+    """unicodedata.category(ch) startswith L/N/M, memoised on ch."""
+    result = _memo.get(ch)
+    if result is None:
+        result = _category(ch).startswith(("L", "N", "M"))
+        _memo[ch] = result
+    return result
+
+
 # ---------------------
 # Main window
 # ---------------------
@@ -2651,17 +2670,22 @@ class Notepad(QMainWindow):
         self._appearance_custom_fg = "#f1f3f4"
         self._line_spacing_preset = "single_line"
 
-        # Status bar item visibility (defaults; overridden in _load_preferences)
-        # Last computed whole-document counts, so a selection change can render
-        # "N of Total" without recounting the document.  Holds finished numbers
-        # only — never the text or the token list, which are what we are trying
-        # to avoid keeping around.  None until the first _update_status_bar.
+        # Status bar counter caches.  _doc_counts holds the last whole-document
+        # counts so a selection change can render "N of Total" without
+        # recounting the document; _sel_counts does the same for the selection,
+        # or is None when nothing is selected.  Both hold finished values only
+        # (ints and the rendered reading-time string) — never the text or the
+        # token list.  _doc_revision is the document revision those counts were
+        # taken at, so an unchanged document is never recounted.
         self._doc_counts = None
-        # Counts for the current selection, or None when nothing is selected.
+        self._doc_counts_flags = None
+        self._doc_revision = None
         self._sel_counts = None
         # Which reserved-width set the counters currently use (see
         # _apply_counter_widths).  None until first applied.
         self._counter_widths_wide = None
+
+        # Status bar item visibility (defaults; overridden in _load_preferences)
         self._status_show_words = True
         self._status_show_sentences = True
         self._status_show_chars = True
@@ -8725,8 +8749,7 @@ th {{ background-color: {table_head_bg}; }}
 
     @staticmethod
     def _is_word_char(ch: str) -> bool:
-        category = unicodedata.category(ch)
-        return category.startswith(("L", "N", "M"))
+        return _is_word_char_cached(ch)
 
     @classmethod
     def _extract_word_spans(cls, text: str) -> list[tuple[int, int]]:
@@ -8737,9 +8760,12 @@ th {{ background-color: {table_head_bg}; }}
         current_start = None
         connector_chars = {"'", "’", "-", "‐"}
         length = len(text)
+        # Bound locally: this runs once per character of the document, so the
+        # staticmethod attribute lookup is not free at that scale.
+        is_word_char = _is_word_char_cached
 
         for idx, ch in enumerate(text):
-            if cls._is_word_char(ch):
+            if is_word_char(ch):
                 if current_start is None:
                     current_start = idx
                 continue
@@ -8748,7 +8774,7 @@ th {{ background-color: {table_head_bg}; }}
                 ch in connector_chars
                 and current_start is not None
                 and idx + 1 < length
-                and cls._is_word_char(text[idx + 1])
+                and is_word_char(text[idx + 1])
             ):
                 continue
 
@@ -8765,17 +8791,19 @@ th {{ background-color: {table_head_bg}; }}
     def _extract_word_tokens(cls, text: str) -> list[str]:
         return [text[start:end] for start, end in cls._extract_word_spans(text)]
 
-    def _update_reading_time_status(self, text: str, tokens: Optional[list[str]] = None,
-                                    label: str = "Read"):
-        if not getattr(self, "_reading_time_enabled", False):
-            self.reading_time_label.setText("")
-            return
+    def _reading_time_body(self, tokens: list[str]) -> str:
+        """The reading-time estimate without its label prefix.
 
-        if tokens is None:
-            tokens = self._extract_word_tokens(text)
+        Returns e.g. "2 min | Ta 28% En 72%".  Pure: the caller adds "Read: " or
+        "Read (sel): ".  Keeping the prefix out matters because Ctrl+A points
+        _sel_counts at the *same dict* as _doc_counts, so a cached string that
+        already carried a prefix would render the wrong one.
+
+        Classifying every token walks every character, so this result is cached
+        by _count_text rather than recomputed on each render.
+        """
         if not tokens:
-            self.reading_time_label.setText(f"{label}: <1 min")
-            return
+            return "<1 min"
 
         tamil_words = 0
         english_words = 0
@@ -8807,9 +8835,7 @@ th {{ background-color: {table_head_bg}; }}
         else:
             estimate = str(int(math.ceil(weighted_minutes)))
 
-        self.reading_time_label.setText(
-            f"{label}: {estimate} min | Ta {tamil_pct}% En {english_pct}%"
-        )
+        return f"{estimate} min | Ta {tamil_pct}% En {english_pct}%"
 
     def _status_counter_flags(self):
         """(words, sentences, chars, reading_time) visibility, in render order."""
@@ -8825,6 +8851,11 @@ th {{ background-color: {table_head_bg}; }}
 
         A hidden counter is never computed, so its key is absent from the
         result.  Callers must therefore read with .get().
+
+        Everything stored here is a *finished* value -- an int, or the rendered
+        reading-time string.  The token list is deliberately not kept: it is
+        both large (~6.7 MB on a 730 KB document) and, if kept, tempts callers
+        into reclassifying it on every repaint.
         """
         show_words, show_sentences, show_chars, reading_time = flags
         counts = {}
@@ -8836,8 +8867,8 @@ th {{ background-color: {table_head_bg}; }}
             counts["sentences"] = self._count_sentences(text)
         if show_chars:
             counts["chars"] = len(text)
-        if need_tokens:
-            counts["tokens"] = tokens
+        if reading_time:
+            counts["reading"] = self._reading_time_body(tokens)
         return counts
 
     # Reserved widths for the counters, narrow and wide.  Sized to the widest
@@ -8904,9 +8935,9 @@ th {{ background-color: {table_head_bg}; }}
             # marks itself instead.  The marker sits on the label rather than
             # after the estimate, where it would look like it qualified only
             # the trailing Ta/En percentages.
-            self._update_reading_time_status(
-                "", tokens=source.get("tokens", []),
-                label="Read (sel)" if sel is not None else "Read",
+            prefix = "Read (sel)" if sel is not None else "Read"
+            self.reading_time_label.setText(
+                f"{prefix}: {source.get('reading', '<1 min')}"
             )
         else:
             self.reading_time_label.setText("")
@@ -8916,10 +8947,22 @@ th {{ background-color: {table_head_bg}; }}
         # Skip the O(n) toPlainText() copy entirely when nothing needs the document text.
         if not any(flags):
             self._doc_counts = None
+            self._doc_counts_flags = None
+            self._doc_revision = None
             self._sel_counts = None
             self._update_cursor_position_status()
             return
-        self._doc_counts = self._count_text(self.editor.toPlainText(), flags)
+        # Counting the document is the expensive part of this method, so skip it
+        # when nothing it depends on has moved.  The flags are part of the guard
+        # as well as the revision: switching a counter on needs a recount even
+        # though the text is identical.
+        revision = self.editor.document().revision()
+        if (self._doc_counts is None
+                or self._doc_revision != revision
+                or self._doc_counts_flags != flags):
+            self._doc_counts = self._count_text(self.editor.toPlainText(), flags)
+            self._doc_counts_flags = flags
+            self._doc_revision = revision
         # Keep the selection in step with what was just counted.  Both a counter
         # switched on mid-selection and an edit made with text still selected
         # would otherwise leave _sel_counts missing a key or describing text
@@ -8936,8 +8979,8 @@ th {{ background-color: {table_head_bg}; }}
         the user immediately abandons, a drag in progress — off the status bar
         entirely.  Deferring the *disappearance* would be worse than useless:
         the numbers on screen would describe a selection that no longer exists,
-        which reads as a bug rather than as polish.  Clearing also costs
-        nothing, since it re-renders from counts already computed.
+        which reads as a bug rather than as polish.  Clearing really is free:
+        it re-renders finished numbers, counting nothing.
         """
         if self.editor.textCursor().hasSelection():
             self._selection_count_timer.start()
@@ -8975,8 +9018,15 @@ th {{ background-color: {table_head_bg}; }}
         flags = self._status_counter_flags()
         if not any(flags):
             return
-        if self._doc_counts is None:
+        # A selection can settle before any status tick has run, or under flags
+        # the cached counts were not taken with.
+        revision = self.editor.document().revision()
+        if (self._doc_counts is None
+                or self._doc_revision != revision
+                or self._doc_counts_flags != flags):
             self._doc_counts = self._count_text(self.editor.toPlainText(), flags)
+            self._doc_counts_flags = flags
+            self._doc_revision = revision
         self._recount_selection(flags)
         self._render_counter_labels()
 

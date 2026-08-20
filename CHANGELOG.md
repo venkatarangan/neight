@@ -29,6 +29,28 @@ removal. Also adds selection-aware counts to the status bar.
   selection that no longer exists would be worse than none. Selecting the whole
   document reuses the counts already on screen instead of recounting.
 
+### Performance
+
+- **The status bar counters got noticeably cheaper on large documents.**
+  Measured on a 730 KB mixed Tamil/English file with every counter enabled, a
+  status refresh went from **126 ms to 98 ms**, and a refresh where the text
+  had not changed from 126 ms to **effectively free** — the document is no
+  longer recounted unless its revision or the visible counters actually moved.
+  Repainting the counters (which happens whenever a selection appears or is
+  cleared) went from **41 ms to 0 ms**.
+- **Tokenising is about 1.5x faster.** **[Both]** The word splitter asked
+  Unicode for a character's category once per character of the document; it now
+  asks once per *distinct* character, which on real text is a few dozen lookups
+  instead of hundreds of thousands. Output is unchanged — verified identical
+  across 6,024 cases including Tamil combining marks, connectors and mixed
+  scripts. The Word Index Overlay uses the same splitter and gets the same
+  speedup.
+- **Fixed a memory regression in the new selection counts.** The count cache
+  was holding the document's full token list — about 6.7 MB on that same
+  730 KB file, for as long as the window stayed open. It now caches only
+  finished values, and the reading-time estimate is computed once per count
+  rather than re-derived on every repaint.
+
 ### Infrastructure
 
 - **Neight is on the Microsoft Store.** **[Windows]** The Store is now the

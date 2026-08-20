@@ -147,6 +147,33 @@ def main() -> None:
     equal(window.words_label.minimumWidth(), narrow,
           "clearing the selection must give the reserved width back")
 
+    # --- The cache holds finished values, never the token list -------------
+    # Caching tokens retained ~6.7 MB on a 730 KB document and made every
+    # repaint reclassify every token (41 ms), including the supposedly free
+    # selection-clear path.  Invisible from the outside, so assert it directly.
+    window._status_show_sentences = True
+    window._reading_time_enabled = True
+    window.editor.setPlainText(DOC)
+    window._update_status_bar()
+    check("tokens" not in window._doc_counts,
+          f"_doc_counts must not retain the token list; keys = {sorted(window._doc_counts)}")
+    check(isinstance(window._doc_counts.get("reading"), str),
+          "_doc_counts must cache the finished reading-time string")
+    for value in window._doc_counts.values():
+        check(isinstance(value, (int, str)),
+              f"cached counts must be finished values, got {type(value).__name__}")
+
+    # An unchanged document must not be recounted.
+    window._update_status_bar()
+    first = window._doc_counts
+    window._update_status_bar()
+    check(window._doc_counts is first,
+          "an unchanged document must reuse the cached counts, not recount")
+    window.editor.setPlainText(DOC + " extra words here.")
+    window._update_status_bar()
+    check(window._doc_counts is not first,
+          "an edited document must be recounted")
+
     sys.exit(report("Selection counts"))
 
 
