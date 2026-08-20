@@ -30,3 +30,4 @@ file, and by these instead for anything current:
 | 2026-07-29 | [Trackpad zoom, click placement, build publishing, repository cleanup, docs audit](2026-07-29-trackpad-fixes-and-cleanup.md) |
 | 2026-08-03 | [macOS 2026.077 signed release, and the Windows 2026.078 split forced by immutable releases](2026-08-03-macos-release-and-windows-handoff.md) |
 | 2026-08-04 | [MSIX/Microsoft Store packaging built, blocked on Partner Center identity verification](2026-08-04-msix-store-packaging-pending-verification.md) |
+| 2026-08-20 | [Update checker removed for App Store review, selection counts added, direct downloads moved to `dist-latest`](2026-08-20-store-distribution-and-status-bar-work.md) |
