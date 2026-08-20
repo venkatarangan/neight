@@ -33,7 +33,7 @@ removal. Also adds selection-aware counts to the status bar.
 
 - **The status bar counters got noticeably cheaper on large documents.**
   Measured on a 730 KB mixed Tamil/English file with every counter enabled, a
-  status refresh went from **126 ms to 98 ms**, and a refresh where the text
+  status refresh went from **126 ms to 64 ms**, and a refresh where the text
   had not changed from 126 ms to **effectively free** — the document is no
   longer recounted unless its revision or the visible counters actually moved.
   Repainting the counters (which happens whenever a selection appears or is
@@ -45,6 +45,20 @@ removal. Also adds selection-aware counts to the status bar.
   across 6,024 cases including Tamil combining marks, connectors and mixed
   scripts. The Word Index Overlay uses the same splitter and gets the same
   speedup.
+- **Reading-time estimation is roughly 14x faster.** **[Both]** Deciding
+  whether a word reads as Tamil or English walked every character of every
+  word, on every refresh. That answer depends only on the word, and prose
+  repeats words heavily, so it is now remembered: 88 ms to 6 ms across 250,000
+  words. The figures are unchanged — verified identical over 8,025 cases
+  spanning Tamil, English, mixed-script, digits, connectors and punctuation.
+
+  What is remembered is capped at **4 MB**, since unlike the character cache
+  above the vocabulary of a document has no natural ceiling. On reaching the
+  cap it stops adding but keeps using what it has, which measured faster than
+  emptying and refilling (103 ms vs 113 ms on a deliberately extreme document
+  of 162,137 distinct words — both still ahead of the 119 ms it would cost
+  with no cache at all). Because the answer depends only on the word, a full
+  cache can only ever cost speed, never accuracy.
 - **Fixed a memory regression in the new selection counts.** The count cache
   was holding the document's full token list — about 6.7 MB on that same
   730 KB file, for as long as the window stayed open. It now caches only

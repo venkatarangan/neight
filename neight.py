@@ -2478,6 +2478,61 @@ class FindReplaceDialog(QDialog):
         self.closed.emit()
 
 
+# Memo for word-script classification (Notepad._classify_word_script below).
+# The answer is a pure function of the word, and prose repeats words heavily,
+# so this collapses a per-character walk of every token into one dict lookup:
+# measured 88 ms -> 6 ms over 250,000 tokens.
+#
+# Unlike the character memo below, the key space here is unbounded -- the memo
+# keeps distinct words alive after the token list itself is discarded -- so it
+# is capped.  On reaching the cap it stops inserting but keeps serving what it
+# has ("freeze"), rather than clearing and refilling.  Both were measured on a
+# deliberately pathological document (250,000 tokens, 162,137 distinct words,
+# far past any cap): freeze 103 ms, clear-and-refill 113 ms, no memo at all
+# 119 ms.  Freezing is both the faster of the two and the simpler, and it can
+# never return a wrong answer -- the classification is pure, so a frozen memo
+# costs speed, never correctness.
+#
+# Budget is counted in bytes rather than entries because a Tamil word costs
+# ~76 bytes against an ASCII word's ~48, so an entry count calibrated on
+# English would overshoot badly on exactly the documents Neight is built for.
+_SCRIPT_MEMO: dict = {}
+_SCRIPT_MEMO_MAX_BYTES = 4 * 1024 * 1024
+_SCRIPT_MEMO_ENTRY_BYTES = 32   # measured dict-table cost per entry
+_script_memo_bytes = 0
+
+
+def _classify_word_script_uncached(word: str) -> str:
+    """Whether `word` reads as Tamil, English or neither, by character majority."""
+    tamil_count = 0
+    english_count = 0
+    for ch in word:
+        code = ord(ch)
+        if 0x0B80 <= code <= 0x0BFF:
+            tamil_count += 1
+        elif ('A' <= ch <= 'Z') or ('a' <= ch <= 'z'):
+            english_count += 1
+    if tamil_count == 0 and english_count == 0:
+        return "other"
+    if tamil_count > english_count:
+        return "tamil"
+    if english_count > tamil_count:
+        return "english"
+    return "other"
+
+
+def _classify_word_script_cached(word, _memo=_SCRIPT_MEMO):
+    """_classify_word_script_uncached, memoised on `word` under a byte budget."""
+    result = _memo.get(word)
+    if result is None:
+        result = _classify_word_script_uncached(word)
+        global _script_memo_bytes
+        if _script_memo_bytes < _SCRIPT_MEMO_MAX_BYTES:
+            _memo[word] = result
+            _script_memo_bytes += sys.getsizeof(word) + _SCRIPT_MEMO_ENTRY_BYTES
+    return result
+
+
 # Memo for the word-character test used by tokenisation (Notepad._is_word_char
 # and _extract_word_spans below).  The test is a pure function of a single
 # character, and a document draws on a few hundred distinct characters at most,
@@ -8723,21 +8778,7 @@ th {{ background-color: {table_head_bg}; }}
 
     @staticmethod
     def _classify_word_script(word: str) -> str:
-        tamil_count = 0
-        english_count = 0
-        for ch in word:
-            code = ord(ch)
-            if 0x0B80 <= code <= 0x0BFF:
-                tamil_count += 1
-            elif ('A' <= ch <= 'Z') or ('a' <= ch <= 'z'):
-                english_count += 1
-        if tamil_count == 0 and english_count == 0:
-            return "other"
-        if tamil_count > english_count:
-            return "tamil"
-        if english_count > tamil_count:
-            return "english"
-        return "other"
+        return _classify_word_script_cached(word)
 
     @staticmethod
     def _count_sentences(text: str) -> int:
@@ -8808,8 +8849,10 @@ th {{ background-color: {table_head_bg}; }}
         tamil_words = 0
         english_words = 0
         other_words = 0
+        # Bound locally: this runs once per token of the document.
+        classify = _classify_word_script_cached
         for token in tokens:
-            script = self._classify_word_script(token)
+            script = classify(token)
             if script == "tamil":
                 tamil_words += 1
             elif script == "english":

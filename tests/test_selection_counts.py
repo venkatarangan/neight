@@ -174,6 +174,53 @@ def main() -> None:
     check(window._doc_counts is not first,
           "an edited document must be recounted")
 
+    # --- Script-classification memo: same answers, bounded memory ----------
+    # Classification is memoised on the word to keep the reading-time estimate
+    # off the per-character path.  Two things must hold: a warm memo must give
+    # exactly the figures a cold one does, and the memo must stop growing at
+    # its byte budget rather than following the document's vocabulary.
+    window._reading_time_enabled = True
+    window.editor.setPlainText(DOC)
+
+    neight._SCRIPT_MEMO.clear()
+    neight._script_memo_bytes = 0
+    window._update_status_bar()
+    cold = window.reading_time_label.text()
+    check(len(neight._SCRIPT_MEMO) > 0, "the memo should have been populated")
+    window._doc_counts = None          # force a real recount, memo now warm
+    window._update_status_bar()
+    equal(window.reading_time_label.text(), cold,
+          "a warm memo must give the same reading time as a cold one")
+
+    # Freeze at the cap: shrink the budget, then push far past it.
+    real_cap = neight._SCRIPT_MEMO_MAX_BYTES
+    try:
+        neight._SCRIPT_MEMO.clear()
+        neight._script_memo_bytes = 0
+        neight._SCRIPT_MEMO_MAX_BYTES = 4096
+        probes = [f"நினைவு{i}" if i % 2 else f"writing{i}" for i in range(4000)]
+        answers = [neight.Notepad._classify_word_script(w) for w in probes]
+        frozen = len(neight._SCRIPT_MEMO)
+        check(neight._script_memo_bytes <= 4096 + 200,
+              f"memo byte counter must stop at the budget, got {neight._script_memo_bytes}")
+        check(0 < frozen < len(probes),
+              f"memo must freeze partway, not hold all {len(probes)} words (held {frozen})")
+        for _ in range(2):
+            for w in probes:
+                neight.Notepad._classify_word_script(w)
+        equal(len(neight._SCRIPT_MEMO), frozen,
+              "a frozen memo must not grow on further lookups")
+        # Freezing may cost speed; it must never cost correctness.
+        rejected = [w for w in probes if w not in neight._SCRIPT_MEMO]
+        check(rejected, "expected some words to be refused entry to the memo")
+        wrong = [w for w, a in zip(probes, answers)
+                 if neight.Notepad._classify_word_script(w) != a]
+        check(not wrong, f"words refused by the memo must still classify correctly: {wrong[:3]}")
+    finally:
+        neight._SCRIPT_MEMO_MAX_BYTES = real_cap
+        neight._SCRIPT_MEMO.clear()
+        neight._script_memo_bytes = 0
+
     sys.exit(report("Selection counts"))
 
 
