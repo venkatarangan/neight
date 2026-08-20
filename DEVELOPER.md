@@ -312,11 +312,12 @@ out to be missing.
 The practical effect: cloning `main` today gets you a source checkout only.
 Binaries live in two places instead —
 
-- **GitHub Releases**, for end users — `releases/latest/download/<asset>`,
-  which is what the website and `README.md` link to, and always resolves to
-  whatever was published most recently regardless of what's in the tree.
-- **The `dist-latest` branch**, for one specific machine consumer, described
-  next.
+- **GitHub Releases**, as the version history — tagged, signed builds and
+  their notes. These no longer back a download button: stable installs go
+  through the stores (Microsoft Store now, Mac App Store once approved).
+- **The `dist-latest` branch**, which now serves both the external signing
+  workflow *and* the direct-download links on the website, `README.md` and
+  `ADVANCED.md`. Described next.
 
 ### The `dist-latest` branch
 

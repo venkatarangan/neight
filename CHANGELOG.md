@@ -7,7 +7,7 @@ Anything untagged is cross-platform.
 
 ---
 
-## 2026.079 — 2026-08-20
+## 2026.080 — 2026-08-20
 
 Neight is now available from the Microsoft Store, and the macOS build is being
 prepared for the Mac App Store — which is what forced the update checker's
@@ -28,6 +28,29 @@ removal. Also adds selection-aware counts to the status bar.
   revert *instantly* when the selection is cleared, since numbers describing a
   selection that no longer exists would be worse than none. Selecting the whole
   document reuses the counts already on screen instead of recounting.
+
+### Changed
+
+- **Stable installs come from the stores; direct downloads are now the latest
+  build.** **[Both]** The Microsoft Store is the stable Windows channel and the
+  Mac App Store will be the stable macOS one once approved, so the direct
+  download links on the website, `README.md` and `ADVANCED.md` now point at the
+  `dist-latest` branch, which every build republishes. That means they run
+  *ahead* of the store versions rather than tracking a release, and both are
+  **unsigned**.
+- **The macOS direct download is unsigned, and the instructions now say so.**
+  **[macOS]** It previously pointed at the signed, notarized `v2026.077` build
+  and promised "no right-click-open, no Gatekeeper prompt". The install steps
+  now cover the one-time **right-click → Open** that an unsigned build needs.
+  Signed builds are no longer offered as a direct download; the Mac App Store
+  version will remove the extra step once it ships.
+- **Help → Neight Releases on GitHub is now Help → Neight on GitHub**, opening
+  the project page rather than the releases page.
+- **The download-links CI check follows the links.** **[Both]**
+  `release-assets-check.yml` verified GitHub Release assets, which no longer
+  back any download button. It now HEADs the two `dist-latest` URLs instead, so
+  the branch being renamed or a publish step silently failing is caught rather
+  than surfacing as a user-facing 404.
 
 ### Performance
 

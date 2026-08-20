@@ -1,76 +1,63 @@
-name: Release assets check
+name: Download links check
 
 # Guards against the download links on the website/README 404ing.
 #
-# Windows link uses https://github.com/.../releases/latest/download/Neight.exe
-# — checked against whatever release is currently "Latest".
+# Both direct downloads are served from the `dist-latest` branch, which every
+# build republishes by amending its single commit and force-pushing (see
+# DEVELOPER.md → "The dist-latest branch"). Stable installs go through the
+# stores instead — Microsoft Store now, Mac App Store once approved — so the
+# GitHub Releases assets no longer back any download button and are not
+# checked here.
 #
-# macOS link is pinned to an explicit tag (see MAC_RELEASE_TAG below) rather
-# than "latest/download", because GitHub enabled immutable releases on this
-# repo (2026-08): once a release is published its assets can never be added
-# to afterwards, so the mac and Windows builds — built/signed on separate
-# machines at separate times — can permanently end up split across two
-# release tags instead of landing in one shared release like before. The
-# pinned tag has to be updated by hand (in this workflow AND in
-# docs/index.html AND README.md) whenever a newer signed mac build ships.
+# What this catches: the branch being renamed or deleted, a publish step that
+# silently failed, or an artifact being renamed by a change to the build
+# scripts. Any of those turn the public download links into a 404, and a
+# force-pushed branch has no history to notice it from.
 #
-# A schedule is what actually catches drift here — checking only at publish
-# time would miss an asset gap that surfaces later (e.g. this tag needing an
-# update after a new mac release), or the Latest release changing away from
-# Windows without a Windows asset.
-env:
-  MAC_RELEASE_TAG: v2026.077
+# A schedule is what actually catches drift — checking only on push would miss
+# a branch that breaks later, since builds are published from developer
+# machines rather than from CI.
 
 on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch: {}
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
 jobs:
-  check-latest-release-assets:
+  check-download-links:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify Windows (Latest) and macOS (pinned tag) assets exist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+      - name: Verify the dist-latest download links resolve
         run: |
           set -euo pipefail
 
-          LATEST_TAG=$(gh release view --repo "$REPO" --json tagName -q .tagName)
-          LATEST_ASSETS=$(gh release view "$LATEST_TAG" --repo "$REPO" --json assets -q '.assets[].name')
-
-          echo "Latest release: $LATEST_TAG"
-          echo "Assets:"
-          echo "$LATEST_ASSETS"
-
+          BASE="https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist"
           missing=0
 
-          if ! echo "$LATEST_ASSETS" | grep -qx "Neight.exe"; then
-            echo "::error::Latest release ($LATEST_TAG) is missing Neight.exe — the Windows download link on the website/README will 404."
-            missing=1
-          fi
+          check() {
+            local name="$1" url="$BASE/$1" platform="$2"
+            # -I fetches headers only, so this does not pull ~50 MB per run;
+            # -L follows the redirect raw.githubusercontent issues.
+            if code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url") && [ "$code" = "200" ]; then
+              echo "OK: $name ($platform) → HTTP $code"
+            else
+              echo "::error::$name is not reachable on dist-latest (HTTP ${code:-000}) — the $platform download link on the website/README will 404."
+              missing=1
+            fi
+          }
 
-          MAC_ASSETS=$(gh release view "$MAC_RELEASE_TAG" --repo "$REPO" --json assets -q '.assets[].name')
-
-          echo "macOS-pinned release: $MAC_RELEASE_TAG"
-          echo "Assets:"
-          echo "$MAC_ASSETS"
-
-          if ! echo "$MAC_ASSETS" | grep -qx "Neight-mac-arm64-signed.zip"; then
-            echo "::error::Pinned mac release ($MAC_RELEASE_TAG) is missing Neight-mac-arm64-signed.zip — the macOS download link on the website/README will 404."
-            missing=1
-          fi
+          check "Neight.exe" "Windows"
+          check "Neight-mac-arm64-unsigned.app.zip" "macOS"
 
           if [ "$missing" -ne 0 ]; then
             echo ""
-            echo "Fix: run the missing platform's release script (release_macos.sh"
-            echo "or release_windows.ps1), then update MAC_RELEASE_TAG here (and the"
-            echo "matching links in docs/index.html and README.md) if a new mac build"
-            echo "shipped in a different release than Windows."
+            echo "Fix: re-run the missing platform's build (buildme.bat on Windows,"
+            echo "./buildme_mac_app.sh on macOS). Each publishes to dist-latest as its"
+            echo "last step. If an artifact was deliberately renamed, update the names"
+            echo "here and the links in docs/index.html, README.md and ADVANCED.md."
             exit 1
           fi
 
-          echo "OK: Windows asset on Latest ($LATEST_TAG), mac asset on pinned tag ($MAC_RELEASE_TAG)."
+          echo "OK: both dist-latest download links resolve."

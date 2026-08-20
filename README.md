@@ -17,8 +17,8 @@ its own. Every network request happens because you clicked something.
 ### Download
 
 - **Windows (recommended):** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
-- **Windows (direct download):** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~50.8 MB) — the same app, straight from GitHub Releases, for anyone who would rather not use the Store.
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip) (~45.2 MB, recommended) — pinned to v2026.077, the newest release with a signed mac build; mac and Windows can land in different release tags since they're built on separate machines, so this can't use `releases/latest/download` like the Windows direct download link. Update the tag when a newer signed mac build ships.
+- **Windows (direct download):** [Download Neight.exe](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe) — the **latest build**, unsigned, for anyone who would rather not use the Store. Refreshed on every build rather than tied to a release, so it moves ahead of the Store version.
+- **macOS Apple Silicon (arm64):** [Download Neight.app zip](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip) — the **latest build**, and it is **unsigned**, so macOS will not open it without the extra step below. A Mac App Store version is on the way; until it lands this is the direct-download route.
 
 ### Install on Windows
 
@@ -34,12 +34,18 @@ its own. Every network request happens because you clicked something.
 
 ### Install on macOS
 
-1. Download and unzip the signed zip.
-2. Drag `Neight.app` to `/Applications` and launch it normally.
+The direct download is **unsigned**, so Gatekeeper blocks it on first launch. This is expected, and the extra step is only needed once.
 
-> The signed macOS build carries an Apple Developer signature contributed by a well-wisher to make installation smoother. The macOS build targets **Apple Silicon (arm64)** only.
+1. Download and unzip the file — you get `Neight.app`.
+2. Drag `Neight.app` to `/Applications`.
+3. **Right-click** (or Control-click) `Neight.app` and choose **Open**, then click **Open** in the dialog that appears. Double-clicking will not work the first time.
+4. From then on, launch it normally.
+
+> The macOS build targets **Apple Silicon (arm64)** only.
 >
-> A Mac App Store version is on the way.
+> A Mac App Store version is on the way. Once it ships, that becomes the recommended way to install on macOS and no Gatekeeper step will be needed.
+>
+> With thanks to Muthu Nedumaran, who contributed an Apple Developer signature for earlier macOS builds.
 
 For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
 For build instructions, release workflow, and developer notes see [DEVELOPER.md](DEVELOPER.md).
@@ -150,7 +156,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 | **Format** | Font, Word Wrap |
 | **View** | Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar controls |
 | **Settings** | Continue where you left off, Appearance, Save Current Settings to (Writer Mode Preset / Techie Mode Preset), Language Switch, Auto-Save Interval |
-| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Neight Releases on GitHub, About, Debug Info |
+| **Help** | Writer (சொல்வெளி) Mode, Techie (நுட்பர்) Mode, Neight on GitHub, About, Debug Info |
 
 ---
 

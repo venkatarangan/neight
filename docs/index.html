@@ -850,7 +850,7 @@
       <a href="#install-mac" class="btn btn-primary">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.45c-.03-2.7 2.2-4 2.3-4.06-1.26-1.83-3.21-2.08-3.9-2.1-1.66-.17-3.24.97-4.09.97-.85 0-2.15-.95-3.54-.92-1.82.02-3.5 1.06-4.43 2.69-1.89 3.27-.48 8.11 1.36 10.77.9 1.3 1.97 2.76 3.37 2.71 1.35-.06 1.87-.87 3.5-.87 1.63 0 2.1.87 3.53.84 1.46-.02 2.38-1.32 3.27-2.62 1.04-1.5 1.46-2.95 1.48-3.03-.03-.01-2.84-1.09-2.87-4.34zM14.46 4.55c.75-.91 1.25-2.17 1.11-3.42-1.07.04-2.37.71-3.14 1.62-.69.8-1.3 2.09-1.13 3.31 1.19.09 2.4-.6 3.16-1.51z"/></svg>
         Download for macOS
-        <span class="btn-size">arm64 · 45.2 MB</span>
+        <span class="btn-size">arm64 · latest build</span>
       </a>
       <a href="https://apps.microsoft.com/detail/9pj70ndp41lv?ocid=webpdpshareGet" class="btn btn-secondary" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5L10.5 4.4v7.1H3V5.5zm0 13l7.5 1.1v-7.1H3v6zm8.5 1.2L21 21V12.5h-9.5v7.2zm0-15.4V11.5H21V3l-9.5 1.3z"/></svg>
@@ -984,31 +984,29 @@
     </div>
 
     <div class="install-grid">
-      <!-- macOS: pinned to v2026.077, the newest release with a signed mac
-           asset. GitHub's immutable-releases lock means the mac and Windows
-           builds can end up in different release tags (mac and Windows are
-           built/signed on separate machines at separate times), so this
-           can't use releases/latest/download like the Windows link does.
-           Update this tag whenever a newer signed mac build ships. -->
+      <!-- Both downloads come from the dist-latest branch, which every build
+           republishes, so they are always the newest build rather than the
+           newest release. Stable installs go through the stores instead:
+           Microsoft Store now, Mac App Store once approved. -->
       <article class="install-card mac" id="install-mac">
         <div class="install-head">
           <span class="install-glyph"></span>
           <div>
             <div class="install-name">macOS</div>
-            <div class="install-sub">macOS 12 Monterey or later · Apple Silicon (arm64) · signed build</div>
+            <div class="install-sub">macOS 12 Monterey or later · Apple Silicon (arm64) · unsigned latest build</div>
           </div>
         </div>
         <ol class="install-steps">
-          <li>Click the download button below &mdash; you&rsquo;ll get a zip with the <b>signed</b> <code>Neight.app</code> inside. <b>Use this build.</b> Don&rsquo;t hand-build or use unsigned copies.</li>
+          <li>Click the download button below &mdash; you&rsquo;ll get a zip with <code>Neight.app</code> inside.</li>
           <li>Double-click the zip to unpack it. macOS will leave a <code>Neight.app</code> next to it.</li>
           <li>Drag <code>Neight.app</code> into your <b>Applications</b> folder.</li>
-          <li>Open Applications and double-click Neight. It opens normally &mdash; no right-click-open, no Gatekeeper prompt.</li>
+          <li><b>Right-click</b> (or Control-click) Neight and choose <b>Open</b>, then <b>Open</b> again in the dialog. Double-clicking will not work the first time. After that, launch it normally.</li>
         </ol>
         <div class="install-note">
-          <b>Why only the signed build?</b> A well-wisher contributed an Apple Developer signature so the app installs without the usual unsigned-app warnings. Stick to that build. The macOS download is <b>Apple Silicon (arm64) only</b>.
+          <b>Why the extra step?</b> This download is <b>unsigned</b>, so macOS Gatekeeper blocks it until you open it once by right-clicking. A <b>Mac App Store</b> version is on the way &mdash; once it ships, that becomes the recommended install and the extra step goes away. The macOS download is <b>Apple Silicon (arm64) only</b>.
         </div>
-        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip" download>
-          ↓ Download signed Neight.app <span class="sz">arm64 · 45.2 MB</span>
+        <a class="install-dl" href="https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip" download>
+          ↓ Download Neight.app <span class="sz">arm64 · unsigned · latest build</span>
         </a>
       </article>
 
@@ -1018,7 +1016,7 @@
           <span class="install-glyph"></span>
           <div>
             <div class="install-name">Windows</div>
-            <div class="install-sub">Windows 10 or 11 · 64-bit · single .exe, no installer needed</div>
+            <div class="install-sub">Windows 10 or 11 · 64-bit · unsigned latest build, no installer needed</div>
           </div>
         </div>
         <ol class="install-steps">
@@ -1030,8 +1028,8 @@
         <div class="install-note">
           <b>Open With integration.</b> Open <b>Help &rarr; Debug Info</b> and enable the <code>.txt</code> and/or Markdown <b>Open With</b> checkboxes before Neight will appear in File Explorer&rsquo;s right-click menu.
         </div>
-        <a class="install-dl" href="https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe" download>
-          ↓ Download Neight.exe <span class="sz">50.8 MB</span>
+        <a class="install-dl" href="https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe" download>
+          ↓ Download Neight.exe <span class="sz">unsigned · latest build</span>
         </a>
       </article>
     </div>
@@ -1186,7 +1184,7 @@
         <tr><th>Format</th><td>Font picker, Word Wrap.</td></tr>
         <tr><th>View</th><td>Line Spacing, Margins, Gutter Line Numbers, Word Index Overlay, Auto-Hide Scrollbar, Partial Word Highlighting, Status Bar items.</td></tr>
         <tr><th>Settings</th><td>Continue where you left off, Appearance, Save current settings as Writer / Techie Mode Preset, Language Switch, Auto-Save Interval.</td></tr>
-        <tr><th>Help</th><td>Writer (<span class="tamil">சொல்வெளி</span>) Mode, Techie (<span class="tamil">நுட்பர்</span>) Mode, Neight Releases on GitHub, About, Debug Info.</td></tr>
+        <tr><th>Help</th><td>Writer (<span class="tamil">சொல்வெளி</span>) Mode, Techie (<span class="tamil">நுட்பர்</span>) Mode, Neight on GitHub, About, Debug Info.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1229,11 +1227,11 @@
     <div class="faq-list">
       <details class="faq-item">
         <summary>Will Neight work on Intel Macs?</summary>
-        <div class="faq-body">Not today. The signed macOS build is <b>Apple Silicon (arm64) only</b>. If you&rsquo;re on an Intel Mac, the Windows build runs fine under Parallels or similar, or you can build from source &mdash; but there isn&rsquo;t a ready-to-run Intel binary.</div>
+        <div class="faq-body">Not today. The macOS build is <b>Apple Silicon (arm64) only</b>. If you&rsquo;re on an Intel Mac, the Windows build runs fine under Parallels or similar, or you can build from source &mdash; but there isn&rsquo;t a ready-to-run Intel binary.</div>
       </details>
       <details class="faq-item">
         <summary>Does it work offline?</summary>
-        <div class="faq-body">Yes, always. Every editing feature works with no connection at all, and your text <b>never</b> leaves your device. Neight makes <b>no</b> automatic network requests &mdash; it never checks for updates or contacts any server on its own. It touches the internet only when <i>you</i> ask it to: clicking a Markdown link, doing a Google search on a selection, or opening <b>Help &rarr; Neight Releases on GitHub</b>. Pull the network cable and everything else works exactly the same.</div>
+        <div class="faq-body">Yes, always. Every editing feature works with no connection at all, and your text <b>never</b> leaves your device. Neight makes <b>no</b> automatic network requests &mdash; it never checks for updates or contacts any server on its own. It touches the internet only when <i>you</i> ask it to: clicking a Markdown link, doing a Google search on a selection, or opening <b>Help &rarr; Neight on GitHub</b>. Pull the network cable and everything else works exactly the same.</div>
       </details>
       <details class="faq-item">
         <summary>Does it support other Indian languages? Hindi, Bengali, Malayalam&hellip;</summary>
@@ -1241,7 +1239,7 @@
       </details>
       <details class="faq-item">
         <summary>Does it auto-update?</summary>
-        <div class="faq-body">It depends where you got it. Installed from the <b>Microsoft Store</b>, updates arrive automatically like any other Store app &mdash; and the same will apply to the Mac App Store version. Installed as a <b>direct download</b> from GitHub, updating is manual: the app never checks for updates or phones home, so use <b>Help &rarr; Neight Releases on GitHub</b> to open the releases page whenever you want to look.</div>
+        <div class="faq-body">It depends where you got it. Installed from the <b>Microsoft Store</b>, updates arrive automatically like any other Store app &mdash; and the same will apply to the Mac App Store version. Installed as a <b>direct download</b>, updating is manual: the app never checks for updates or phones home, so re-download the latest build from the install section above whenever you want a newer one. <b>Help &rarr; Neight on GitHub</b> opens the project page.</div>
       </details>
       <details class="faq-item">
         <summary>Where are my files saved?</summary>
@@ -1344,7 +1342,7 @@
       </div>
     </div>
     <p style="margin-top: 28px; font-size: 14.5px; color: var(--ink-mute);">
-      And a quiet thank-you to the kind soul who contributed the Apple Developer signature so macOS users can install without friction.
+      And a quiet thank-you to the kind soul who contributed the Apple Developer signature used for earlier macOS builds.
     </p>
   </div>
 </section>

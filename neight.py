@@ -25,7 +25,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.079"
+VERSION = "2026.080"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -3074,9 +3074,9 @@ class Notepad(QMainWindow):
         # Help
         self.about_act = QAction("About", self)
         self.debug_info_act = QAction("Debug Info", self)
-        self.releases_act = QAction("Neight Releases on GitHub", self)
+        self.releases_act = QAction("Neight on GitHub", self)
         self.releases_act.setToolTip(
-            "Opens the Neight releases page in your web browser.\n"
+            "Opens the Neight project page in your web browser.\n"
             "Neight never checks for updates on its own."
         )
         self.view_recovery_folder_act = QAction("View Recovery Folder", self)
@@ -3398,7 +3398,7 @@ class Notepad(QMainWindow):
         # Help
         self.about_act.triggered.connect(self.show_about)
         self.debug_info_act.triggered.connect(self._show_debug_info)
-        self.releases_act.triggered.connect(self._open_releases_page)
+        self.releases_act.triggered.connect(self._open_project_page)
         self.view_recovery_folder_act.triggered.connect(self._view_recovery_folder)
         self.empty_recovery_act.triggered.connect(self._empty_recovery_folder)
         self.solveli_act.triggered.connect(self._apply_solveli_preset)
@@ -5752,15 +5752,15 @@ th {{ background-color: {table_head_bg}; }}
             msg.setIconPixmap(icon.pixmap(64, 64))
         msg.exec()
 
-    def _open_releases_page(self):
-        """Open the GitHub releases page in the user's browser.
+    def _open_project_page(self):
+        """Open the Neight project page in the user's browser.
 
         Neight does not check for updates itself: Store installs update
         automatically, and this is simply a link out for anyone running a
         direct download.
         """
         QDesktopServices.openUrl(
-            QUrl("https://github.com/venkatarangan/neight/releases")
+            QUrl("https://github.com/venkatarangan/neight")
         )
 
     def _show_debug_info(self):

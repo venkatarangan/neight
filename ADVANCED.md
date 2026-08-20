@@ -378,25 +378,26 @@ it from:
 - **Microsoft Store (Windows)** — updates arrive automatically, like any other
   Store app. Nothing to do.
 - **Mac App Store** — same, once that version ships.
-- **Direct download from GitHub Releases** — manual. **Help → Neight Releases
-  on GitHub** opens the releases page in your browser so you can see whether a
-  newer build exists; compare it against the version in **Help → About**.
+- **Direct download** — manual. These come from the `dist-latest` branch and
+  are rebuilt with every build, so they run ahead of the store versions and are
+  **unsigned**. **Help → Neight on GitHub** opens the project page in your
+  browser; compare the latest build against the version in **Help → About**.
 
 ### Installing an update (direct downloads)
 
 #### Windows
 
-1. Download the new `Neight.exe` from [GitHub Releases](https://github.com/venkatarangan/neight/releases).
+1. Download the new [`Neight.exe`](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe).
 2. Close the running Neight instance.
 3. Replace the old `Neight.exe` with the downloaded file in the same folder.
 4. Replacing only the `.exe` leaves `settings.json` untouched, wherever it lives. Check **Help → Debug Info** for its exact path if you are moving the whole folder.
 
 #### macOS
 
-1. Download `Neight-mac-arm64-signed.zip` from [GitHub Releases](https://github.com/venkatarangan/neight/releases).
+1. Download [`Neight-mac-arm64-unsigned.app.zip`](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip).
 2. Unzip the archive.
 3. Drag the new `Neight.app` to `/Applications`, replacing the old one when prompted.
-4. If macOS blocks the app after the update, run once in Terminal:
+4. The build is unsigned, so the first launch needs a **right-click → Open → Open**. If macOS still blocks it, run once in Terminal:
    ```bash
    xattr -dr com.apple.quarantine /Applications/Neight.app
    ```
