@@ -7,6 +7,33 @@ Anything untagged is cross-platform.
 
 ---
 
+## 2026.079 — 2026-08-20
+
+Distribution release. No application code changed — Neight is now available
+from the Microsoft Store, and the macOS build is being prepared for the Mac
+App Store.
+
+### Infrastructure
+
+- **Neight is on the Microsoft Store.** **[Windows]** The Store is now the
+  recommended Windows install: Microsoft re-signs every Store package, so the
+  SmartScreen warning that the direct `.exe` triggers never appears. The
+  `.exe` on GitHub Releases stays available as a second, non-Store channel for
+  anyone who prefers it. The website's Windows call-to-action already pointed
+  at the Store listing; `README.md` now leads with it too.
+- **The macOS bundle identifier changed to `com.murasu.neight`.** **[macOS]**
+  Was `com.venkatarangan.neight`. Changed in
+  `packaging/Neight.macos.spec` so the app can be submitted through the
+  well-wisher's Apple Developer account for the upcoming Mac App Store
+  release — the same account that already contributes the Developer ID
+  signature for the notarized direct-download build.
+- **README and website now lead with the store install paths.** **[Both]**
+  Direct downloads from GitHub Releases are relabelled as a separate channel
+  rather than the default, and the SmartScreen instructions are scoped to the
+  direct `.exe` only.
+
+---
+
 ## 2026.078 — 2026-08-03
 
 Windows-only release. No application code changed — this exists because the

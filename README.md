@@ -16,13 +16,21 @@ does not share any text, documents, or other data you create.
 
 ### Download
 
-- **Windows:** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~50.8 MB)
-- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip) (~45.2 MB, recommended) — pinned to v2026.077, the newest release with a signed mac build; mac and Windows can land in different release tags since they're built on separate machines, so this can't use `releases/latest/download` like the Windows link. Update the tag when a newer signed mac build ships.
+- **Windows (recommended):** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
+- **Windows (direct download):** [Download Neight.exe](https://github.com/venkatarangan/neight/releases/latest/download/Neight.exe) (~50.8 MB) — the same app, straight from GitHub Releases, for anyone who would rather not use the Store.
+- **macOS Apple Silicon (arm64):** [Download signed Neight.app zip](https://github.com/venkatarangan/neight/releases/download/v2026.077/Neight-mac-arm64-signed.zip) (~45.2 MB, recommended) — pinned to v2026.077, the newest release with a signed mac build; mac and Windows can land in different release tags since they're built on separate machines, so this can't use `releases/latest/download` like the Windows direct download link. Update the tag when a newer signed mac build ships.
 
 ### Install on Windows
 
+**From the Microsoft Store (recommended):**
+
+1. Open the [Store listing](https://apps.microsoft.com/detail/9pj70ndp41lv) and click **Get**.
+2. Launch Neight from the Start menu. No SmartScreen warning appears.
+
+**From the direct `.exe` download:**
+
 1. Download `Neight.exe` and copy it to any folder.
-2. Double-click to run. If Windows Defender SmartScreen appears, click **More info → Run anyway**.
+2. Double-click to run. Because this copy isn't Store-signed, Windows Defender SmartScreen may appear — click **More info → Run anyway**.
 
 ### Install on macOS
 
@@ -30,6 +38,8 @@ does not share any text, documents, or other data you create.
 2. Drag `Neight.app` to `/Applications` and launch it normally.
 
 > The signed macOS build carries an Apple Developer signature contributed by a well-wisher to make installation smoother. The macOS build targets **Apple Silicon (arm64)** only.
+>
+> A Mac App Store version is on the way.
 
 For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
 For build instructions, release workflow, and developer notes see [DEVELOPER.md](DEVELOPER.md).
