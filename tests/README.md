@@ -8,6 +8,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_selection_counts.py
 ```
 
 Each script exits non-zero on failure and prints failures as GitHub Actions
@@ -43,6 +44,15 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
   `MouseButtonPress`, so the old press-counting handler never fired on a real
   triple click and *did* fire on ordinary clicks used to move the caret around a
   long document.
+
+- **`test_selection_counts.py`** — the status bar counters must describe the
+  selection correctly when one exists. Qt spells paragraph breaks as `\n` in
+  `toPlainText()` but U+2029 in `selectedText()`, so counting a selection
+  straight from Qt drifts from the document counts on any multi-paragraph text —
+  silently, and only for people who write in paragraphs. Selecting everything
+  pins it down: the numbers must match exactly. Also guards that counts appear
+  on a delay but vanish *immediately* when the selection is cleared, and that a
+  counter hidden in **View → Status Bar** is never computed or shown.
 
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
 manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the

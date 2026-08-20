@@ -84,6 +84,8 @@ Both files survive app deletion and reinstallation. They are plain JSON and can 
 
 Reading Time estimates how long the current document would take to read and shows the result in the status bar as **Read:**.
 
+With text selected it estimates the **selection** instead, and relabels itself **Read (sel):** so the two are never confused. (`N of Total` is used for the word, sentence and character counts, but a duration reads badly that way — `<1 of 2 min` is more puzzling than useful — so reading time carries a marker rather than a ratio.)
+
 Configure it from **View → Status Bar → Reading Time…**
 
 - Configurable Tamil reading speed: **50–400 words per minute** (in steps of 50: 50, 100, 150 … 400; default 150)

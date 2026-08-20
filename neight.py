@@ -2652,6 +2652,16 @@ class Notepad(QMainWindow):
         self._line_spacing_preset = "single_line"
 
         # Status bar item visibility (defaults; overridden in _load_preferences)
+        # Last computed whole-document counts, so a selection change can render
+        # "N of Total" without recounting the document.  Holds finished numbers
+        # only — never the text or the token list, which are what we are trying
+        # to avoid keeping around.  None until the first _update_status_bar.
+        self._doc_counts = None
+        # Counts for the current selection, or None when nothing is selected.
+        self._sel_counts = None
+        # Which reserved-width set the counters currently use (see
+        # _apply_counter_widths).  None until first applied.
+        self._counter_widths_wide = None
         self._status_show_words = True
         self._status_show_sentences = True
         self._status_show_chars = True
@@ -2683,6 +2693,17 @@ class Notepad(QMainWindow):
         self._status_update_timer = QTimer(self)
         self._status_update_timer.setSingleShot(True)
         self._status_update_timer.timeout.connect(self._update_status_bar)
+
+        # Selection counts appear on a delay but disappear instantly.  Dragging,
+        # double-clicking and shift-arrowing all fire selectionChanged
+        # continuously; 250 ms (the same interval _schedule_status_update uses,
+        # for the same reason) means a selection that comes and goes never
+        # reaches the status bar.  Clearing a selection is handled immediately
+        # instead — see _on_selection_changed_counts.
+        self._selection_count_timer = QTimer(self)
+        self._selection_count_timer.setSingleShot(True)
+        self._selection_count_timer.setInterval(250)
+        self._selection_count_timer.timeout.connect(self._update_selection_counts)
 
         # Debounce word-highlight scans on selectionChanged (collapses drag bursts).
         self._word_highlight_timer = QTimer(self)
@@ -3299,6 +3320,7 @@ class Notepad(QMainWindow):
         # Status updates
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self._schedule_word_highlight_update)
+        self.editor.selectionChanged.connect(self._on_selection_changed_counts)
         self.editor.cursorPositionChanged.connect(self._update_cursor_position_status)
         self.count_label.clicked.connect(self._toggle_word_index_from_status_label)
 
@@ -8743,7 +8765,8 @@ th {{ background-color: {table_head_bg}; }}
     def _extract_word_tokens(cls, text: str) -> list[str]:
         return [text[start:end] for start, end in cls._extract_word_spans(text)]
 
-    def _update_reading_time_status(self, text: str, tokens: Optional[list[str]] = None):
+    def _update_reading_time_status(self, text: str, tokens: Optional[list[str]] = None,
+                                    label: str = "Read"):
         if not getattr(self, "_reading_time_enabled", False):
             self.reading_time_label.setText("")
             return
@@ -8751,7 +8774,7 @@ th {{ background-color: {table_head_bg}; }}
         if tokens is None:
             tokens = self._extract_word_tokens(text)
         if not tokens:
-            self.reading_time_label.setText("Read: <1 min")
+            self.reading_time_label.setText(f"{label}: <1 min")
             return
 
         tamil_words = 0
@@ -8784,28 +8807,178 @@ th {{ background-color: {table_head_bg}; }}
         else:
             estimate = str(int(math.ceil(weighted_minutes)))
 
-        self.reading_time_label.setText(f"Read: {estimate} min | Ta {tamil_pct}% En {english_pct}%")
+        self.reading_time_label.setText(
+            f"{label}: {estimate} min | Ta {tamil_pct}% En {english_pct}%"
+        )
 
-    def _update_status_bar(self):
-        show_words = getattr(self, "_status_show_words", True)
-        show_sentences = getattr(self, "_status_show_sentences", True)
-        show_chars = getattr(self, "_status_show_chars", True)
-        reading_time = getattr(self, "_reading_time_enabled", False)
-        # Skip the O(n) toPlainText() copy entirely when nothing needs the document text.
-        if not show_words and not show_sentences and not show_chars and not reading_time:
-            self._update_cursor_position_status()
-            return
-        text = self.editor.toPlainText()
+    def _status_counter_flags(self):
+        """(words, sentences, chars, reading_time) visibility, in render order."""
+        return (
+            getattr(self, "_status_show_words", True),
+            getattr(self, "_status_show_sentences", True),
+            getattr(self, "_status_show_chars", True),
+            getattr(self, "_reading_time_enabled", False),
+        )
+
+    def _count_text(self, text: str, flags) -> dict:
+        """Count `text` for whichever counters are visible.
+
+        A hidden counter is never computed, so its key is absent from the
+        result.  Callers must therefore read with .get().
+        """
+        show_words, show_sentences, show_chars, reading_time = flags
+        counts = {}
         need_tokens = show_words or reading_time
         tokens = self._extract_word_tokens(text) if need_tokens else []
         if show_words:
-            self.words_label.setText(f"Words: {len(tokens)}")
+            counts["words"] = len(tokens)
         if show_sentences:
-            self.sentences_label.setText(f"Sentences: {self._count_sentences(text)}")
+            counts["sentences"] = self._count_sentences(text)
         if show_chars:
-            self.chars_label.setText(f"Chars: {len(text)}")
-        self._update_reading_time_status(text, tokens=tokens if need_tokens else None)
+            counts["chars"] = len(text)
+        if need_tokens:
+            counts["tokens"] = tokens
+        return counts
+
+    # Reserved widths for the counters, narrow and wide.  Sized to the widest
+    # content each state can hold, so the numbers never jitter as they grow.
+    _COUNTER_WIDTHS = {
+        False: ("Words: 000000", "Sentences: 00000", "Chars: 0000000",
+                "Read: 000 min | Ta 100% En 100%"),
+        True:  ("Words: 000000 of 000000", "Sentences: 00000 of 00000",
+                "Chars: 0000000 of 0000000", "Read (sel): 000 min | Ta 100% En 100%"),
+    }
+
+    def _apply_counter_widths(self, wide: bool) -> None:
+        """Reserve counter widths for the selected or unselected state.
+
+        Reserving the "N of Total" width unconditionally would cost ~230 px of
+        status bar even with nothing selected, which pushed the smallest usable
+        window from 928 px to 1159 px with every counter enabled -- enough to
+        clip the keyboard-layout label on a half-screen window.  Widening only
+        while a selection is live keeps the narrow case exactly as it was.
+
+        There are only two states and they are each fixed, so the labels shift
+        once when a selection appears and once when it goes -- never while the
+        numbers themselves change.
+        """
+        if self._counter_widths_wide == wide:
+            return
+        self._counter_widths_wide = wide
+        fm = self.fontMetrics()
+        for label, sample in zip(
+            (self.words_label, self.sentences_label, self.chars_label,
+             self.reading_time_label),
+            self._COUNTER_WIDTHS[wide],
+        ):
+            label.setMinimumWidth(fm.horizontalAdvance(sample))
+
+    def _render_counter_labels(self):
+        """Paint the counters from the cached document and selection counts.
+
+        With a selection live each counter reads "N of Total"; without one it
+        reads exactly as it always has.  Either way a hidden counter is left
+        untouched, so the show/hide preferences stay authoritative.
+        """
+        show_words, show_sentences, show_chars, reading_time = self._status_counter_flags()
+        doc = self._doc_counts or {}
+        sel = self._sel_counts
+        self._apply_counter_widths(sel is not None)
+
+        def _text(label: str, key: str) -> str:
+            total = doc.get(key, 0)
+            if sel is None:
+                return f"{label}: {total}"
+            return f"{label}: {sel.get(key, 0)} of {total}"
+
+        if show_words:
+            self.words_label.setText(_text("Words", "words"))
+        if show_sentences:
+            self.sentences_label.setText(_text("Sentences", "sentences"))
+        if show_chars:
+            self.chars_label.setText(_text("Chars", "chars"))
+
+        if reading_time:
+            source = sel if sel is not None else doc
+            # "N of Total" makes no sense for a duration, so the reading time
+            # marks itself instead.  The marker sits on the label rather than
+            # after the estimate, where it would look like it qualified only
+            # the trailing Ta/En percentages.
+            self._update_reading_time_status(
+                "", tokens=source.get("tokens", []),
+                label="Read (sel)" if sel is not None else "Read",
+            )
+        else:
+            self.reading_time_label.setText("")
+
+    def _update_status_bar(self):
+        flags = self._status_counter_flags()
+        # Skip the O(n) toPlainText() copy entirely when nothing needs the document text.
+        if not any(flags):
+            self._doc_counts = None
+            self._sel_counts = None
+            self._update_cursor_position_status()
+            return
+        self._doc_counts = self._count_text(self.editor.toPlainText(), flags)
+        # Keep the selection in step with what was just counted.  Both a counter
+        # switched on mid-selection and an edit made with text still selected
+        # would otherwise leave _sel_counts missing a key or describing text
+        # that has changed.
+        if self._sel_counts is not None:
+            self._recount_selection(flags)
+        self._render_counter_labels()
         self._update_cursor_position_status()
+
+    def _on_selection_changed_counts(self):
+        """Selection counts appear on a delay, but vanish immediately.
+
+        Deferring the *appearance* keeps transient selections — a double-click
+        the user immediately abandons, a drag in progress — off the status bar
+        entirely.  Deferring the *disappearance* would be worse than useless:
+        the numbers on screen would describe a selection that no longer exists,
+        which reads as a bug rather than as polish.  Clearing also costs
+        nothing, since it re-renders from counts already computed.
+        """
+        if self.editor.textCursor().hasSelection():
+            self._selection_count_timer.start()
+            return
+        self._selection_count_timer.stop()
+        if self._sel_counts is not None:
+            self._sel_counts = None
+            self._render_counter_labels()
+
+    def _selection_is_whole_document(self) -> bool:
+        """True when the selection spans the entire document.
+
+        Compared through the cursor rather than by measuring the selected text,
+        so this stays O(1) instead of pulling a second copy of the document.
+        """
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            return False
+        # characterCount() includes the trailing block separator.
+        return (cursor.selectionStart() == 0
+                and cursor.selectionEnd() >= self.editor.document().characterCount() - 1)
+
+    def _recount_selection(self, flags) -> None:
+        """Recount the live selection under `flags`; assumes _doc_counts is current."""
+        # Ctrl+A is both the most common large selection and the one case where
+        # counting is pure waste: the answers are the document's by definition.
+        if self._selection_is_whole_document():
+            self._sel_counts = self._doc_counts
+            return
+        selected = self._get_selected_text()
+        self._sel_counts = self._count_text(selected, flags) if selected else None
+
+    def _update_selection_counts(self):
+        """Count the current selection and repaint.  Runs on the 250 ms timer."""
+        flags = self._status_counter_flags()
+        if not any(flags):
+            return
+        if self._doc_counts is None:
+            self._doc_counts = self._count_text(self.editor.toPlainText(), flags)
+        self._recount_selection(flags)
+        self._render_counter_labels()
 
     # Confirm close with save prompt and persist settings
     def closeEvent(self, event):

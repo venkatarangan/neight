@@ -9,9 +9,25 @@ Anything untagged is cross-platform.
 
 ## 2026.079 — 2026-08-20
 
-Distribution release. Neight is now available from the Microsoft Store, and
-the macOS build is being prepared for the Mac App Store — which is what forced
-the update checker's removal, the only application code change here.
+Neight is now available from the Microsoft Store, and the macOS build is being
+prepared for the Mac App Store — which is what forced the update checker's
+removal. Also adds selection-aware counts to the status bar.
+
+### Added
+
+- **The status bar counts your selection.** Select any passage and the word,
+  sentence and character counters switch to it, shown as `Words: 42 of 1240` —
+  the selection and the document total side by side, so the two can never be
+  confused at a glance. Reading time relabels itself **Read (sel):**, since a
+  duration reads badly as a ratio. Your **View → Status Bar** preferences still
+  decide what appears: a counter you have hidden stays hidden and is never
+  computed, so in Writer Mode a selection shows only `Words: 42 of 1240`.
+
+  The counters appear a moment after a selection settles, so dragging or a
+  double-click you immediately abandon never makes them flicker — but they
+  revert *instantly* when the selection is cleared, since numbers describing a
+  selection that no longer exists would be worse than none. Selecting the whole
+  document reuses the counts already on screen instead of recounting.
 
 ### Infrastructure
 

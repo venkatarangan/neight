@@ -99,6 +99,8 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 
 The status bar shows — per your preferences — word count, sentence count, character count, reading time, cursor line/column, and current keyboard layout. Every element can be individually shown or hidden from **View → Status Bar** (or click the status bar itself to open that submenu instantly). Layout is fixed-width so hiding one item never shifts the others.
 
+**Select text and the counters describe the selection instead**, shown as `Words: 42 of 1240` so the selection and the whole document are visible at once and can never be confused. Reading time marks itself as **Read (sel):**. Your show/hide preferences still apply — a counter you have hidden stays hidden. The counters appear a moment after you settle on a selection, so a quick drag or double-click doesn't make them flicker, and they revert the instant you click away.
+
 ### Markdown support
 
 All Markdown features live in the **Markdown** menu:

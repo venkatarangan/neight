@@ -54,6 +54,7 @@ jobs:
           python tests/test_text_integrity.py
           python tests/test_cursor_layout.py
           python tests/test_input_gestures.py
+          python tests/test_selection_counts.py
 
   lint:
     name: Lint
