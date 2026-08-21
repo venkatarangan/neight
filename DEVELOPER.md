@@ -267,7 +267,13 @@ This packages the existing `Neight.exe` as a classic Win32 app under the
 **Desktop Bridge** (`EntryPoint="Windows.FullTrustApplication"`), not as a
 native UWP rewrite — no application source changes are needed.
 
-### One-time account setup (manual, only you can do this)
+### One-time account setup — already done
+
+**This is complete and nothing here needs redoing.** The listing is live at
+[apps.microsoft.com/detail/9pj70ndp41lv](https://apps.microsoft.com/detail/9pj70ndp41lv),
+and `packaging/msix_identity.json` holds the real Partner Center values, so a
+clean clone builds the MSIX with no setup. Kept as a record of where those
+values came from, and for anyone rebuilding this from scratch:
 
 1. Register a free individual developer account at
    [partner.microsoft.com/dashboard](https://partner.microsoft.com/dashboard).
@@ -276,16 +282,41 @@ native UWP rewrite — no application source changes are needed.
 3. Open that app's **Product identity** page (under App management) and copy
    the three values shown there — **Package/Identity/Name**,
    **Package/Identity/Publisher**, **Package/Properties/PublisherDisplayName**
-   — into `packaging/msix_identity.json`, replacing the `REPLACE_ME`
-   placeholders exactly as shown. Do not guess these values; they must match
-   Partner Center's records byte-for-byte or the package will be rejected.
+   — into `packaging/msix_identity.json`. Do not guess these values; they must
+   match Partner Center's records byte-for-byte or the package will be rejected.
+
+The three values are not secret — they ship inside every installed copy — which
+is why they are committed rather than kept out of the repository.
 
 ### Building the package
 
 ```powershell
-buildme.bat                # produces dist\Neight.exe, as usual
+buildme.bat                 # produces dist\Neight.exe, as usual
 build_msix.ps1              # produces dist\Neight.msix
 ```
+
+Use `buildme.bat --no-bump` when repackaging a version that is already
+committed — it leaves `neight.py` unmodified, so the working tree stays clean
+and `build_msix.ps1` runs straight afterwards. A plain `buildme.bat` bumps
+`VERSION`, which must then be committed before `build_msix.ps1` will run.
+
+Build the `.exe` from a clean environment (above) — the MSIX packages whatever
+`dist\Neight.exe` happens to be, so a development-environment build gets
+published to the Store with the same bloat.
+
+To test the package locally without submitting, enable Developer Mode and
+register it in place:
+
+```powershell
+Add-AppxPackage -Register dist\msix_staging\AppxManifest.xml
+```
+
+Two things to know about that. It installs *from the build folder*, so
+rebuilding changes the installed app underneath itself, and the register fails
+with `0x80073D02` while any instance is running — close Neight first. And it
+replaces a Store-installed copy; reinstall from the listing to get back. This
+is the only way to test file associations, which do not exist until the package
+is installed.
 
 `build_msix.ps1`:
 
@@ -298,7 +329,12 @@ build_msix.ps1              # produces dist\Neight.msix
 - stages `Neight.exe` plus the logo assets from
   `packaging/msix_assets/Assets/` (regenerate them from `neight.ico` any time
   with `python design/gen_msix_assets.py`) and a rendered
-  `packaging/AppxManifest.xml.template` into `dist\msix_staging\`;
+  `packaging/AppxManifest.xml.template` into `dist\msix_staging\`, deleting and
+  recreating that directory each run — so a stray file left there by a
+  locally-registered test install can never end up in a shipped package;
+- parses the staged manifest before packing. `makeappx` reports any XML problem
+  as the same opaque *"the package manifest is not valid"* with no line number,
+  and a double hyphen inside an XML comment is enough to trigger it;
 - runs `makeappx.exe pack` (from the Windows SDK — installed with Visual
   Studio, or standalone from the
   [Windows SDK downloads page](https://developer.microsoft.com/windows/downloads/windows-sdk/))

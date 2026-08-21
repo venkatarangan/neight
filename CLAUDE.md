@@ -72,8 +72,36 @@ speedup.
 - **GitHub Releases is the version history**, not a download channel.
 - `buildme_mac_app.sh` and `buildme.bat` increment `VERSION` as their first step
   and publish to `dist-latest` as their last. Expect a dirty tree after a build.
+  `buildme.bat --no-bump` skips the increment, for a Windows build catching up
+  to a version macOS already set — the tree then stays clean.
+- **Build releases from an environment holding only `requirements.txt` and
+  `requirements-build.txt`.** A normal development `.venv` also has `pillow` and
+  `python-pptx`, which PyInstaller's hooks bundle even though Neight imports
+  neither — worth 18 MB of dead weight in the `.exe`. Reinstall
+  `requirements-dev.txt` after building.
 
 `DEVELOPER.md` has the full build and release detail.
+
+## Windows file associations come from the package, not the registry
+
+`.txt`, `.md` and `.markdown` are declared in
+`packaging/AppxManifest.xml.template`. That is the only mechanism the shell
+honours for a packaged app, and it is what puts Neight in Explorer's **Open
+With** menu on a Store install. The unpackaged `.exe` has no association at all.
+
+Do not reintroduce registry writes to `HKCU\Software\Classes`. Neight used to do
+this and it broke on the move to the Store: the writes do not survive, and the
+open command would name a `WindowsApps` path containing the version number,
+which disappears at the next update. `_win_repair_orphaned_associations()`
+exists to clean up what that left behind.
+
+**No application can make itself the default handler on Windows** — the
+`UserChoice` value has been hash-protected since Windows 8. Appearing in Open
+With is the most any app may do. Do not accept a "fix" that claims otherwise.
+
+The behaviour only exists once the package is installed, so a source checkout
+and a bare `Neight.exe` both exercise the *unpackaged* path and cannot catch a
+broken manifest. See `tests/README.md` for the manual procedure.
 
 ## Committing
 

@@ -324,6 +324,28 @@ outright.
 - macOS is untouched: no `darwin`, `_macos_`, `CFBundle` or `LSSet` line appears
   in the diff, `Neight.macos.spec` is unmodified, and CI's
   `Import and construct (macos-latest)` job passes.
+- **A fresh `git clone` of `main` builds everything, verified by doing it.**
+  Into an empty directory: `py -m venv .venv`, install
+  `requirements.txt` + `requirements-build.txt`, then
+
+  | Step | Result |
+  |---|---|
+  | Five test scripts | 954 passed, 0 failed |
+  | `pyinstaller packaging\Neight.windows.spec` | `Neight.exe`, 52,840,351 bytes |
+  | `build_msix.ps1` | `Neight.msix` at `2026.81.0.0`, 50.1 MB |
+
+  The MSIX step is the one that mattered: it is exactly what the 2026-08-20 note
+  recorded as impossible from a clean clone, and it now works because
+  `msix_identity.json` carries the real Partner Center values.
+
+  The `.exe` from a fresh clone is 644 bytes smaller than the published one and
+  hashes differently. That is expected — PyInstaller embeds absolute paths and
+  timestamps, so builds are not byte-reproducible. Matching to within 644 bytes
+  is what confirms the same dependency set; do not chase an identical hash.
+
+  Note the deliberate omission: this used `pyinstaller` directly rather than
+  `buildme.bat`, because `buildme.bat` force-pushes to `dist-latest` as its last
+  step and would have replaced the public download with a throwaway test build.
 
 ## Where to look for current state
 
