@@ -1,15 +1,20 @@
-# 2026-08-21 — Windows caught up to 2026.081, and the download shrank by 26%
+# 2026-08-21 — Windows caught up to 2026.081, the download shrank 26%, and file associations were fixed
 
-**State at close:** `main` @ `5f7a8ec`, working tree clean, `VERSION` =
+**State at close:** `main` @ `a36b9a6`, working tree clean, `VERSION` =
 `2026.081` — deliberately *unchanged*, see below. Windows and macOS now serve
 the same version from `dist-latest`. `dist\Neight.msix` is built at
-`2026.81.0.0` and **waiting to be uploaded to Partner Center** — the one task
-this session did not finish.
+`2026.81.0.0`, verified against a real local install, and **waiting to be
+uploaded to Partner Center** — the one task this session did not finish.
+
+**A dev-registered copy of that package is deliberately left installed** on the
+Windows machine so the maintainer can test it before uploading. See "The test
+install left behind" for what it is and how to undo it.
 
 Date: 2026-08-21
-Context: a short Windows session picking up
+Context: a Windows session picking up
 [`2026-08-20`](2026-08-20-store-distribution-and-status-bar-work.md), which
-closed asking for exactly this. Three commits, `3323e01` to `5f7a8ec`.
+closed asking for the catch-up build. The file-association work came out of a
+bug report raised during the session. Five commits, `3323e01` to `a36b9a6`.
 
 ---
 
@@ -21,6 +26,11 @@ package at or above **2026.81.0.0** is already there — the live listing was
 submitted at 2026.79.0.0, and MSIX versions must strictly increase.
 
 Do not sign it locally. Microsoft re-signs on publish.
+
+**Before uploading, be clear about what this package contains.** It is not the
+same software as the macOS build published under 2026.081 — see "Two trees, one
+version number" below. Uploading is still the right move; just do not read the
+2026.081 changelog as describing both platforms.
 
 ---
 
@@ -98,6 +108,121 @@ paths echo the version actually being built.
 Use it for catch-up builds only. An ordinary Windows build that introduces
 changes should still bump.
 
+## File associations were broken by the move to the Store
+
+Reported during the session: opening `.txt` and `.md` with Neight had stopped
+working on Windows. It had, and the cause was structural rather than a slip.
+
+**Help → Debug Info** offered two checkboxes that registered Neight by writing
+`HKCU\Software\Classes` directly. That is a legitimate mechanism for an ordinary
+`.exe` and the wrong one for a packaged app. Three things were wrong at once:
+
+1. **The MSIX manifest declared no file type associations at all.** For a
+   packaged app the manifest is the only mechanism the shell honours, so the
+   Store build could never appear as a handler no matter what the checkbox did.
+2. **The registry state left behind was half-written.** `.txt\OpenWithProgids`
+   named `Neight.txt`, but `Software\Classes\Neight.txt` — the ProgID holding
+   the open command — did not exist. A dead entry in the Open With menu.
+3. **A successful write could not have survived anyway.** Under MSIX
+   `sys.executable` is
+   `C:\Program Files\WindowsApps\LittleFeetServicesPvtLtd.neight_2026.79.0.0_x64__…\Neight.exe`.
+   That path contains the version and disappears at the next Store update.
+
+Microsoft's own Notepad registers as `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw` with
+a `DelegateExecute` handler — an `AppX<hash>` ProgID the platform generates
+*from the manifest*. That is the shape a correct packaged registration takes,
+and an app does not write it for itself.
+
+### What was done
+
+The manifest now declares `.txt`, `.md` and `.markdown`. The checkboxes are gone
+on **all** Windows builds, replaced by text that explains where the association
+comes from, plus the existing Default apps button and a link to Microsoft's
+instructions. Opening Debug Info also repairs dangling entries — but only
+dangling ones; a *complete* registration from an older direct `.exe` build still
+works and was chosen deliberately, so it is left alone.
+
+**This removes a capability from direct-download users.** The checkboxes were
+the only thing that registered the unpackaged `.exe`, so it can no longer appear
+in Open With at all. That was a deliberate call, not an oversight.
+
+### Two traps worth remembering
+
+**The app-model APIs are exported without a trailing `W`.** `GetCurrentPackageFullNameW`
+does not exist; the name is `GetCurrentPackageFullName`. The first version of
+`_win_appmodel_string` asked for the `W` form, got `AttributeError`, swallowed it
+in the `except`, and would have made **every** build report itself as unpackaged —
+leaving the entire Store branch permanently dead while looking like it worked.
+The two functions also report absence differently: `GetCurrentPackageFullName`
+answers `APPMODEL_ERROR_NO_PACKAGE` (15700), `GetCurrentApplicationUserModelId`
+answers `APPMODEL_ERROR_NO_APPLICATION` (15703). Treating only 15700 as
+"unpackaged" is a live trap.
+
+**A double hyphen is illegal inside an XML comment.** The first manifest comment
+contained one, and `makeappx` rejected the package with only "the package
+manifest is not valid" — no line, no column. `build_msix.ps1` now parses the
+staged manifest before packing so the next occurrence names the actual error.
+
+### How it was verified
+
+The manifest half is proven end-to-end. The package was registered locally
+(Developer Mode) and all three extensions opened in the packaged app —
+`assoc-test.txt`, `assoc-test.md` and `assoc-test.markdown` each appeared as a
+window title. `tasklist /apps` confirmed every process carried package identity.
+The generated ProgIDs are textbook: `ContractId = Windows.File`,
+`PackageRelativeExecutable = Neight.exe`, `DesktopAppXActivateOptions = 0x20`
+(the Desktop Bridge flag meaning "pass the file as a command-line argument"),
+and the correct AUMID `LittleFeetServicesPvtLtd.neight_rs07675pfr2ay!Neight`.
+
+**One thing is *not* verified: `_win_is_packaged()` returning `True` inside the
+real package.** Several approaches failed —
+`Invoke-CommandInDesktopPackage` runs an external `.exe` without granting it
+package identity, and a probe added as a second `Application` in the manifest hit
+schema and deployment errors that were not worth chasing further. What is known:
+the export names are right, the unpackaged branch returns `""` correctly from
+both sentinels, and the running packaged process demonstrably *has* identity, so
+the API will return a value. What is unproven is the success-path parsing.
+
+**If it is wrong, the damage is cosmetic**: Open With still works, because that
+is manifest-driven and independent of this code. Debug Info would wrongly say
+"direct download", and the Default apps button would open the generic page
+instead of Neight's own entry. Worth one look at Debug Info on the installed
+package before assuming it is fine.
+
+## The test install left behind
+
+`Get-AppxPackage LittleFeetServicesPvtLtd.neight` reports **2026.81.0.0**,
+`SignatureKind: None`, installed from `C:\DevTemp\neight\dist\msix_staging` —
+a dev registration, not a Store install. It replaced the Store copy that was
+there (2026.79.0.0, `SignatureKind: Store`).
+
+To go back to the Store build: uninstall from Settings → Apps, then reinstall
+from [the listing](https://apps.microsoft.com/detail/9pj70ndp41lv).
+
+Two things about a dev registration worth knowing:
+
+- **It runs out of the build folder.** Rebuilding into `dist\msix_staging`
+  changes the installed app underneath itself, and `Add-AppxPackage -Register`
+  fails with `0x80073D02` while any instance is running. Close Neight first.
+- **The app writes `settings.json` next to its own exe**, so running it puts one
+  in the staging folder. That cannot leak into a shipped package —
+  `build_msix.ps1` deletes and recreates the staging directory on every run
+  (`build_msix.ps1:123-127`) — and the built `Neight.msix` was checked and
+  contains only the six assets, `Neight.exe` and the manifest.
+
+## Two trees, one version number
+
+`VERSION` was held at 2026.081 for the catch-up build, when the source was
+identical to what macOS shipped. It stayed at 2026.081 through the association
+work, when it no longer was. That was raised and confirmed as a deliberate
+choice, but it leaves a real discrepancy:
+
+**The Windows 2026.081 build contains code that no macOS 2026.081 build has.**
+The `CHANGELOG` entry for it says so explicitly and is tagged **[Windows]**, and
+the Store package will carry `2026.81.0.0`. A future reader diffing a
+user-reported version against source should know that 2026.081 does not identify
+a single tree. Bumping is the better default for anything that changes code.
+
 ## The test suite passes 954 checks on Windows, not 934
 
 The 2026-08-20 note says to expect **934**. On Windows it is **954**, 0 failed:
@@ -146,6 +271,18 @@ README now scopes those instructions to that download only.
 4. **`CHANGELOG` 2026.076's 57 MB figure is stale** now that a clean build is
    50.4 MB. Left alone deliberately — it was accurate when written, and the
    changelog is a historical record.
+5. **`_win_is_packaged()` is unproven inside a real package**, as described
+   above. One look at **Help → Debug Info** on the installed test package
+   settles it: it should say the copy is installed from the **Microsoft Store**,
+   not that it is a direct download.
+6. **The Windows machine has a dev-registered package installed, not the Store
+   build.** Reinstall from the Store listing once testing is done.
+7. **Developer Mode was enabled on the Windows machine** to allow the local
+   install. Turn it off in Settings → System → For developers if it is not
+   wanted permanently.
+8. **Windows file associations have no automated coverage**, and by their nature
+   cannot have much — the behaviour only exists once the package is installed.
+   `tests/README.md` now records the manual procedure.
 
 ## What to avoid
 
@@ -164,15 +301,29 @@ outright.
 
 ## Verified this session
 
-- 954 checks, 0 failed, before building.
-- `dist\Neight.exe` = 52,836,543 bytes; the blob on `dist-latest` matches it
-  exactly (`a1a6805…`), and is no longer the stale `3dc3bdc4…`.
-- Both `dist-latest` download URLs return HTTP 200; the mac artifact survived
-  the force-push.
+- 954 checks, 0 failed — run before the catch-up build, and again after the
+  association change.
+- `dist\Neight.exe` = 52,840,995 bytes (50.4 MB); the blob on `dist-latest`
+  matches it exactly (`790ac11…`) and is no longer the stale `3dc3bdc4…`.
+- Both `dist-latest` download URLs return HTTP 200; the mac artifact is
+  untouched at `b97f019…` after three Windows force-pushes.
 - The built `.exe` launches and stays up.
 - No `_UpdateCheckWorker`, `Check for Updates`, `update_check_on_launch` or
   `QThread` remains in `neight.py`; `Help → Neight on GitHub` is present.
-- `AppxManifest.xml` carries the real identity, `Version="2026.81.0.0"`.
+- `AppxManifest.xml` carries the real identity, `Version="2026.81.0.0"`, and
+  both `FileTypeAssociation` blocks.
+- `Neight.msix` = 52,578,768 bytes (50.1 MB), containing only the six assets,
+  `Neight.exe` and the manifest — no stray files.
+- **The associations work end-to-end on a real install**: `.txt`, `.md` and
+  `.markdown` each opened in the packaged Neight, every process carrying package
+  identity.
+- The orphan repair removed the three genuinely dangling entries on this machine
+  and left a deliberately seeded *complete* registration untouched.
+- Debug Info constructs with no checkboxes, the help link, and the correct
+  unpackaged wording when run from source.
+- macOS is untouched: no `darwin`, `_macos_`, `CFBundle` or `LSSet` line appears
+  in the diff, `Neight.macos.spec` is unmodified, and CI's
+  `Import and construct (macos-latest)` job passes.
 
 ## Where to look for current state
 
