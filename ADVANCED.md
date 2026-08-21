@@ -320,7 +320,7 @@ The first launch after upgrading to this behaviour performs a **one-time migrati
 
 **Where the association comes from depends on how you installed Neight.**
 
-- **Microsoft Store** — `.txt`, `.md` and `.markdown` are registered by the app package itself, so Neight appears in the right-click → **Open With** menu for those types with nothing to switch on. This is handled by Windows, not by Neight, so it cannot be turned off from inside the app; use Windows' own Open With settings if you want it gone.
+- **Microsoft Store** — from the **2026.081** update onward, `.txt`, `.md` and `.markdown` are registered by the app package itself, so Neight appears in the right-click → **Open With** menu for those types with nothing to switch on. (On an earlier Store build no association exists; update from the Store to get it.) This is handled by Windows, not by Neight, so it cannot be turned off from inside the app; use Windows' own Open With settings if you want it gone.
 - **Direct download** — the `.exe` is not registered with the Windows shell and will not appear under **Open With**. Install from the Store if you want that integration.
 
 Earlier versions offered two checkboxes here that wrote the association into `HKEY_CURRENT_USER` directly. They have been removed. That approach cannot work for a Store install: the writes do not survive, and the command they record points at a versioned `WindowsApps` folder that ceases to exist at the next Store update. If those old registrations left dead entries in your **Open With** menu, opening **Help → Debug Info** clears them out automatically.

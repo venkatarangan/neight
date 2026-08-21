@@ -94,12 +94,13 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **New Window** — open a second instance for side-by-side writing
 - **Open With integration** — the macOS app bundle appears in Finder's
   **Open With** menu for `.txt`, `.md` and `.markdown` files. On Windows, the
-  **Microsoft Store** build registers the same three types automatically, so
-  Neight appears in Explorer's **Open With** menu with nothing to switch on;
-  the direct `.exe` download is not registered with the shell. Windows has
-  hash-protected the *default* handler since Windows 8, so Neight cannot
-  silently claim it — **Help → Debug Info** links to the Default Apps page. On
-  macOS, the same dialog can set the Markdown handler directly.
+  **Microsoft Store** build registers the same three types automatically **from
+  the 2026.081 update onward**, so Neight appears in Explorer's **Open With**
+  menu with nothing to switch on; the direct `.exe` download is not registered
+  with the shell. Windows has hash-protected the *default* handler since
+  Windows 8, so Neight cannot silently claim it — **Help → Debug Info** links to
+  the Default Apps page. On macOS, the same dialog can set the Markdown handler
+  directly.
 
 ### Status bar
 
