@@ -14,6 +14,17 @@ its own. Every network request happens because you clicked something.
 
 ## Quick Start
 
+### What you need
+
+| | |
+|---|---|
+| **Windows** | Windows 10 (version 1809) or Windows 11, 64-bit |
+| **macOS** | macOS 12 Monterey or later, **Apple Silicon (arm64) only** — no Intel build |
+| **Tamil typing** | A **built-in** Tamil keyboard layout (*Tamil 99*, *Tamil Phonetic*, or the macOS *Tamil* layout). Third-party input apps such as **NHM Writer** and **Azhagi** are not supported |
+
+Nothing else to install — no runtime, no framework, no admin rights for the
+direct download.
+
 ### Download
 
 - **Windows (recommended):** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
