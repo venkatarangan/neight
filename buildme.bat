@@ -5,13 +5,38 @@ echo Neight Enhanced Build Script
 echo ========================================
 echo.
 
-REM Run the Python script to increment version
+REM ── Version bump, unless --no-bump was passed ──────────────────────────────
+REM
+REM Mac and Windows build on separate machines, so VERSION drifts between them:
+REM a macOS session bumps it and pushes, leaving Windows a build behind. A plain
+REM rebuild here would bump again rather than catch up, and since both platforms'
+REM artifacts are served side by side from dist-latest, the two direct downloads
+REM would sit permanently one version apart -- a user comparing them on the
+REM website sees two different numbers for what is the same build.
+REM
+REM --no-bump rebuilds at the committed VERSION instead. It also leaves neight.py
+REM unmodified, so the working tree stays clean and build_msix.ps1 -- which
+REM refuses to run on a dirty tree -- can follow directly without a commit in
+REM between.
+set "SKIP_BUMP="
+if /i "%~1"=="--no-bump" set "SKIP_BUMP=1"
+if defined SKIP_BUMP goto :skip_bump
+
 python increment_version.py
 if errorlevel 1 (
     echo Error: Failed to increment version number
     pause
     exit /b 1
 )
+goto :after_bump
+
+:skip_bump
+echo Skipping the version bump ^(--no-bump^).
+
+:after_bump
+REM Report what is actually being built, whichever path ran above.
+for /f "tokens=3" %%v in ('findstr /b /c:"VERSION = " neight.py') do set "BUILD_VERSION=%%~v"
+echo Building version %BUILD_VERSION%
 
 echo.
 echo Starting PyInstaller build...
