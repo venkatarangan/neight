@@ -106,6 +106,16 @@ removal. Also adds selection-aware counts to the status bar.
   Direct downloads from GitHub Releases are relabelled as a separate channel
   rather than the default, and the SmartScreen instructions are scoped to the
   direct `.exe` only.
+- **The Windows download is 26% smaller — 68.2 MB down to 50.4 MB.**
+  **[Windows]** Not a code change: the `.exe` being served had been built in an
+  ordinary development environment, and PyInstaller silently bundles whatever it
+  finds there. `pillow` and `python-pptx` — both legitimate entries in
+  `requirements-dev.txt`, neither imported by Neight — were being packaged into
+  every copy, along with `lxml` and `xlsxwriter` behind them. Rebuilt from an
+  environment holding only the runtime and build dependencies. `DEVELOPER.md`
+  now gives the exact commands rather than only warning against it in prose,
+  and `buildme.bat --no-bump` makes a catch-up rebuild like this one possible
+  without pushing the version out of step with macOS.
 
 ### Removed
 

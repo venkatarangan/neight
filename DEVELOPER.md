@@ -107,14 +107,50 @@ The standard build script increments the version number automatically and then r
 buildme.bat
 ```
 
-For a release build, use a fresh virtual environment containing
-`requirements.txt` plus the pinned PyInstaller version. Do not build a release
-from the general development environment: optional design and presentation
-packages can be discovered by PyInstaller hooks and silently added to the
-executable even though Neight never imports them.
+For a release build, use an environment containing `requirements.txt` plus the
+pinned PyInstaller version and **nothing else**. Do not build from the general
+development environment: optional design and presentation packages can be
+discovered by PyInstaller hooks and silently added to the executable even though
+Neight never imports them. This is not theoretical: an ordinary development
+`.venv` — `requirements.txt` plus `requirements-dev.txt`, nothing unusual —
+produced a **68.2 MB** `Neight.exe` where the same source built clean gives
+**50.4 MB**. `pillow` and `python-pptx` are the culprits (`python-pptx` also
+drags in `lxml` and `xlsxwriter`), and every one of them is a legitimate entry
+in `requirements-dev.txt`. Nothing is misconfigured; the two environments simply
+have to stay separate. That 68.2 MB build was the public Windows download for
+three weeks.
+
+```powershell
+Remove-Item -Recurse -Force .venv   # if the existing one has drifted
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-build.txt
+buildme.bat
+```
+
+Reinstall `requirements-dev.txt` **after** the build to get the design tools and
+the pre-commit hooks back. Doing it in that order is the whole point — the
+development environment is fine to have, just not while PyInstaller is looking.
+
+#### Rebuilding without a version bump
+
+```bat
+buildme.bat --no-bump
+```
+
+Skips step 1 below and builds the version already committed in `neight.py`.
+
+Use it when Windows is catching up to a version macOS already set. The two
+platforms build on separate machines, so `VERSION` drifts between them; bumping
+on a catch-up build would leave the two `dist-latest` artifacts permanently one
+version apart, which is visible to anyone comparing the website's two download
+links. It also leaves the working tree clean, so `build_msix.ps1` can run
+straight afterwards without an intervening commit.
 
 What it does:
 1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
+   (skipped with `--no-bump`)
 2. Runs PyInstaller from the checked-in spec: `pyinstaller packaging\Neight.windows.spec`
 3. Produces `dist\Neight.exe`
 4. Publishes `dist\Neight.exe` to the `dist-latest` branch on a best-effort
