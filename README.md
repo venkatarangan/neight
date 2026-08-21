@@ -93,13 +93,13 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 - **Plain-text paste** (`Shift+Ctrl+V`) — strips formatting on paste
 - **New Window** — open a second instance for side-by-side writing
 - **Open With integration** — the macOS app bundle appears in Finder's
-  **Open With** menu for `.txt`, `.md` and `.markdown` files. On Windows, open
-  **Help → Debug Info** and enable the `.txt` and/or Markdown **Open With**
-  checkboxes first; Markdown registers separately, so Explorer labels it
-  *Markdown Document*. Windows has hash-protected the *default* handler since
-  Windows 8, so Neight cannot silently claim it — Debug Info links to the
-  Default Apps page. On macOS, the same dialog can set the Markdown handler
-  directly.
+  **Open With** menu for `.txt`, `.md` and `.markdown` files. On Windows, the
+  **Microsoft Store** build registers the same three types automatically, so
+  Neight appears in Explorer's **Open With** menu with nothing to switch on;
+  the direct `.exe` download is not registered with the shell. Windows has
+  hash-protected the *default* handler since Windows 8, so Neight cannot
+  silently claim it — **Help → Debug Info** links to the Default Apps page. On
+  macOS, the same dialog can set the Markdown handler directly.
 
 ### Status bar
 

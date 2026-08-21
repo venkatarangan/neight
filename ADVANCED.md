@@ -318,16 +318,16 @@ The first launch after upgrading to this behaviour performs a **one-time migrati
 
 #### Windows
 
-Two checkboxes register Neight in your user account only — no administrator rights are needed, and nothing outside `HKEY_CURRENT_USER` is touched:
+**Where the association comes from depends on how you installed Neight.**
 
-- **Show Neight in 'Open With' for .txt files**
-- **Show Neight in 'Open With' for .md files** — covers `.md` and `.markdown`
+- **Microsoft Store** — `.txt`, `.md` and `.markdown` are registered by the app package itself, so Neight appears in the right-click → **Open With** menu for those types with nothing to switch on. This is handled by Windows, not by Neight, so it cannot be turned off from inside the app; use Windows' own Open With settings if you want it gone.
+- **Direct download** — the `.exe` is not registered with the Windows shell and will not appear under **Open With**. Install from the Store if you want that integration.
 
-Ticking a box makes Neight appear in the right-click → **Open With** menu. It does **not** make Neight the default application, and no application is allowed to do that on Windows: since Windows 8 the setting that records your default app is protected by a hash the operating system verifies, specifically so that software cannot silently take over your file types.
+Earlier versions offered two checkboxes here that wrote the association into `HKEY_CURRENT_USER` directly. They have been removed. That approach cannot work for a Store install: the writes do not survive, and the command they record points at a versioned `WindowsApps` folder that ceases to exist at the next Store update. If those old registrations left dead entries in your **Open With** menu, opening **Help → Debug Info** clears them out automatically.
 
-So the last step is yours. The **Open Windows Default Apps settings…** button takes you straight to the right page, where you can set Neight for `.md` in one click.
+Neight never becomes your **default** application for a file type, and no application is allowed to make itself one on Windows: since Windows 8 the setting that records your default app is protected by a hash the operating system verifies, specifically so that software cannot silently take over your file types.
 
-Unticking a box removes the registration completely, including the ProgID it created.
+So the last step is yours, and only yours. The **Open Windows Default Apps settings…** button takes you straight to the right page — on a Store install, straight to Neight's own entry — where you can set it per file type. There is also a link to Microsoft's own instructions for doing it.
 
 #### macOS
 

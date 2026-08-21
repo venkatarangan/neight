@@ -448,6 +448,88 @@ def _activate_klid(klid: str) -> None:
 
 
 # ----------------------------------------------------------
+# Windows packaging identity (MSIX / Microsoft Store)
+# ----------------------------------------------------------
+# What the app-model APIs return when the caller is not inside a package.  There
+# are two: GetCurrentPackageFullName answers NO_PACKAGE, while
+# GetCurrentApplicationUserModelId answers NO_APPLICATION.  Both mean the same
+# thing to us, and treating only the first as "unpackaged" is a real trap.
+_APPMODEL_ERROR_NO_PACKAGE = 15700
+_APPMODEL_ERROR_NO_APPLICATION = 15703
+_ERROR_INSUFFICIENT_BUFFER = 122
+
+
+def _win_appmodel_string(func_name: str) -> str:
+    """Call a kernel32 app-model getter that follows the (length, buffer) pattern.
+
+    Returns "" when unpackaged, when running off Windows, or when the API is
+    unavailable — every caller treats those the same way.
+
+    Note the exact export names: these APIs are Unicode-only and exported
+    *without* a trailing "W".  Asking for "GetCurrentPackageFullNameW" raises
+    AttributeError, which this would swallow — leaving every build looking
+    unpackaged and the Store branch permanently dead.
+    """
+    if sys.platform != "win32":
+        return ""
+    try:
+        func = getattr(ctypes.windll.kernel32, func_name)
+    except (AttributeError, OSError):
+        return ""
+    try:
+        length = ctypes.c_uint32(0)
+        # First call sizes the buffer; unpackaged short-circuits here.
+        rc = func(ctypes.byref(length), None)
+        if rc in (_APPMODEL_ERROR_NO_PACKAGE, _APPMODEL_ERROR_NO_APPLICATION):
+            return ""
+        if rc != _ERROR_INSUFFICIENT_BUFFER or length.value == 0:
+            return ""
+        buf = ctypes.create_unicode_buffer(length.value)
+        if func(ctypes.byref(length), buf) != 0:
+            return ""
+        return buf.value or ""
+    except Exception:
+        return ""
+
+
+# Packaging identity cannot change within a process, so both answers are
+# resolved once.  None means "not asked yet".
+_win_package_identity_cache: dict[str, str] = {}
+
+
+def _win_package_full_name() -> str:
+    """Package full name of the running app, or "" when unpackaged."""
+    if "full_name" not in _win_package_identity_cache:
+        _win_package_identity_cache["full_name"] = _win_appmodel_string(
+            "GetCurrentPackageFullName"
+        )
+    return _win_package_identity_cache["full_name"]
+
+
+def _win_is_packaged() -> bool:
+    """True when running from an MSIX package — i.e. a Microsoft Store install.
+
+    This matters because a packaged app and a plain .exe get their file
+    associations from completely different places: the package manifest for the
+    former, the registry for the latter.
+    """
+    return bool(_win_package_full_name())
+
+
+def _win_package_aumid() -> str:
+    """Application User Model ID of the running package, or "" when unpackaged.
+
+    Used to deep-link Settings straight to Neight's own Default apps page
+    instead of dropping the user at the top of an alphabetical list.
+    """
+    if "aumid" not in _win_package_identity_cache:
+        _win_package_identity_cache["aumid"] = _win_appmodel_string(
+            "GetCurrentApplicationUserModelId"
+        )
+    return _win_package_identity_cache["aumid"]
+
+
+# ----------------------------------------------------------
 # Windows HKCU file-association helpers (no elevation needed)
 # ----------------------------------------------------------
 _NEIGHT_PROGID = "Neight.txt"
@@ -463,92 +545,96 @@ _WIN_FILE_KINDS: dict[str, tuple[str, str, tuple[str, ...]]] = {
 }
 
 
-def _win_association_registered(kind: str) -> bool:
-    """Return True if Neight is an HKCU 'Open With' handler for every extension of `kind`."""
-    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
+def _win_progid_defined(progid: str) -> bool:
+    """True if the ProgID subtree exists — i.e. it actually has an open command.
+
+    An extension can name a ProgID that no longer exists.  Explorer then shows a
+    dead 'Open With' entry, which is exactly the state Neight's own registration
+    left behind on Store installs.
+    """
+    if sys.platform != "win32":
         return False
-    progid, _label, extensions = _WIN_FILE_KINDS[kind]
     try:
         import winreg
-        for ext in extensions:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}\OpenWithProgids"
-            ) as key:
-                winreg.QueryValueEx(key, progid)
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, rf"Software\Classes\{progid}\shell\open\command"
+        ):
+            return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _win_extension_names_progid(ext: str, progid: str) -> bool:
+    """True if `ext` lists `progid` under OpenWithProgids."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}\OpenWithProgids"
+        ) as key:
+            winreg.QueryValueEx(key, progid)
         return True
     except (FileNotFoundError, OSError):
         return False
 
 
-def _win_register_association(kind: str) -> None:
-    """Register Neight in HKCU so it appears in the 'Open With' list for `kind`."""
-    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
-        return
+def _win_repair_orphaned_associations() -> int:
+    """Remove Neight 'Open With' entries whose ProgID no longer exists.
+
+    Neight used to register itself by writing HKCU directly.  That is a valid
+    mechanism for a plain .exe but not for an MSIX build, where the writes do
+    not survive and the open command would name a versioned WindowsApps path
+    that disappears at the next Store update.  What was left behind is an
+    extension pointing at a ProgID with no definition: a dead entry in the
+    user's Open With menu.
+
+    Only *dangling* entries are removed.  A complete registration from an older
+    direct .exe build still works and was chosen deliberately, so it is left
+    alone — Windows' own Open With management is where it can be removed.
+
+    Returns the number of entries cleaned up.
+    """
+    if sys.platform != "win32":
+        return 0
     import winreg
-    progid, label, extensions = _WIN_FILE_KINDS[kind]
+    removed = 0
+    for progid, _label, extensions in _WIN_FILE_KINDS.values():
+        if _win_progid_defined(progid):
+            continue  # complete registration — not ours to undo
+        for ext in extensions:
+            if not _win_extension_names_progid(ext, progid):
+                continue
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    rf"Software\Classes\{ext}\OpenWithProgids",
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as key:
+                    winreg.DeleteValue(key, progid)
+                removed += 1
+            except (FileNotFoundError, OSError):
+                pass
 
-    # Build the open command.  For the frozen build this is just the exe; from a
-    # source checkout it must be "python.exe script.py", because registering the
-    # bare .py path only works if Python happens to own the .py association —
-    # and sys.argv[0] is not even a path under `python -c`.
-    if getattr(sys, "frozen", False):
-        open_command = f'"{os.path.abspath(sys.executable)}" "%1"'
-    else:
-        script = os.path.abspath(__file__)
-        open_command = f'"{os.path.abspath(sys.executable)}" "{script}" "%1"'
+    # Sweep up any partial ProgID subtree left behind (leaf-to-root order).
+    for progid, _label, _extensions in _WIN_FILE_KINDS.values():
+        if _win_progid_defined(progid):
+            continue
+        for sub in (
+            rf"Software\Classes\{progid}\shell\open\command",
+            rf"Software\Classes\{progid}\shell\open",
+            rf"Software\Classes\{progid}\shell",
+            rf"Software\Classes\{progid}",
+        ):
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
+            except (FileNotFoundError, OSError):
+                pass
 
-    # 1. Define the ProgID with a friendly name and open command
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{progid}"
-    ) as key:
-        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, label)
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, rf"Software\Classes\{progid}\shell\open\command",
-    ) as key:
-        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, open_command)
-
-    # 2. Register the ProgID under each extension's OpenWithProgids
-    for ext in extensions:
-        with winreg.CreateKeyEx(
-            winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}\OpenWithProgids"
-        ) as key:
-            winreg.SetValueEx(key, progid, 0, winreg.REG_NONE, b"")
-
-    _win_notify_shell_assoc_changed()
-
-
-def _win_unregister_association(kind: str) -> None:
-    """Remove the Neight HKCU 'Open With' registration for `kind`."""
-    if sys.platform != "win32" or kind not in _WIN_FILE_KINDS:
-        return
-    import winreg
-    progid, _label, extensions = _WIN_FILE_KINDS[kind]
-
-    for ext in extensions:
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                rf"Software\Classes\{ext}\OpenWithProgids",
-                0,
-                winreg.KEY_SET_VALUE,
-            ) as key:
-                winreg.DeleteValue(key, progid)
-        except (FileNotFoundError, OSError):
-            pass
-
-    # Remove the ProgID subtree (leaf-to-root order)
-    for sub in (
-        rf"Software\Classes\{progid}\shell\open\command",
-        rf"Software\Classes\{progid}\shell\open",
-        rf"Software\Classes\{progid}\shell",
-        rf"Software\Classes\{progid}",
-    ):
-        try:
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
-        except (FileNotFoundError, OSError):
-            pass
-
-    _win_notify_shell_assoc_changed()
+    if removed:
+        _win_notify_shell_assoc_changed()
+    return removed
 
 
 def _win_notify_shell_assoc_changed() -> None:
@@ -719,6 +805,14 @@ def _win_open_default_apps_settings() -> bool:
     """
     if sys.platform != "win32":
         return False
+    # A packaged build can deep-link to its *own* page in Default apps, which
+    # lands on the per-extension list instead of the top of an alphabetical one.
+    # Unpackaged there is nothing to name, so open the page itself.
+    aumid = _win_package_aumid()
+    if aumid:
+        url = QUrl(f"ms-settings:defaultapps?registeredAUMID={quote_plus(aumid)}")
+        if QDesktopServices.openUrl(url):
+            return True
     return QDesktopServices.openUrl(QUrl("ms-settings:defaultapps"))
 
 
@@ -6094,54 +6188,45 @@ th {{ background-color: {table_head_bg}; }}
             layout.addWidget(assoc_header)
 
         if sys.platform == "win32":
-            def _make_win_assoc_checkbox(kind: str, label: str, tip: str) -> QCheckBox:
-                box = QCheckBox(label, dialog)
-                box.setChecked(_win_association_registered(kind))
-                box.setToolTip(tip)
+            # Neight used to offer checkboxes here that wrote HKCU directly.  They
+            # are gone: the mechanism cannot work for a Store install, and it left
+            # dangling entries behind when it failed.  Clear those up quietly —
+            # they are Neight's own mess, and each one is a dead entry in the
+            # user's Open With menu.  A registry we cannot write is not a reason
+            # to fail opening Debug Info.
+            try:
+                _win_repair_orphaned_associations()
+            except Exception:
+                pass
 
-                def _on_toggled(checked: bool) -> None:
-                    try:
-                        if checked:
-                            _win_register_association(kind)
-                        else:
-                            _win_unregister_association(kind)
-                    except Exception as exc:
-                        QMessageBox.warning(
-                            dialog,
-                            "Registration Error",
-                            f"Could not update file association:\n{exc}",
-                        )
-                    # Always resync from the registry: the write may have partly
-                    # succeeded, and the checkbox must show what is actually true.
-                    box.blockSignals(True)
-                    box.setChecked(_win_association_registered(kind))
-                    box.blockSignals(False)
+            if _win_is_packaged():
+                assoc_text = (
+                    "This copy is installed from the <b>Microsoft Store</b>, so "
+                    "<b>.txt</b>, <b>.md</b> and <b>.markdown</b> are registered by the "
+                    "app package itself. Neight appears under right-click → "
+                    "<b>Open With</b> for those file types."
+                )
+            else:
+                assoc_text = (
+                    "This copy is a <b>direct download</b>, which is not registered with "
+                    "the Windows shell, so Neight will not appear under right-click → "
+                    "<b>Open With</b>. The <b>Microsoft Store</b> version registers "
+                    "<b>.txt</b>, <b>.md</b> and <b>.markdown</b> automatically."
+                )
 
-                box.toggled.connect(_on_toggled)
-                layout.addWidget(box)
-                return box
-
-            _make_win_assoc_checkbox(
-                "text",
-                "Show Neight in 'Open With' for .txt files",
-                "Registers Neight in your user account (no admin rights required).\n"
-                "Neight will appear in the right-click → Open With menu for .txt files.",
-            )
-            _make_win_assoc_checkbox(
-                "markdown",
-                "Show Neight in 'Open With' for .md files",
-                "Registers Neight in your user account (no admin rights required).\n"
-                "Covers .md and .markdown files.",
-            )
+            assoc_lbl = QLabel(assoc_text, dialog)
+            assoc_lbl.setWordWrap(True)
+            layout.addWidget(assoc_lbl)
 
             # Windows deliberately prevents an application from making itself the
-            # default handler — the UserChoice registry value is hash-protected.
-            # Registering the ProgID above is the most an app may legitimately do,
-            # so point the user at the one place where they can confirm it.
+            # default handler — the UserChoice value is hash-protected, precisely
+            # so software cannot take file types over silently.  Appearing in the
+            # Open With list is the most any app may do; the promotion is the
+            # user's, so point them at the one place it can be made.
             default_note = QLabel(
-                "Windows only lets <i>you</i> choose the default app, not Neight. "
-                "After ticking the box above, open Default apps and set Neight for "
-                "<b>.md</b>.",
+                "Windows only lets <i>you</i> choose the default app, never the app "
+                "itself. To open these files in Neight by default, set it in "
+                "Windows Settings.",
                 dialog,
             )
             default_note.setWordWrap(True)
@@ -6151,6 +6236,18 @@ th {{ background-color: {table_head_bg}; }}
             default_btn = QPushButton("Open Windows Default Apps settings…", dialog)
             default_btn.clicked.connect(lambda: _win_open_default_apps_settings())
             layout.addWidget(default_btn)
+
+            help_lbl = QLabel(
+                '<a href="https://support.microsoft.com/windows/'
+                'change-default-programs-in-windows-'
+                'e5d82cad-17d1-c53b-3505-f10a32e1894d">'
+                "How to change default apps in Windows</a>",
+                dialog,
+            )
+            help_lbl.setWordWrap(True)
+            help_lbl.setOpenExternalLinks(True)
+            help_lbl.setStyleSheet("margin-top: 2px;")
+            layout.addWidget(help_lbl)
 
         elif sys.platform == "darwin":
             bundle_id = _macos_bundle_identifier()

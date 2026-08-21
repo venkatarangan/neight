@@ -59,3 +59,12 @@ manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the
 calibration is not), Tamil/English keyboard switching, and the macOS file
 associations. See the "Still needs a person" section of
 `knownbugs/MACOS-VALIDATION-RESULTS.md`.
+
+**Windows file associations are manual too, and they need a real install.**
+Whether Neight appears under Explorer's **Open With** is decided by the MSIX
+package manifest, which only takes effect once the package is installed — a
+source checkout and a bare `Neight.exe` both exercise the *unpackaged* code
+path, so neither can catch a broken manifest. Install the built package with
+`Add-AppxPackage -Register dist\msix_staging\AppxManifest.xml` (Developer Mode)
+and check `.txt`, `.md` and `.markdown` by hand. This is the gap that let the
+association break reach users.

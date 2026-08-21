@@ -45,6 +45,47 @@
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
+
+      <!--
+        File type associations.
+
+        For a packaged app this manifest is the *only* mechanism the shell
+        honours. Writing HKCU\Software\Classes from inside the app does not
+        work: those writes do not survive, and the open command would point at
+        C:\Program Files\WindowsApps\<name>_<version>_..., a path that ceases
+        to exist at the next Store update.
+
+        Declaring a type here makes Neight appear under right-click -> Open
+        With. It does NOT make Neight the default handler, and nothing can:
+        since Windows 8 the UserChoice value is protected by an OS-verified
+        hash, so promoting Neight to default is the user's choice alone, made
+        in Settings -> Default apps.
+
+        Name must be lowercase with no dots. Each FileType keeps its leading
+        dot. Logo must exist in the staging tree -- build_msix.ps1 stages
+        packaging/msix_assets/Assets/.
+      -->
+      <Extensions>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="neighttext">
+            <uap:DisplayName>Plain Text Document</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.txt</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="neightmarkdown">
+            <uap:DisplayName>Markdown Document</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.md</uap:FileType>
+              <uap:FileType>.markdown</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

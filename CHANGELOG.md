@@ -117,6 +117,38 @@ removal. Also adds selection-aware counts to the status bar.
   and `buildme.bat --no-bump` makes a catch-up rebuild like this one possible
   without pushing the version out of step with macOS.
 
+- **File associations work again on Windows, and are now handled by the app
+  package.** **[Windows]** Opening `.txt` or `.md` with Neight had quietly
+  stopped working once Neight moved to the Microsoft Store. **Help → Debug
+  Info** offered two checkboxes that registered Neight by writing to the
+  Windows registry — a valid mechanism for an ordinary program, and the wrong
+  one for a Store app. Those writes do not survive, and the command they record
+  points at a folder whose name contains the version number, so it would break
+  at the next Store update even if it did. What they left behind was an entry
+  in the **Open With** menu pointing at nothing.
+
+  The Store package now declares `.txt`, `.md` and `.markdown` itself, which is
+  the mechanism Windows actually honours, so Neight appears under **Open With**
+  with nothing to switch on. The checkboxes are gone, and Debug Info explains
+  where the association comes from instead. Opening that dialog also clears out
+  any dead entries the old registrations left, without touching a registration
+  that still works.
+
+  **This removes something for direct-download users:** the `.exe` can no
+  longer be registered with Explorer at all, because the checkboxes were the
+  only thing that did it. The Microsoft Store build is the one with Open With
+  integration.
+
+  Neight still never becomes your *default* app for a file type — no Windows
+  program is permitted to do that, and that has not changed. Debug Info links
+  to the Default Apps page, now landing on Neight's own entry on a Store
+  install, and to Microsoft's instructions for setting it.
+
+  *This entry describes the Windows build of 2026.081 only. The macOS build
+  published under the same version predates it and is unaffected — none of this
+  code runs on macOS, where Finder integration works through the app bundle and
+  is unchanged.*
+
 ### Removed
 
 - **The update checker is gone.** **[Both]** Mac App Store review rejected the
