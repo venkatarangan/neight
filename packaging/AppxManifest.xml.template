@@ -49,21 +49,24 @@
       <!--
         File type associations.
 
-        For a packaged app this manifest is the *only* mechanism the shell
+        For a packaged app this manifest is the only mechanism the shell
         honours. Writing HKCU\Software\Classes from inside the app does not
-        work: those writes do not survive, and the open command would point at
-        C:\Program Files\WindowsApps\<name>_<version>_..., a path that ceases
-        to exist at the next Store update.
+        work: those writes do not survive, and the open command would name a
+        WindowsApps folder whose path contains the version number, so it would
+        break at the next Store update even if it did.
 
-        Declaring a type here makes Neight appear under right-click -> Open
+        Declaring a type here makes Neight appear under right-click, Open
         With. It does NOT make Neight the default handler, and nothing can:
         since Windows 8 the UserChoice value is protected by an OS-verified
         hash, so promoting Neight to default is the user's choice alone, made
-        in Settings -> Default apps.
+        in Settings, Default apps.
 
         Name must be lowercase with no dots. Each FileType keeps its leading
-        dot. Logo must exist in the staging tree -- build_msix.ps1 stages
+        dot. Logo must exist in the staging tree; build_msix.ps1 stages
         packaging/msix_assets/Assets/.
+
+        Careful: a double hyphen is illegal inside an XML comment, and
+        makeappx reports it only as "the package manifest is not valid".
       -->
       <Extensions>
         <uap:Extension Category="windows.fileTypeAssociation">

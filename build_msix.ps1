@@ -139,6 +139,19 @@ $Manifest = $Template `
     -replace '\{\{PACKAGE_VERSION\}\}', $PackageVersion
 Set-Content -Path "$Staging\AppxManifest.xml" -Value $Manifest -Encoding UTF8
 
+# Check the manifest is well-formed before handing it to makeappx, which reports
+# any XML problem as the same opaque "the package manifest is not valid" with no
+# line number. A stray double hyphen inside a comment is enough to trigger it.
+try {
+    [xml](Get-Content "$Staging\AppxManifest.xml" -Raw) | Out-Null
+} catch {
+    Write-Error @"
+packaging\AppxManifest.xml.template does not produce well-formed XML.
+$($_.Exception.Message)
+"@
+    exit 1
+}
+
 # ── Pack ───────────────────────────────────────────────────────────────────
 
 $OutMsix = "dist\Neight.msix"
