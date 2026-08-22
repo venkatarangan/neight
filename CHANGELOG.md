@@ -45,6 +45,14 @@ demanding macOS 26.
 - **CI runs on Python 3.14**, matching the interpreter release builds use,
   rather than 3.12.
 
+- **GitHub Releases are gone.** Neight is distributed through the app stores —
+  Microsoft Store now, Mac App Store pending approval — with unsigned developer
+  builds on the `dist-latest` branch. The GitHub Releases were a third channel
+  serving binaries nobody should install any more, so the five that existed were
+  deleted. The version tags stay, and this changelog remains the version
+  history. Direct-download links are unchanged, and the app never checked
+  Releases for updates: it makes no update check at all.
+
 ---
 
 ## 2026.082 — 2026-08-22

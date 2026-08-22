@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**[Latest releases on GitHub](https://github.com/venkatarangan/neight/releases)** | [Privacy Policy](PRIVACY.md)
+**[Get it from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv)** | [Changelog](CHANGELOG.md) | [Privacy Policy](PRIVACY.md)
 
 **Neight** (pronounced N8) is a lightweight text editor for writers who work in Tamil and English on Windows and macOS. It handles mixed-language drafting, Markdown, and distraction-free writing without the weight of a full IDE or word processor.
 
@@ -27,9 +27,26 @@ direct download.
 
 ### Download
 
-- **Windows (recommended):** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
-- **Windows (direct download):** [Download Neight.exe](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe) — the **latest build**, unsigned, for anyone who would rather not use the Store. Refreshed on every build rather than tied to a release, so it moves ahead of the Store version.
-- **macOS Apple Silicon (arm64):** [Download Neight.app zip](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip) — the **latest build**, and it is **unsigned**, so macOS will not open it without the extra step below. A Mac App Store version is on the way; until it lands this is the direct-download route.
+Neight is distributed through the app stores. They handle installation, updates
+and signing for you, and are the recommended route on both platforms.
+
+- **Windows:** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
+- **macOS:** the Mac App Store version is **awaiting approval**. Until it lands, use the direct download below.
+
+#### For developers — unsigned builds
+
+> These are the **latest builds**, published straight from a developer machine
+> on every build. They are **unsigned**: Windows shows a SmartScreen prompt and
+> macOS refuses to open them without the extra step described below. They move
+> ahead of the Store versions and receive no review, so treat them as
+> development builds rather than stable installs. There is no version history
+> here — each build replaces the last.
+
+- **Windows (x64):** [`Neight.exe`](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe)
+- **macOS (Apple Silicon):** [`Neight-mac-arm64-unsigned.app.zip`](https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip)
+
+Both come from the [`dist-latest`](https://github.com/venkatarangan/neight/tree/dist-latest)
+branch. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install on Windows
 
@@ -38,14 +55,16 @@ direct download.
 1. Open the [Store listing](https://apps.microsoft.com/detail/9pj70ndp41lv) and click **Get**.
 2. Launch Neight from the Start menu. No SmartScreen warning appears.
 
-**From the direct `.exe` download:**
+**From the unsigned `.exe` download:**
 
 1. Download `Neight.exe` and copy it to any folder.
 2. Double-click to run. Because this copy isn't Store-signed, Windows Defender SmartScreen may appear — click **More info → Run anyway**.
 
 ### Install on macOS
 
-The direct download is **unsigned**, so Gatekeeper blocks it on first launch. This is expected, and the extra step is only needed once.
+Until the Mac App Store version is approved, the direct download is the only
+route. It is **unsigned**, so Gatekeeper blocks it on first launch. This is
+expected, and the extra step is only needed once.
 
 1. Download and unzip the file — you get `Neight.app`.
 2. Drag `Neight.app` to `/Applications`.
@@ -59,7 +78,7 @@ The direct download is **unsigned**, so Gatekeeper blocks it on first launch. Th
 > With thanks to Muthu Nedumaran, who contributed an Apple Developer signature for earlier macOS builds.
 
 For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
-For build instructions, release workflow, and developer notes see [DEVELOPER.md](DEVELOPER.md).
+For build instructions and developer notes see [DEVELOPER.md](DEVELOPER.md).
 
 ---
 

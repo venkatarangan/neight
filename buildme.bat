@@ -132,8 +132,9 @@ if "%PUBLISH_RESULT%"=="0" (
 )
 echo.
 
-echo To release this build to GitHub and end users, run:
+echo This build is now the public Windows download - dist-latest is
+echo what the website and README link to, so it went live above.
 echo.
-echo   powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
+echo For the Microsoft Store, package it with build_msix.ps1.
 echo.
 pause

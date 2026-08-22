@@ -64,23 +64,31 @@ speedup.
 ## Distribution
 
 - **Stable installs go through the stores** — Microsoft Store now, Mac App Store
-  pending approval.
+  pending approval. These are the *only* stable channels.
 - **Direct downloads come from the `dist-latest` branch**, which every build
   republishes by amending its single commit and force-pushing. It is what the
   website and `README.md` link to, so **any local build immediately becomes the
   public download**. Both artifacts there are unsigned.
-- **GitHub Releases is the version history**, not a download channel.
+- **There are no GitHub Releases.** They were deleted once the stores took over;
+  the version tags were kept. Do not reintroduce a release step — the two
+  channels above are the whole distribution story, and `release_macos.sh` /
+  `release_windows.ps1` were removed with the releases.
 - `buildme_mac_app.sh` and `buildme.bat` increment `VERSION` as their first step
   and publish to `dist-latest` as their last. Expect a dirty tree after a build.
   `buildme.bat --no-bump` skips the increment, for a Windows build catching up
   to a version macOS already set — the tree then stays clean.
 - **Build releases from an environment holding only `requirements.txt` and
-  `requirements-build.txt`.** A normal development `.venv` also has `pillow` and
-  `python-pptx`, which PyInstaller's hooks bundle even though Neight imports
-  neither — worth 18 MB of dead weight in the `.exe`. Reinstall
-  `requirements-dev.txt` after building.
+  `requirements-build.txt`.** PyInstaller's hooks bundle any optional package
+  they can import, even ones Neight never imports — `pillow` and `python-pptx`
+  once cost 18 MB of dead weight in the `.exe`. Both are out of
+  `requirements-dev.txt` now (`pillow` lives in `requirements-design.txt`), so
+  the rule is a second line of defence rather than the only one. It still
+  applies: the next optional package added will behave the same way.
+- **macOS release builds need a python.org interpreter, not Homebrew's.** The
+  interpreter sets the bundle's macOS floor; Homebrew's is compiled for whatever
+  macOS is running it, which shipped a build only macOS 26 could run (2026.082).
 
-`DEVELOPER.md` has the full build and release detail.
+`DEVELOPER.md` has the full build and distribution detail.
 
 ## Windows file associations come from the package, not the registry
 

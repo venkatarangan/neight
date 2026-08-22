@@ -172,12 +172,8 @@ What it does:
 4. Publishes `dist\Neight.exe` to the `dist-latest` branch on a best-effort
    basis without changing the working tree
 
-After a successful build the script prints a reminder:
-
-```
-To release this build to GitHub, run:
-  powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
-```
+After a successful build the script confirms that `dist\Neight.exe` is now the
+public Windows download, and points at `build_msix.ps1` for the Store package.
 
 ### macOS build
 
@@ -282,67 +278,73 @@ with:
 codesign -d --entitlements :- /Applications/Neight.app
 ```
 
-After a successful build the script prints the next steps for creating a signed release.
+After a successful build the script prints where the artifact went and what to
+hand the Mac App Store signer.
 
 > Tested on Apple Silicon. The checked-in build workflow intentionally rejects
 > Intel hosts because the distributed macOS artifact is arm64-only.
 
 ---
 
-## Releasing to GitHub
+## Publishing a build
 
-Releases are published using the [GitHub CLI (`gh`)](https://cli.github.com). Install it once and authenticate:
+**Neight has no GitHub Releases.** Stable installs go through the app stores —
+Microsoft Store now, Mac App Store pending approval — and the direct downloads
+come from the `dist-latest` branch. The GitHub Releases that used to exist were
+deleted once the stores took over, because they were a third channel nobody
+used, serving binaries that no longer matched what anyone should install. The
+version tags (`v2026.045` … `v2026.078`) were kept: they cost nothing and
+`CHANGELOG.md` refers to those versions.
 
-```bash
-gh auth login
-```
+There is therefore no release script to run. `release_macos.sh`,
+`release_windows.ps1` and `release_install_notes.md` were removed for the same
+reason; recover them from git history if a GitHub release is ever wanted again.
 
-> **Commit the version bump before releasing.** The build scripts update
-> `VERSION` in the working tree, while GitHub creates a new release tag at the
-> current `HEAD` commit. Review the build, update the release notes, commit the
-> new version directly to `main`, and push it before running either release
-> script. Otherwise the tag name can describe the newly built version while
-> pointing to source that still contains the previous version.
+### Publishing happens automatically, as the last step of a build
 
-### Windows release
+Both build scripts force-push the artifact they just produced to the
+[`dist-latest`](#the-dist-latest-branch) branch. That branch is what the website
+and `README.md` link to, so:
 
-After `buildme.bat` completes and `dist\Neight.exe` exists:
+> **Any local build immediately becomes the public download.** There is no
+> staging step and no approval between `./buildme_mac_app.sh` finishing and a
+> stranger downloading it. Build deliberately.
 
-```powershell
-powershell -ExecutionPolicy RemoteSigned -File release_windows.ps1
-```
+The artifacts, and the URLs they are served from:
 
-The script reads `VERSION` from `neight.py`, creates a GitHub release tagged `v{VERSION}`, and uploads `dist\Neight.exe`. If a release with that tag already exists it uploads the executable to the existing release instead.
+| Platform | Artifact | Direct link |
+|---|---|---|
+| Windows | `Neight.exe` | `https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe` |
+| macOS | `Neight-mac-arm64-unsigned.app.zip` | `https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip` |
 
-### macOS release — unsigned build
+Both are **unsigned**, always the newest build, and carry no version history —
+each build replaces the last. These are the links to give a developer or a
+technical tester. `.github/workflows/release-assets-check.yml` checks daily that
+both still resolve, since a force-pushed branch leaves no history to notice a
+broken publish from.
 
-The unsigned zip (`dist/Neight-mac-arm64-unsigned.app.zip`) is for developer testing or sharing with technical users. End users should always use the signed build.
+### Commit the version bump
 
-To distribute an unsigned build, share the zip directly — do not publish it as the primary GitHub release asset.
+The build scripts bump `VERSION` in `neight.py` and leave the tree dirty by
+design. Commit and push that bump, so the version a user sees in **Help > About**
+corresponds to source that is actually on `main`. `build_msix.ps1` enforces
+this — it refuses to package while the tree has uncommitted changes.
 
-### macOS release — signed build
+### Going to the stores
 
-The recommended workflow:
+- **Microsoft Store:** package `dist\Neight.exe` with `build_msix.ps1` and
+  submit through Partner Center. See
+  [Microsoft Store (MSIX) Packaging](#microsoft-store-msix-packaging) below.
+- **Mac App Store:** signing and submission happen on someone else's machine.
+  Send them the bundle zip together with
+  [`packaging/HANDOVER-MAC-APP-STORE.md`](packaging/HANDOVER-MAC-APP-STORE.md)
+  and [`packaging/Neight.entitlements`](packaging/Neight.entitlements) — all
+  three are also published on `dist-latest`. Refresh the artifact hash inside
+  that document first; every macOS build changes it.
 
-```
-Step 1 — Build:
-  ./buildme_mac_app.sh
-  → dist/Neight-mac-arm64-unsigned.app.zip and dist/Neight.app
-
-Step 2 — Sign externally (Apple Developer account required):
-  Notarize/sign dist/Neight.app through Xcode or notarytool
-
-Step 3 — Re-zip the signed app into stable/:
-  ditto -c -k --sequesterRsrc --keepParent dist/Neight.app \
-        stable/Neight-mac-arm64-signed.zip
-
-Step 4 — Publish to GitHub:
-  ./release_macos.sh
-```
-
-`release_macos.sh` reads `VERSION` from `neight.py`, creates a tagged release, and uploads `stable/Neight-mac-arm64-signed.zip`. If a release with that tag already exists, it uploads the zip to the existing release.
-
-> The signed macOS build is contributed by a well-wisher with an Apple Developer account. Without notarization, macOS Gatekeeper may block launch. See the **Installing an unsigned macOS build** section below for the developer workaround.
+> The signed macOS build is contributed by a well-wisher with an Apple Developer
+> account. See [`packaging/MAC-APP-STORE-SIGNING.md`](packaging/MAC-APP-STORE-SIGNING.md)
+> for the full procedure and the outstanding asks.
 
 ---
 
@@ -413,9 +415,9 @@ is installed.
 `build_msix.ps1`:
 
 - refuses to run while `packaging/msix_identity.json` still has placeholder
-  values, or while the working tree has uncommitted changes (same provenance
-  discipline as `release_windows.ps1` — the packaged version must match what's
-  committed);
+  values, or while the working tree has uncommitted changes (the packaged
+  version must match what's committed, so a Store submission can always be
+  traced back to source on `main`);
 - converts Neight's `VERSION` into the 4-part numeric version MSIX requires
   (e.g. `"2026.081"` becomes `2026.81.0.0`);
 - stages `Neight.exe` plus the logo assets from
@@ -466,21 +468,23 @@ automate.
 start that way: `dist/` and `stable/` used to be committed directly, which
 meant 127 MB of binaries — 2.68 GB once every past build was counted across
 history — so a plain `git clone` pulled down every `.app` and `.exe` ever
-built, and every release commit was an opaque binary diff. History was
-rewritten with `git-filter-repo` to strip both directories from every commit.
-Nothing was lost — every binary had already been published to GitHub
-Releases — but see `knownbugs/MACOS-VALIDATION-RESULTS.md` (decision C4) for
-the full account, including the safety branch kept in case anything turned
-out to be missing.
+built, and every commit that shipped a build was an opaque binary diff. History
+was rewritten with `git-filter-repo` to strip both directories from every
+commit. At the time nothing was lost, because every binary had also been
+published to GitHub Releases — see `knownbugs/MACOS-VALIDATION-RESULTS.md`
+(decision C4) for the full account, including the safety branch kept in case
+anything turned out to be missing.
 
-The practical effect: cloning `main` today gets you a source checkout only.
-Binaries live in two places instead —
+> Those Releases have since been **deleted**, so that fallback copy of the old
+> binaries no longer exists. The version tags remain, and they point at the
+> source each build came from, which is the part worth keeping. Nothing in the
+> project depends on the old binaries; noted so nobody goes looking for them.
 
-- **GitHub Releases**, as the version history — tagged, signed builds and
-  their notes. These no longer back a download button: stable installs go
-  through the stores (Microsoft Store now, Mac App Store once approved).
-- **The `dist-latest` branch**, which now serves both the external signing
-  workflow *and* the direct-download links on the website, `README.md` and
+The practical effect: cloning `main` today gets you a source checkout only, and
+binaries live in exactly one place —
+
+- **The `dist-latest` branch**, which serves both the external signing workflow
+  *and* the direct-download links on the website, `README.md` and
   `ADVANCED.md`. Described next.
 
 ### The `dist-latest` branch
