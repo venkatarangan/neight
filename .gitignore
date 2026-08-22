@@ -223,3 +223,8 @@ deploylocal.bat
 # macOS app bundle artifacts
 *.app/
 make_slides.py
+
+# Local scratch space
+# Working notes, throwaway scripts and handover drafts kept next to the repo
+# but never committed.
+localtemp/

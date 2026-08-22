@@ -7,6 +7,62 @@ Anything untagged is cross-platform.
 
 ---
 
+## 2026.082 — 2026-08-22
+
+Fixes the Mac App Store build's inability to open files, and stops Neight asking
+whether to save a document nobody has touched.
+
+### Fixed
+
+- **File > Open works again in the Mac App Store build.** **[macOS]** Opening
+  any file — Desktop, Downloads, Dropbox, OneDrive, anywhere — failed with
+  *Operation not permitted*, on every install, since the sandboxed build
+  shipped. The native Open panel was doing its job and the entitlements were
+  right; the problem was that the access macOS grants when you pick a file was
+  gone by the time Python read the bytes, a few milliseconds later. A `stat()`
+  on the path still succeeded in that window, because the sandbox treats reading
+  a file's metadata and reading its contents as separate permissions, which is
+  why the failure looked so much like a bad path rather than a lost permission.
+
+  Neight now mints a **security-scoped bookmark** the instant the panel returns,
+  before anything else in the app runs, and redeems it around every read and
+  write. A bookmark is a token that can be handed back to macOS later for the
+  same access, so this fixes a second, quieter problem too: a file opened in one
+  session is now still readable in the next, which is what **Reopen last file on
+  launch** and autosave to a previously opened file both depend on. Files handed
+  over by Finder's **Open With** are recorded the same way.
+
+  Requires `com.apple.security.files.bookmarks.app-scope`, which is why
+  `packaging/Neight.entitlements` now exists in the repository at all — until
+  now the entitlements lived only on the machine that signs the Store build, so
+  what Neight was actually allowed to do could not be read from the source.
+
+- **No more "save changes?" on a document you never touched.** Launching Neight
+  and going straight to File > Open asked whether to save the empty, untouched
+  document it had just opened with. Applying your saved preferences at startup
+  resizes the document margin and restyles blocks, and Qt counts each of those
+  as a content change, so the window came up already flagged as modified. The
+  prompt is also skipped for an untitled document you typed into and then
+  cleared, where the only save on offer would write an empty file. Emptying a
+  file that *has* a path is a real edit and still prompts.
+
+### Changed
+
+- **The macOS build no longer claims to run on systems it cannot.** **[macOS]**
+  2026.081 declared a minimum of macOS 12 while containing binaries built for
+  macOS 26 — so on anything older it would install and then fail to launch. The
+  build script now measures every binary in the finished bundle and raises the
+  declared minimum to the truth, and says loudly when it has to, because the
+  usual cause is a Homebrew Python (compiled for whatever macOS is running it)
+  standing in for a python.org one. PySide6 6.11's own bindings set the lowest
+  reachable floor at macOS 15.
+
+  The ad-hoc signature also drops `--deep`, which Apple deprecated and which
+  signs nested code with the outer bundle's options — wrong for anything
+  carrying entitlements.
+
+---
+
 ## 2026.081 — 2026-08-20
 
 Neight is now available from the Microsoft Store, and the macOS build is being

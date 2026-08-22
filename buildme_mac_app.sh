@@ -44,6 +44,36 @@ fi
 echo "Python: $("${PYTHON_BIN}" -c 'import sys; print(sys.executable)')"
 echo ""
 
+# The Store signing step lives on another machine and reads this file over the
+# repository, so a broken one is not discovered until a submission fails.  Check
+# it here, where the cost is a second.
+#
+# Both checks earn their place.  plutil accepts a plist whose XML is malformed
+# in ways codesign's parser rejects -- notably a double hyphen inside a comment,
+# which is illegal XML and cost a build already (a36b9a6, same mistake in the
+# MSIX manifest).  xmllint is what catches that; codesign reports only
+# "AMFIUnserializeXML: syntax error near line N".
+ENTITLEMENTS="packaging/Neight.entitlements"
+echo "Validating ${ENTITLEMENTS}..."
+if [ ! -f "${ENTITLEMENTS}" ]; then
+    echo "Error: ${ENTITLEMENTS} is missing."
+    echo "       It is the source of truth for the Mac App Store sandbox entitlements."
+    exit 1
+fi
+if ! plutil -lint "${ENTITLEMENTS}" >/dev/null; then
+    echo "Error: ${ENTITLEMENTS} is not a valid property list."
+    plutil -lint "${ENTITLEMENTS}"
+    exit 1
+fi
+if command -v xmllint >/dev/null 2>&1; then
+    if ! xmllint --noout "${ENTITLEMENTS}"; then
+        echo "Error: ${ENTITLEMENTS} is not well-formed XML; codesign will reject it."
+        exit 1
+    fi
+fi
+echo "  OK (not applied to this build -- see DEVELOPER.md)"
+echo ""
+
 # Run the Python script to increment version
 "${PYTHON_BIN}" increment_version.py
 
@@ -76,12 +106,61 @@ if [ ! -d "dist/Neight.app" ]; then
 fi
 
 echo ""
+echo "Checking the declared macOS floor against what the bundle actually needs..."
+# LSMinimumSystemVersion in the spec is a claim.  Every Mach-O carries the real
+# answer in LC_BUILD_VERSION's minos field, and the bundle can only run on the
+# highest of them.  Claiming lower than the truth is the damaging direction:
+# macOS lets the app install and it then fails to launch, which is exactly what
+# 2026.081 shipped -- a Homebrew Python built for macOS 26 inside a bundle
+# declaring 12.0.  Measure, and correct the claim upward if it is short, so what
+# ships is true whichever interpreter built it.
+DECLARED="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' dist/Neight.app/Contents/Info.plist 2>/dev/null || echo '0.0')"
+REQUIRED="$(
+    find dist/Neight.app -type f -print0 \
+        | xargs -0 file 2>/dev/null \
+        | grep 'Mach-O' \
+        | sed 's/:.*//' \
+        | while read -r bin; do
+              otool -l "$bin" 2>/dev/null \
+                  | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}'
+          done \
+        | sort -t. -k1,1n -k2,2n \
+        | tail -1
+)"
+REQUIRED="${REQUIRED:-0.0}"
+echo "  Declared: ${DECLARED}   Actually required by the binaries: ${REQUIRED}"
+HIGHEST="$(printf '%s\n%s\n' "${DECLARED}" "${REQUIRED}" | sort -t. -k1,1n -k2,2n | tail -1)"
+if [ "${HIGHEST}" != "${DECLARED}" ]; then
+    echo ""
+    echo "  WARNING: the bundle cannot run on the macOS version it claims."
+    echo "           Raising LSMinimumSystemVersion to ${REQUIRED} so the store"
+    echo "           and Finder refuse the install rather than letting it crash."
+    echo ""
+    echo "           This is almost always the build interpreter.  Homebrew's"
+    echo "           Python is compiled for the macOS running it; python.org's"
+    echo "           installer builds target an old floor and are what this"
+    echo "           project wants.  Check yours with:"
+    echo "             otool -l \"\$(python -c 'import sys,os;print(os.path.realpath(sys.executable))')\" \\"
+    echo "               | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print;exit}'"
+    echo ""
+    /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion ${REQUIRED}" dist/Neight.app/Contents/Info.plist
+fi
+
+echo ""
 echo "Applying ad-hoc signature (no Apple Developer account required)..."
-# Ad-hoc signing improves consistency but is not notarization.
-codesign --force --deep --sign - dist/Neight.app
+# Ad-hoc signing improves consistency but is not notarization.  Deliberately no
+# --entitlements: packaging/Neight.entitlements asks for com.apple.security.
+# app-sandbox, and applying that to the direct-download build would sandbox an
+# app that has no provisioning profile to make the sandbox workable.  The Store
+# signing step, which runs elsewhere, is the one that passes them.
+#
+# --deep is gone: Apple deprecated it years ago and it signs nested code with
+# the *outer* options, which is wrong for any bundle that carries entitlements.
+# Signing the bundle plainly lets codesign walk it the supported way.
+codesign --force --sign - dist/Neight.app
 
 echo "Verifying code signature..."
-codesign --verify --deep --strict --verbose=2 dist/Neight.app
+codesign --verify --strict --verbose=2 dist/Neight.app
 
 echo ""
 echo "Creating release zip for distribution..."

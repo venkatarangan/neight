@@ -61,8 +61,16 @@ exe = EXE(
     # Lets a file dragged onto the app, or opened via "Open With", arrive in
     # sys.argv as well as through the QFileOpenEvent path in NeightApplication.
     argv_emulation=True,
-    target_arch=None,
+    # Apple Silicon only.  Intel and any macOS predating Apple Silicon are
+    # out of scope, so there is no universal2 slice to build or test.
+    target_arch='arm64',
     codesign_identity=None,
+    # Deliberately None even though packaging/Neight.entitlements exists.
+    # PyInstaller applies this file whether or not codesign_identity is set --
+    # it ad-hoc signs the bootloader either way -- so naming it here stamps
+    # com.apple.security.app-sandbox onto the direct-download build, which has
+    # no provisioning profile to make a sandbox survivable.  The Store signing
+    # step runs elsewhere and passes the entitlements itself; see DEVELOPER.md.
     entitlements_file=None,
 )
 
@@ -89,6 +97,21 @@ app = BUNDLE(
         'CFBundleShortVersionString': APP_VERSION,
         'CFBundleVersion': APP_VERSION,
         'NSHighResolutionCapable': True,
+        # The lowest macOS this project intends to support.  Nothing targets
+        # Intel, so the only question is how far back on Apple Silicon to go,
+        # and PySide6 6.11 sets the answer: its own bindings -- QtCore.abi3.so,
+        # QtWidgets.abi3.so, libpyside6 -- are built with minos 15.0, and every
+        # run imports them.  Below 15.0 is not reachable without changing Qt.
+        #
+        # This key is a claim, not a fact, and shipping a claim lower than the
+        # truth is worse than shipping an honest higher one: macOS installs the
+        # app and then it fails to launch.  buildme_mac_app.sh measures every
+        # Mach-O in the finished bundle and raises this value if the toolchain
+        # actually needs more (a Homebrew Python, for instance, is built for the
+        # current macOS and drags the floor up to it), so what ships is always
+        # true.  Check a built bundle by hand with:
+        #   otool -l <binary> | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print;exit}'
+        'LSMinimumSystemVersion': '15.0',
         # Neight is a document-based editor; without these it cannot be chosen
         # from Finder's "Open With" menu or set as the default .txt handler.
         'CFBundleDocumentTypes': [

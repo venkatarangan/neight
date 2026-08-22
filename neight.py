@@ -17,6 +17,7 @@ import html
 import threading
 import random
 import shutil
+import base64
 import urllib.request
 import platform
 from datetime import datetime
@@ -25,7 +26,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.081"
+VERSION = "2026.082"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -792,6 +793,337 @@ def _macos_markdown_is_default() -> bool:
     if not bundle_id:
         return False
     return _macos_default_handler(_MACOS_MARKDOWN_UTI).lower() == bundle_id.lower()
+
+
+# ----------------------------------------------------------
+# macOS App Sandbox — security-scoped access to user-picked files
+# ----------------------------------------------------------
+# Inside the Mac App Store build Neight runs sandboxed, and the only files it
+# may read are ones the user pointed at through the native Open panel (or handed
+# over from Finder).  macOS grants that access as a "sandbox extension" attached
+# to the run, and the grant is gone the moment the app relaunches -- and, on
+# recent macOS, can lapse between the panel closing and Python's open() call,
+# which is what produced "Operation not permitted" on files the user had just
+# picked.  A stat() on the path still succeeds in that state because sandbox
+# rules separate file-read-metadata from file-read-data, which is why the
+# failure looked so much like a bug in the path rather than in the permission.
+#
+# The fix is a security-scoped bookmark: a token minted while access is alive
+# that can be redeemed for access later.  Minting one needs
+# com.apple.security.files.bookmarks.app-scope, which is why that entitlement is
+# in packaging/Neight.entitlements alongside files.user-selected.read-write.
+#
+# Everything here is best-effort and returns None on any failure.  Off macOS, or
+# outside the sandbox, or if the Objective-C bridge cannot be built, callers
+# fall through to a plain open() -- which is exactly what Neight did before, so
+# the worst case is the behaviour we already had.
+#
+# Uses ctypes rather than pyobjc deliberately: the same choice the Carbon and
+# Launch Services helpers above make, and it keeps pyobjc out of requirements
+# and out of the shipped bundle.
+
+# NSURLBookmarkCreationWithSecurityScope / NSURLBookmarkResolutionWithSecurityScope
+_NS_BOOKMARK_CREATE_SCOPED = 1 << 11
+_NS_BOOKMARK_RESOLVE_SCOPED = 1 << 10
+
+_macos_objc_bridge = None
+
+
+def _macos_is_sandboxed() -> bool:
+    """True when running inside a macOS App Sandbox container.
+
+    Set by the OS for every sandboxed process, so it distinguishes a Store
+    install from a development run or the unsigned direct download, where none
+    of this machinery is needed (or possible -- minting a scoped bookmark
+    requires the entitlement, which an ad-hoc signature cannot carry).
+    """
+    return sys.platform == "darwin" and bool(os.environ.get("APP_SANDBOX_CONTAINER_ID"))
+
+
+def _macos_objc():
+    """Return a small Objective-C message-sending bridge, or None.
+
+    Cached after the first call: loading the frameworks and registering
+    selectors costs more than the calls that use them.
+    """
+    global _macos_objc_bridge
+    if _macos_objc_bridge is not None:
+        return _macos_objc_bridge or None
+    if sys.platform != "darwin":
+        _macos_objc_bridge = False
+        return None
+    try:
+        import ctypes.util
+        objc = ctypes.CDLL(
+            ctypes.util.find_library("objc") or "/usr/lib/libobjc.dylib"
+        )
+        # Loading Foundation registers NSURL/NSData/NSString with the runtime.
+        ctypes.CDLL(
+            ctypes.util.find_library("Foundation")
+            or "/System/Library/Frameworks/Foundation.framework/Foundation"
+        )
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+
+        def send(restype, *argtypes):
+            # objc_msgSend must be cast per signature: it is a variadic trampoline
+            # and ctypes has to know the exact argument types to marshal a call
+            # correctly on arm64.
+            signature = ctypes.CFUNCTYPE(
+                restype, ctypes.c_void_p, ctypes.c_void_p, *argtypes
+            )
+            return ctypes.cast(objc.objc_msgSend, signature)
+
+        bridge = {
+            "cls": lambda name: objc.objc_getClass(name.encode()),
+            "sel": lambda name: objc.sel_registerName(name.encode()),
+            "send": send,
+        }
+        if not bridge["cls"]("NSURL"):
+            _macos_objc_bridge = False
+            return None
+        _macos_objc_bridge = bridge
+        return bridge
+    except Exception:
+        _macos_objc_bridge = False
+        return None
+
+
+def _macos_nsurl_for_path(bridge, path: str):
+    """Build an NSURL for a filesystem path.  Autoreleased -- do not release."""
+    nsstring = bridge["send"](ctypes.c_void_p, ctypes.c_char_p)(
+        bridge["cls"]("NSString"),
+        bridge["sel"]("stringWithUTF8String:"),
+        str(path).encode("utf-8"),
+    )
+    if not nsstring:
+        return None
+    return bridge["send"](ctypes.c_void_p, ctypes.c_void_p)(
+        bridge["cls"]("NSURL"), bridge["sel"]("fileURLWithPath:"), nsstring
+    )
+
+
+def _macos_nsstring_to_str(bridge, nsstring) -> str:
+    if not nsstring:
+        return ""
+    raw = bridge["send"](ctypes.c_char_p)(nsstring, bridge["sel"]("UTF8String"))
+    return raw.decode("utf-8", errors="replace") if raw else ""
+
+
+def macos_create_bookmark(path) -> Optional[bytes]:
+    """Mint a security-scoped bookmark for a path the user just chose.
+
+    Call this while access is still live -- immediately after the Open panel
+    returns, or on a Finder-delivered QFileOpenEvent.  Returns None outside the
+    sandbox, or whenever macOS declines, which is the normal answer in an
+    unsandboxed development run.
+    """
+    if not _macos_is_sandboxed():
+        return None
+    bridge = _macos_objc()
+    if bridge is None:
+        return None
+    try:
+        url = _macos_nsurl_for_path(bridge, path)
+        if not url:
+            return None
+        error = ctypes.c_void_p(0)
+        data = bridge["send"](
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+        )(
+            url,
+            bridge["sel"](
+                "bookmarkDataWithOptions:includingResourceValuesForKeys:"
+                "relativeToURL:error:"
+            ),
+            _NS_BOOKMARK_CREATE_SCOPED, None, None, ctypes.byref(error),
+        )
+        if not data:
+            return None
+        length = bridge["send"](ctypes.c_ulong)(data, bridge["sel"]("length"))
+        raw = bridge["send"](ctypes.c_void_p)(data, bridge["sel"]("bytes"))
+        if not raw or not length:
+            return None
+        return ctypes.string_at(raw, length)
+    except Exception:
+        return None
+
+
+class _MacosScopedAccess:
+    """Hold a security-scoped grant open for the duration of a file operation.
+
+    Used as a context manager.  ``path`` is the path to actually read or write:
+    the bookmark resolves to macOS's own canonical URL, which is the one the
+    grant is attached to, so a symlinked or FileProvider-backed location is
+    reached by the path the OS recorded rather than the one the user saw.
+    Falls back to the caller's path when there is nothing to resolve.
+    """
+
+    def __init__(self, path, bookmark: Optional[bytes]):
+        self.path = str(path)
+        self._bookmark = bookmark
+        self._url = None
+        self._started = False
+
+    def __enter__(self):
+        if not _macos_is_sandboxed() or not self._bookmark:
+            return self
+        bridge = _macos_objc()
+        if bridge is None:
+            return self
+        try:
+            nsdata = bridge["send"](ctypes.c_void_p, ctypes.c_char_p, ctypes.c_ulong)(
+                bridge["cls"]("NSData"),
+                bridge["sel"]("dataWithBytes:length:"),
+                self._bookmark, len(self._bookmark),
+            )
+            if not nsdata:
+                return self
+            stale = ctypes.c_byte(0)
+            error = ctypes.c_void_p(0)
+            url = bridge["send"](
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_byte), ctypes.POINTER(ctypes.c_void_p),
+            )(
+                bridge["cls"]("NSURL"),
+                bridge["sel"](
+                    "URLByResolvingBookmarkData:options:relativeToURL:"
+                    "bookmarkDataIsStale:error:"
+                ),
+                nsdata, _NS_BOOKMARK_RESOLVE_SCOPED, None,
+                ctypes.byref(stale), ctypes.byref(error),
+            )
+            if not url:
+                return self
+            started = bridge["send"](ctypes.c_byte)(
+                url, bridge["sel"]("startAccessingSecurityScopedResource")
+            )
+            if not started:
+                # Apple documents stopAccessing... on a URL that never started as
+                # undefined behaviour, and in practice it tears down the grant the
+                # Open panel already issued.  Never pair a stop with a failed start.
+                return self
+            # Retain: the URL is autoreleased, and the grant lives as long as it does.
+            bridge["send"](ctypes.c_void_p)(url, bridge["sel"]("retain"))
+            self._url = url
+            self._started = True
+            resolved = _macos_nsstring_to_str(
+                bridge, bridge["send"](ctypes.c_void_p)(url, bridge["sel"]("path"))
+            )
+            if resolved:
+                self.path = resolved
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if not self._started or not self._url:
+            return False
+        try:
+            bridge = _macos_objc()
+            if bridge is not None:
+                bridge["send"](None)(
+                    self._url, bridge["sel"]("stopAccessingSecurityScopedResource")
+                )
+                bridge["send"](None)(self._url, bridge["sel"]("release"))
+        except Exception:
+            pass
+        self._url = None
+        self._started = False
+        return False
+
+
+def macos_scoped_access(path, bookmark: Optional[bytes]) -> _MacosScopedAccess:
+    """Context manager granting sandbox access to ``path`` for its body.
+
+    Yields an object whose ``.path`` is the path to open.  A no-op everywhere
+    the sandbox is not involved, so callers can wrap unconditionally.
+    """
+    return _MacosScopedAccess(path, bookmark)
+
+
+# Bookmarks are kept beside the other macOS support files.  Inside the sandbox
+# Path.home() is the container, so this resolves to the container's own
+# Application Support directory, which is always writable without any grant.
+_SANDBOX_BOOKMARK_LIMIT = 200
+_sandbox_bookmarks: Optional[dict] = None
+
+
+def _sandbox_bookmark_store_path() -> Path:
+    return (
+        Path.home() / "Library" / "Application Support" / "Neight"
+        / "sandbox-bookmarks.json"
+    )
+
+
+def _load_sandbox_bookmarks() -> dict:
+    """Load the path -> base64 bookmark map, or an empty one."""
+    global _sandbox_bookmarks
+    if _sandbox_bookmarks is not None:
+        return _sandbox_bookmarks
+    _sandbox_bookmarks = {}
+    if not _macos_is_sandboxed():
+        return _sandbox_bookmarks
+    try:
+        raw = json.loads(_sandbox_bookmark_store_path().read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            _sandbox_bookmarks = {
+                str(k): str(v) for k, v in raw.items() if isinstance(v, str)
+            }
+    except Exception:
+        # A missing or corrupt store is not an error: every bookmark in it can be
+        # re-minted the next time the user picks the file.
+        pass
+    return _sandbox_bookmarks
+
+
+def remember_sandbox_access(path) -> None:
+    """Record a redeemable grant for a file the user has just chosen.
+
+    Must be called while the grant is live -- straight after the Open or Save
+    panel returns, or on a Finder-delivered QFileOpenEvent -- because minting a
+    bookmark is itself an access to the file.  Silent no-op outside the sandbox.
+    """
+    if not _macos_is_sandboxed():
+        return
+    bookmark = macos_create_bookmark(path)
+    if not bookmark:
+        return
+    store = _load_sandbox_bookmarks()
+    key = str(path)
+    # Re-insert at the end so the trim below drops the least recently used.
+    store.pop(key, None)
+    store[key] = base64.b64encode(bookmark).decode("ascii")
+    while len(store) > _SANDBOX_BOOKMARK_LIMIT:
+        store.pop(next(iter(store)))
+    try:
+        target = _sandbox_bookmark_store_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(target, json.dumps(store, indent=2))
+    except Exception:
+        # Losing the store only costs the user a re-pick; never break the open.
+        pass
+
+
+def sandbox_bookmark_for(path) -> Optional[bytes]:
+    """Return the stored bookmark for a path, or None."""
+    if not _macos_is_sandboxed():
+        return None
+    encoded = _load_sandbox_bookmarks().get(str(path))
+    if not encoded:
+        return None
+    try:
+        return base64.b64decode(encoded)
+    except Exception:
+        return None
+
+
+def sandbox_access(path) -> _MacosScopedAccess:
+    """Open scoped access to ``path`` using whatever grant we have stored."""
+    return macos_scoped_access(path, sandbox_bookmark_for(path))
 
 
 def _win_open_default_apps_settings() -> bool:
@@ -1579,6 +1911,14 @@ class CodeEditor(QPlainTextEdit):
         self.setWordWrap(True)
         self.updateCurrentLineHighlight()
         self.wordIndexOverlay.sync_with_viewport()
+
+        # Installing the spacing-aware document layout above counts as a content
+        # change to Qt, so a brand-new empty editor came up already flagged as
+        # modified.  Nothing the user did caused it, but _maybe_save_changes()
+        # believed it: launching Neight and going straight to File > Open asked
+        # whether to save an untouched, empty document.  The document is by
+        # definition unmodified until someone edits it.
+        self.document().setModified(False)
 
     # ----- Word wrap -----
     def setWordWrap(self, enabled: bool):
@@ -2960,6 +3300,16 @@ class Notepad(QMainWindow):
         if initial_file:
             self._load_initial_path(initial_file)
 
+        # Startup is not an edit.  Applying saved preferences resizes the
+        # document margin and restyles blocks, and Qt counts each of those as a
+        # content change, so the window used to open already flagged as
+        # modified: File > Open on a freshly launched, empty Neight asked
+        # whether to save a document nobody had touched.  Any file loaded above
+        # cleared the flag itself as part of loading, so this only ever settles
+        # what setup left behind.
+        self.editor.document().setModified(False)
+        self._update_title()
+
     # --- UI setup ---
     def _create_actions(self):
         # File
@@ -3840,36 +4190,61 @@ class Notepad(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Invalid file path:\n{path}")
             return False
 
-        if not path_obj.exists() or not path_obj.is_file():
-            if notify_errors:
-                QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
-            return False
+        # Everything from here to the read happens under whatever sandbox grant
+        # we hold for this path.  Outside the Mac App Store build this is a
+        # no-op wrapper and read_path is just path_obj.  Inside it, read_path is
+        # the canonical location macOS attached the grant to, which is not always
+        # the path the user saw -- a FileProvider-backed OneDrive or Dropbox file
+        # resolves elsewhere, and reading the path as typed is denied.
+        with sandbox_access(path_obj) as grant:
+            read_path = Path(grant.path)
 
-        try:
-            file_size = path_obj.stat().st_size
-        except Exception as e:
-            if notify_errors:
-                QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
-            return False
+            if not read_path.exists() or not read_path.is_file():
+                if notify_errors:
+                    QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
+                return False
 
-        if file_size > self._MAX_OPEN_FILE_BYTES:
-            limit_mb = self._MAX_OPEN_FILE_BYTES // (1024 * 1024)
-            actual_mb = file_size / (1024 * 1024)
-            if notify_errors:
-                QMessageBox.warning(
-                    self,
-                    "File Too Large",
-                    f"This file is {actual_mb:.1f} MB, which exceeds the {limit_mb} MB limit.\n\n"
-                    "Neight is a plain-text editor and is not designed for very large files.",
-                )
-            return False
+            try:
+                file_size = read_path.stat().st_size
+            except Exception as e:
+                if notify_errors:
+                    QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
+                return False
 
-        try:
-            raw_bytes = path_obj.read_bytes()
-        except Exception as e:
-            if notify_errors:
-                QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
-            return False
+            if file_size > self._MAX_OPEN_FILE_BYTES:
+                limit_mb = self._MAX_OPEN_FILE_BYTES // (1024 * 1024)
+                actual_mb = file_size / (1024 * 1024)
+                if notify_errors:
+                    QMessageBox.warning(
+                        self,
+                        "File Too Large",
+                        f"This file is {actual_mb:.1f} MB, which exceeds the {limit_mb} MB limit.\n\n"
+                        "Neight is a plain-text editor and is not designed for very large files.",
+                    )
+                return False
+
+            try:
+                raw_bytes = read_path.read_bytes()
+            except PermissionError as e:
+                # The sandbox refused the read.  Either we never held a grant for
+                # this path or it lapsed; either way the honest recovery is to let
+                # the user point at the file again through the Open panel, which
+                # mints a fresh one.  Say so, rather than reporting the errno.
+                if notify_errors:
+                    if _macos_is_sandboxed():
+                        QMessageBox.critical(
+                            self,
+                            "Permission Denied",
+                            f"macOS did not grant Neight access to:\n{path_obj}\n\n"
+                            "Choose the file again with File › Open to restore access.",
+                        )
+                    else:
+                        QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+                return False
+            except Exception as e:
+                if notify_errors:
+                    QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+                return False
 
         # Decode by explicit BOM first.  A UTF-32 BOM starts with the UTF-16 BOM
         # bytes, so testing UTF-16 first would decode a UTF-32 file into garbage
@@ -4069,6 +4444,13 @@ class Notepad(QMainWindow):
             str(self.default_directory),
             "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
+        # Mint the sandbox grant before anything else touches the app: on macOS
+        # the access the Open panel just granted can lapse within milliseconds,
+        # and _post_file_dialog() below crosses into Carbon to resync the
+        # keyboard layout.  Nothing runs between the panel returning and the
+        # bookmark being taken.
+        if path:
+            remember_sandbox_access(path)
         self._post_file_dialog()
         if path:
             self._open_file_path(path)
@@ -4140,6 +4522,10 @@ class Notepad(QMainWindow):
             self._update_export_menu_visibility()
             self._update_title()
             return False
+        # Only now does the file exist, and a bookmark can only be minted for a
+        # file that does: this is the earliest point a Save As target can be
+        # recorded for later autosaves and for reopening after a relaunch.
+        remember_sandbox_access(path)
         self._update_default_directory(Path(path).parent)
         self._update_export_menu_visibility()
         return True
@@ -4155,7 +4541,12 @@ class Notepad(QMainWindow):
             # used to skip both, making it less durable than autosave — and uses a
             # temp name unique per call, so it can no longer collide with the
             # autosave worker writing the same target.
-            _atomic_write_text(path_obj, self.editor.documentText())
+            #
+            # Saving needs the same sandbox grant reading does, and needs it for
+            # the containing directory too: the atomic write creates a temp file
+            # beside the target before renaming over it.
+            with sandbox_access(path_obj) as grant:
+                _atomic_write_text(Path(grant.path), self.editor.documentText())
             # The file now matches what we write, so any pending conversion has
             # happened and must not be reported again.
             self._source_encoding = "utf-8"
@@ -4218,10 +4609,14 @@ class Notepad(QMainWindow):
                 # same file inside this window.  should_commit is evaluated just
                 # before the rename, so a snapshot superseded mid-write is dropped
                 # rather than written over the newer content.
-                committed = _atomic_write_text(
-                    Path(path), text,
-                    should_commit=lambda: generation == self._save_generation,
-                )
+                # The sandbox grant is process-wide, so opening it here on the
+                # worker thread is as good as on the UI thread — and it has to be
+                # here, because the grant must still be open when the write runs.
+                with sandbox_access(path) as grant:
+                    committed = _atomic_write_text(
+                        Path(grant.path), text,
+                        should_commit=lambda: generation == self._save_generation,
+                    )
                 if committed:
                     self._autosave_succeeded.emit()
                 else:
@@ -8714,6 +9109,13 @@ th {{ background-color: {table_head_bg}; }}
     def _maybe_save_changes(self) -> bool:
         if not self.editor.document().isModified():
             return True
+        # An untitled document with no text has nothing to save, whatever the
+        # modified flag says — a stray flag from setting up the editor, or the
+        # user typing and then deleting it all again.  Prompting here offers a
+        # save that would only ever produce an empty file.  A document with a
+        # path is different: emptying it is a real edit worth keeping.
+        if self.current_path is None and not self.editor.documentText().strip():
+            return True
         ret = QMessageBox.question(
             self,
             "Unsaved Changes",
@@ -9214,6 +9616,10 @@ class NeightApplication(QApplication):
         if event.type() == QEvent.Type.FileOpen:
             path = event.file()
             if path:
+                # Finder's hand-off carries its own sandbox grant.  Record it the
+                # moment it arrives, before any prompt can steal the window's
+                # attention, so the file stays openable afterwards.
+                remember_sandbox_access(path)
                 if self._main_window is not None:
                     # Post-startup: a file was opened while the app is already running.
                     win = self._main_window

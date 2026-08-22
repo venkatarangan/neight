@@ -185,10 +185,58 @@ What it does:
 2. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
 3. Cleans `build/`, `dist/Neight`, `dist/Neight.app`, and Python test caches
 4. Runs the active environment's PyInstaller against `packaging/Neight.macos.spec` (the checked-in spec preserves `BUNDLE`, `info_plist`, `argv_emulation`, and file-type associations)
-5. Applies an ad-hoc code signature (`codesign --force --deep --sign -`)
-6. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
-7. Publishes the unsigned zip to the `dist-latest` branch on a best-effort
+5. Checks the declared `LSMinimumSystemVersion` against the `minos` field of
+   every Mach-O in the bundle, and raises it if the bundle needs more than it
+   claims (see below)
+6. Applies an ad-hoc code signature (`codesign --force --sign -`), deliberately
+   without entitlements
+7. Zips the result to `dist/Neight-mac-arm64-unsigned.app.zip`
+8. Publishes the unsigned zip to the `dist-latest` branch on a best-effort
    basis without changing the working tree
+
+#### The deployment floor is measured, not declared
+
+`LSMinimumSystemVersion` in `packaging/Neight.macos.spec` is a claim, and
+claiming lower than the truth is the damaging direction: macOS installs the app
+and it then fails to launch. 2026.081 shipped declaring macOS 12 while
+containing binaries built for macOS 26.
+
+The real floor is whatever the highest `minos` among the bundled binaries is.
+PySide6 6.11's own bindings — `QtCore.abi3.so`, `QtWidgets.abi3.so`,
+`libpyside6` — are built for **15.0**, so nothing below that is reachable
+without changing Qt. The interpreter is what usually pushes it higher:
+Homebrew's Python is compiled for the macOS running it, while python.org's
+installer builds target an old floor. Check yours with:
+
+```bash
+otool -l "$(python -c 'import sys,os;print(os.path.realpath(sys.executable))')" \
+  | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print;exit}'
+```
+
+The build script prints both numbers every time and corrects the plist upward
+when it has to, so what ships is always true — but a build made with a Homebrew
+Python will honestly exclude every Mac older than that Python's target.
+
+#### Entitlements
+
+[`packaging/Neight.entitlements`](packaging/Neight.entitlements) holds the
+sandbox entitlements for the Mac App Store build, and is the source of truth for
+them. Pass it to the signing step with `codesign --entitlements`.
+[`packaging/MAC-APP-STORE-SIGNING.md`](packaging/MAC-APP-STORE-SIGNING.md) has
+the full procedure, what each entitlement is for, and what to ask the person who
+signs and submits.
+
+`buildme_mac_app.sh` deliberately does **not** apply it: the ad-hoc signature it
+produces is for the direct download, and stamping `com.apple.security.app-sandbox`
+onto a build with no provisioning profile sandboxes an app that has nothing to
+make the sandbox workable. Store signing happens separately.
+
+Confirm what a signed bundle actually carries — the only thing that counts —
+with:
+
+```bash
+codesign -d --entitlements :- /Applications/Neight.app
+```
 
 After a successful build the script prints the next steps for creating a signed release.
 

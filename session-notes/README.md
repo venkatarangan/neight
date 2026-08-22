@@ -32,3 +32,4 @@ file, and by these instead for anything current:
 | 2026-08-04 | [MSIX/Microsoft Store packaging built, blocked on Partner Center identity verification](2026-08-04-msix-store-packaging-pending-verification.md) |
 | 2026-08-20 | [Update checker removed for App Store review, selection counts added, direct downloads moved to `dist-latest`](2026-08-20-store-distribution-and-status-bar-work.md) |
 | 2026-08-21 | [Windows rebuilt at 2026.081, download shrunk 26%, file associations fixed for the Store build](2026-08-21-windows-catchup-and-clean-rebuild.md) |
+| 2026-08-22 | [Mac App Store file-open permission bug fixed with security-scoped bookmarks; spurious save prompt removed; built 2026.082](2026-08-22-sandbox-file-open-and-save-prompt.md) |

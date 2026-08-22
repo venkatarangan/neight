@@ -9,6 +9,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_selection_counts.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_unsaved_prompt.py
 ```
 
 Each script exits non-zero on failure and prints failures as GitHub Actions
@@ -53,6 +54,18 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
   pins it down: the numbers must match exactly. Also guards that counts appear
   on a delay but vanish *immediately* when the selection is cleared, and that a
   counter hidden in **View → Status Bar** is never computed or shown.
+
+- **`test_unsaved_prompt.py`** — the save prompt must appear only when there is
+  something to save. Applying preferences at startup resizes the document margin
+  and restyles blocks, and Qt counts each as a content change, so the window used
+  to open already flagged as modified and File > Open on a freshly launched,
+  empty Neight asked whether to save an untouched document. Also covers an
+  untitled document typed into and then cleared, where the only save on offer
+  would write an empty file, while an *opened* file emptied out stays a real
+  change. Types through a `QTextCursor` rather than `setPlainText()`, which
+  clears the modified flag and would make a broken gate look fine. Finally
+  checks that the macOS security-scoped-access helpers are inert off the
+  sandbox, since every read and write now runs inside one.
 
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
 manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the
