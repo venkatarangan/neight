@@ -6,6 +6,18 @@ Apple Developer identity and uploads it. That split is why the sandbox was
 impossible to reason about from the source for so long, and this file exists to
 close the gap.
 
+**Neight is live on the Mac App Store**: [`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12), published under
+Muthu Nedumaran's account. As of 2026-08-22 the listing shows version **1.0**
+with a **macOS 12.0** minimum — a build that predates the security-scoped
+bookmark fix, so **it cannot open any file**, and whose binaries actually need
+macOS 26 despite the 12.0 claim. Both are fixed in 2026.083, which has not been
+submitted. Treat the Store build as broken until a signed 2026.083 or later
+ships.
+
+Note also that the repository stamps `CFBundleShortVersionString` with Neight's
+own version, yet the listing reads `1.0` — so something in the signing chain
+changes it. That is an open question, not a settled fact.
+
 > **Handing a build over?** Send
 > [`HANDOVER-MAC-APP-STORE.md`](HANDOVER-MAC-APP-STORE.md) and
 > [`Neight.entitlements`](Neight.entitlements) with it. That document is the

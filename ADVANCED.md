@@ -377,7 +377,8 @@ it from:
 
 - **Microsoft Store (Windows)** — updates arrive automatically, like any other
   Store app. Nothing to do.
-- **Mac App Store** — same, once that version ships.
+- **Mac App Store (macOS)** — same: updates arrive automatically. The
+  [listing](https://apps.apple.com/app/neight/id6800348235?mt=12) is the recommended install on macOS.
 - **Direct download** — manual. These come from the `dist-latest` branch and
   are rebuilt with every build, so they run ahead of the store versions and are
   **unsigned**. **Help → Neight on GitHub** opens the project page in your

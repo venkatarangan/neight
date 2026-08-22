@@ -45,6 +45,13 @@ demanding macOS 26.
 - **CI runs on Python 3.14**, matching the interpreter release builds use,
   rather than 3.12.
 
+- **Neight is live on the Mac App Store.** **[macOS]** The listing is now the
+  recommended way to install on macOS: signed, sandboxed, and updated
+  automatically, with no Gatekeeper step. Note that the build currently on the
+  Store predates this version — it still has the file-open failure fixed in
+  2026.082 and the macOS version floor corrected in 2026.083. The unsigned
+  download on `dist-latest` is ahead of it until an updated build is submitted.
+
 - **GitHub Releases are gone.** Neight is distributed through the app stores —
   Microsoft Store now, Mac App Store pending approval — with unsigned developer
   builds on the `dist-latest` branch. The GitHub Releases were a third channel

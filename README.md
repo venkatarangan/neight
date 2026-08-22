@@ -1,6 +1,6 @@
 # Neight — Notepad Enhanced, Tamil-Friendly
 
-**[Get it from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv)** | [Changelog](CHANGELOG.md) | [Privacy Policy](PRIVACY.md)
+**[Mac App Store](https://apps.apple.com/app/neight/id6800348235?mt=12)** | **[Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv)** | [Changelog](CHANGELOG.md) | [Privacy Policy](PRIVACY.md)
 
 **Neight** (pronounced N8) is a lightweight text editor for writers who work in Tamil and English on Windows and macOS. It handles mixed-language drafting, Markdown, and distraction-free writing without the weight of a full IDE or word processor.
 
@@ -30,8 +30,8 @@ direct download.
 Neight is distributed through the app stores. They handle installation, updates
 and signing for you, and are the recommended route on both platforms.
 
+- **macOS:** [Get Neight from the Mac App Store](https://apps.apple.com/app/neight/id6800348235?mt=12) — signed, sandboxed, and updated by the App Store. No Gatekeeper prompt.
 - **Windows:** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
-- **macOS:** the Mac App Store version is **awaiting approval**. Until it lands, use the direct download below.
 
 #### For developers — unsigned builds
 
@@ -62,9 +62,16 @@ branch. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install on macOS
 
-Until the Mac App Store version is approved, the direct download is the only
-route. It is **unsigned**, so Gatekeeper blocks it on first launch. This is
-expected, and the extra step is only needed once.
+**From the Mac App Store (recommended):**
+
+1. Open the [App Store listing](https://apps.apple.com/app/neight/id6800348235?mt=12) and click **Get**.
+2. Launch Neight from Launchpad or Applications. No Gatekeeper prompt appears,
+   and updates arrive automatically.
+
+**From the unsigned download:**
+
+It is **unsigned**, so Gatekeeper blocks it on first launch. This is expected,
+and the extra step is only needed once.
 
 1. Download and unzip the file — you get `Neight.app`.
 2. Drag `Neight.app` to `/Applications`.
@@ -73,9 +80,7 @@ expected, and the extra step is only needed once.
 
 > The macOS build targets **Apple Silicon (arm64)** only.
 >
-> A Mac App Store version is on the way. Once it ships, that becomes the recommended way to install on macOS and no Gatekeeper step will be needed.
->
-> With thanks to Muthu Nedumaran, who contributed an Apple Developer signature for earlier macOS builds.
+> With thanks to Muthu Nedumaran, who signs and publishes the Mac App Store build.
 
 For advanced configuration, power-user features, and update instructions see [ADVANCED.md](ADVANCED.md).
 For build instructions and developer notes see [DEVELOPER.md](DEVELOPER.md).
@@ -268,10 +273,10 @@ Neight is a personal project, vibe-coded with AI assistance and brewed at [venka
 ## Future Ideas
 
 - Export to DOCX
-- A proper Windows installer
 - Page numbers in PDF footer
 - Print preview before PDF export
-- Drag and drop a file from Finder or Explorer to open it
+- Drag and drop a file **into the editor window** to open it — dropping onto the
+  app icon and Finder's **Open With** already work
 - Optional AI features for translation, rewriting, or lookup
 
 ---
@@ -293,9 +298,8 @@ Neight is a personal project, vibe-coded with AI assistance and brewed at [venka
 ## Changelog
 
 [CHANGELOG.md](CHANGELOG.md) records what changed in each build, tagged by
-platform. The most recent entries cover trackpad zoom and click handling, and
-the first validation run on real Apple hardware — which found two bugs that had
-been silently altering saved files.
+platform. The most recent entries cover the Mac App Store build's file-open
+failure and the macOS version floor it shipped with.
 
 ---
 

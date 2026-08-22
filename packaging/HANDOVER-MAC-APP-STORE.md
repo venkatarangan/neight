@@ -1,17 +1,45 @@
-# Neight 2026.083 — handover for Mac App Store signing and submission
+# Neight 2026.083 — handover for the Mac App Store update
 
 **For:** whoever signs and submits Neight to the Mac App Store.
 **From:** the Neight repository, <https://github.com/venkatarangan/neight>.
 **Date:** 2026-08-22.
 
-You have been sent an **unsigned** `Neight.app` bundle. This document is
-everything needed to sign it, submit it, and confirm afterwards that the right
-thing shipped. It is self-contained — you do not need to read the rest of the
+**Neight is already live on the Mac App Store** — thank you. This is an
+**update**, and it is an urgent one: the build currently on the Store **cannot
+open a single file**, on any Mac. This document is everything needed to sign
+the replacement, submit it, and confirm afterwards that the right thing
+shipped. It is self-contained — you do not need to read the rest of the
 repository.
 
 If you read only one section, read
-[The one entitlement that matters](#the-one-entitlement-that-matters). The
-previous Store release could not open a single file, and that key is the fix.
+[The one entitlement that matters](#the-one-entitlement-that-matters). That
+entitlement is the fix, and without it this submission changes nothing.
+
+## What is live right now
+
+Read from Apple's own lookup API on 2026-08-22, for
+[`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12):
+
+| | |
+|---|---|
+| Version shown | **1.0** |
+| Minimum macOS | **12.0** |
+| Released | 2026-08-22 |
+| Bundle ID | `com.murasu.neight` |
+
+Two problems with that, both fixed in the bundle you are being sent:
+
+1. **It cannot open files.** See below — it predates the security-scoped
+   bookmark fix.
+2. **The macOS 12.0 minimum is wrong and harmful.** That build's binaries were
+   compiled for macOS 26. macOS reads the 12.0 claim, allows the install, and
+   the app then fails to launch. 2026.083 genuinely runs on macOS 15 and later,
+   and declares exactly that.
+
+There is also a question worth answering, flagged below: the Store says version
+**1.0**, but the bundle this repository builds stamps
+`CFBundleShortVersionString` with Neight's own version — `2026.083` for this
+one. Something in the signing chain is changing it.
 
 ---
 
@@ -149,7 +177,8 @@ Once you have a signed build, on a Mac that is not the build machine:
 
 1. Launch Neight.
 2. **File > Open**, and open a `.txt` file on the Desktop. It must open and show
-   its contents. Previously this failed with *Operation not permitted*.
+   its contents. On the build currently live this fails with *Operation not
+   permitted*, which is the whole reason for this update.
 3. Open a file inside OneDrive or Dropbox — those go through a different macOS
    mechanism and are worth checking separately.
 4. Edit it, **File > Save**. The save must succeed.
@@ -181,10 +210,17 @@ In order of value:
 2. **The signing commands verbatim** — every `codesign` invocation with all
    flags, in order; whether nested code is signed inside-out or only the outer
    `.app`.
-3. **Anything you modify in the bundle before signing.** 2026.081 shipped with
-   `LSMinimumSystemVersion = 12.0` in its `Info.plist` while the spec that built
-   it never set that key at all — so something in the chain was editing the
-   bundle. Still unexplained, and worth settling.
+3. **Anything you modify in the bundle before signing.** There is now direct
+   evidence that something does. The bundle this repository builds sets
+   `CFBundleShortVersionString` and `CFBundleVersion` to Neight's own version
+   (`2026.083`), but the Store listing shows **1.0**. Separately, 2026.081
+   shipped with `LSMinimumSystemVersion = 12.0` while the spec that built it
+   never set that key at all.
+
+   If you are rebuilding from source rather than signing the bundle you are
+   sent, that would explain both — and it matters, because a rebuild on a
+   different Python would reintroduce the macOS 26 floor this update exists to
+   fix. Please say which you do.
 4. **Which artifact and version you submitted**, plus your macOS and Xcode
    versions.
 
@@ -224,7 +260,12 @@ Time was spent on each of these; all are settled:
 - **Neight is a Tamil and English text editor**, PySide6 (Qt 6) on Python 3.14,
   single-window, document-based. It declares plain-text and Markdown document
   types so it appears in Finder's **Open With**.
+- **Version numbering.** Neight uses a `YYYY.NNN` scheme — `2026.083` is the
+  83rd build of 2026, not a semantic version. If the Store listing needs a
+  conventional-looking number, that is fine; just let us know what mapping you
+  use, so a bug report naming a Store version can be traced to a build.
 - **Full reference:** `packaging/MAC-APP-STORE-SIGNING.md` in the repository,
-  which this document condenses.
+  which this document condenses. The live listing is at
+  <https://apps.apple.com/app/neight/id6800348235?mt=12>.
 
 Questions are welcome and cheaper than a rejected submission.

@@ -63,8 +63,14 @@ speedup.
 
 ## Distribution
 
-- **Stable installs go through the stores** — Microsoft Store now, Mac App Store
-  pending approval. These are the *only* stable channels.
+- **Stable installs go through the stores** — both are live: Microsoft Store and
+  Mac App Store (`id6800348235`, published under Muthu Nedumaran's account).
+  These are the *only* stable channels.
+- **The live Mac App Store build is behind, and broken.** It predates the
+  security-scoped bookmark fix, so it cannot open any file, and its `Info.plist`
+  declares macOS 12 while its binaries need macOS 26. Both are fixed in
+  2026.083, which has not been submitted. Do not describe the Store build as
+  current until a signed 2026.083 or later ships.
 - **Direct downloads come from the `dist-latest` branch**, which every build
   republishes by amending its single commit and force-pushing. It is what the
   website and `README.md` link to, so **any local build immediately becomes the

@@ -289,8 +289,9 @@ hand the Mac App Store signer.
 ## Publishing a build
 
 **Neight has no GitHub Releases.** Stable installs go through the app stores —
-Microsoft Store now, Mac App Store pending approval — and the direct downloads
-come from the `dist-latest` branch. The GitHub Releases that used to exist were
+[Mac App Store](https://apps.apple.com/app/neight/id6800348235?mt=12) and
+[Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv), both live —
+and the direct downloads come from the `dist-latest` branch. The GitHub Releases that used to exist were
 deleted once the stores took over, because they were a third channel nobody
 used, serving binaries that no longer matched what anyone should install. The
 version tags (`v2026.045` … `v2026.078`) were kept: they cost nothing and
@@ -465,7 +466,8 @@ automate.
 ## Why `dist/` Isn't on GitHub
 
 `dist/` is gitignored on `main`, and has been since 2026-07-27. It didn't
-start that way: `dist/` and `stable/` used to be committed directly, which
+start that way: `dist/` and a since-removed `stable/` used to be committed
+directly, which
 meant 127 MB of binaries — 2.68 GB once every past build was counted across
 history — so a plain `git clone` pulled down every `.app` and `.exe` ever
 built, and every commit that shipped a build was an opaque binary diff. History
@@ -646,7 +648,9 @@ packaging/             — the PyInstaller specs the build scripts use:
                          overwrites a spec instead of using one.
                          Also: Neight.entitlements (the Mac App Store sandbox
                          entitlements, applied by the signer, not by this repo's
-                         build) and MAC-APP-STORE-SIGNING.md; plus
+                         build), MAC-APP-STORE-SIGNING.md and
+                         HANDOVER-MAC-APP-STORE.md (sent to the signer with a
+                         build); plus
                          AppxManifest.xml.template, msix_identity.json
                          and msix_assets/ for the MSIX package above.
 design/                — icon generators, MSIX asset generator, and
@@ -656,7 +660,6 @@ session-notes/         — per-session handoff records (see "Session notes" abov
 tests/                 — regression suite, run in CI on Windows and macOS
 screenshots/           — screenshots used in documentation
 dist/                  — build output (gitignored — see "Why dist/ Isn't on GitHub")
-stable/                — signed macOS release zips (gitignored — see CHANGELOG 2026.070)
 CHANGELOG.md           — what changed in each build, tagged by platform
 ```
 
