@@ -1,0 +1,15 @@
+# Neight — design asset generation
+#
+# Needed only to regenerate icons and social images from the scripts in
+# design/.  Install ad hoc, in a throwaway environment, when you actually need
+# to run one:
+#
+#   python -m pip install -r requirements-design.txt
+#   python design/gen_neight_icon.py
+#
+# Deliberately NOT part of requirements-dev.txt.  PyInstaller's hooks bundle
+# Pillow whenever it is importable, so keeping it out of the everyday
+# development environment is what stops it reaching a distributable.
+
+# Used by design/gen_neight_icon.py, gen_msix_assets.py, gen_social_preview.py
+pillow==12.3.0

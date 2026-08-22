@@ -77,7 +77,9 @@ pre-commit install
 
 ## Requirements
 
-- Python 3.10+ (built and tested on 3.12)
+- Python 3.10+ for development. **Release builds require a python.org
+  interpreter** — currently 3.14.7 — not Homebrew's; see
+  [The deployment floor is measured, not declared](#the-deployment-floor-is-measured-not-declared)
 - PySide6 / shiboken6 6.11.1 (Qt 6) — pinned
 - Markdown 3.10.2 — pinned
 - Pygments 2.20.0 — pinned
@@ -87,11 +89,19 @@ release can be reproduced. A Qt minor release can change text layout, cursor
 geometry and Tamil shaping without a line of Neight changing, so bump the pin
 deliberately and re-run the cross-platform checks.
 
-Build and design tools are separate, in [requirements-dev.txt](requirements-dev.txt):
-`pyinstaller` (distributables), `pillow` (design asset generation only — not
-imported by the application), and `pre-commit` (repository hooks).
-[requirements-build.txt](requirements-build.txt) contains only the pinned
-PyInstaller version for clean distributable builds.
+Everything else is split across three files, kept apart so that no environment
+carries more than it needs:
+
+| File | Holds | Install when |
+|---|---|---|
+| [requirements-build.txt](requirements-build.txt) | pinned `pyinstaller` + hooks | building a distributable |
+| [requirements-dev.txt](requirements-dev.txt) | the above plus `pre-commit` | ordinary development |
+| [requirements-design.txt](requirements-design.txt) | `pillow` | regenerating icons from `design/` |
+
+The split is not tidiness. PyInstaller's hooks bundle whatever they can import,
+so a package installed for an unrelated reason ends up inside a shipped binary —
+which is exactly what happened, and why `pillow` is no longer in
+`requirements-dev.txt`.
 
 > Neight uses **PySide6 exclusively**. All PyQt5 references have been removed. There is no Qt5 fallback.
 
@@ -114,11 +124,17 @@ discovered by PyInstaller hooks and silently added to the executable even though
 Neight never imports them. This is not theoretical: an ordinary development
 `.venv` — `requirements.txt` plus `requirements-dev.txt`, nothing unusual —
 produced a **68.2 MB** `Neight.exe` where the same source built clean gives
-**50.4 MB**. `pillow` and `python-pptx` are the culprits (`python-pptx` also
-drags in `lxml` and `xlsxwriter`), and every one of them is a legitimate entry
-in `requirements-dev.txt`. Nothing is misconfigured; the two environments simply
-have to stay separate. That 68.2 MB build was the public Windows download for
-three weeks.
+**50.4 MB**. `pillow` and `python-pptx` were the culprits (`python-pptx` also
+drags in `lxml` and `xlsxwriter`). That 68.2 MB build was the public Windows
+download for three weeks.
+
+Since 2026.083 neither is in `requirements-dev.txt`: `python-pptx` is gone
+entirely — the `make_slides.py` it existed for is not in this repository —
+and `pillow` moved to [requirements-design.txt](requirements-design.txt),
+installed only when regenerating icons. A development environment is therefore
+no longer capable of producing that build. Keep it that way: the separation
+above is still the rule, because the next optional package added anywhere will
+behave exactly the same.
 
 ```powershell
 Remove-Item -Recurse -Force .venv   # if the existing one has drifted
@@ -129,9 +145,9 @@ python -m pip install -r requirements.txt -r requirements-build.txt
 buildme.bat
 ```
 
-Reinstall `requirements-dev.txt` **after** the build to get the design tools and
-the pre-commit hooks back. Doing it in that order is the whole point — the
-development environment is fine to have, just not while PyInstaller is looking.
+Reinstall `requirements-dev.txt` **after** the build to get the pre-commit hooks
+back. Doing it in that order is the whole point — the development environment is
+fine to have, just not while PyInstaller is looking.
 
 #### Rebuilding without a version bump
 
@@ -167,18 +183,43 @@ To release this build to GitHub, run:
 
 The build script targets Apple Silicon (arm64). Run it on an Apple Silicon Mac.
 Use a dedicated build environment containing only runtime dependencies and
-PyInstaller. This prevents optional design or presentation packages from being
-discovered and bundled by PyInstaller hooks.
+PyInstaller. This prevents optional design packages from being discovered and
+bundled by PyInstaller hooks.
+
+**Build with a python.org interpreter, not Homebrew's.** The interpreter sets
+the bundle's macOS floor, and this is the single most consequential choice in
+the macOS build — see [below](#the-deployment-floor-is-measured-not-declared).
+Install it from [python.org](https://www.python.org/downloads/macos/) (3.14.7 at
+the time of writing) and confirm it is the low-floor one before going further:
+
+```bash
+otool -l /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 \
+  | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print;exit}'
+```
+
+`minos 10.15` is what a python.org build reports. If it says the current macOS
+version, that is Homebrew's Python and the build will silently ship a bundle
+almost nobody can run.
 
 ```bash
 git clone https://github.com/venkatarangan/neight.git
 cd neight
-python3 -m venv .venv-build
-source .venv-build/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt -r requirements-build.txt
-./buildme_mac_app.sh
+# Name the interpreter explicitly -- `python3 -m venv` takes whatever is first
+# on PATH, which on a developer Mac is usually Homebrew's.
+/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 -m venv .venv-build
+.venv-build/bin/python -m pip install --upgrade pip
+.venv-build/bin/python -m pip install -r requirements.txt -r requirements-build.txt
+PYTHON_BIN="$PWD/.venv-build/bin/python" ./buildme_mac_app.sh
 ```
+
+Read the floor line the script prints before trusting the result:
+
+```
+  Declared: 15.0   Actually required by the binaries: 15.0
+```
+
+Both numbers 15.0, and no WARNING block, is success. Anything higher on the
+right means the wrong interpreter built it.
 
 What it does:
 1. Verifies that it is running on Apple Silicon in an activated virtual environment
@@ -199,7 +240,10 @@ What it does:
 `LSMinimumSystemVersion` in `packaging/Neight.macos.spec` is a claim, and
 claiming lower than the truth is the damaging direction: macOS installs the app
 and it then fails to launch. 2026.081 shipped declaring macOS 12 while
-containing binaries built for macOS 26.
+containing binaries built for macOS 26, and 2026.082 was honest but unusable —
+correctly declaring the macOS 26 its Homebrew-built interpreter really needed.
+2026.083 is the first build to reach the intended floor of **15.0**, purely by
+changing which interpreter ran PyInstaller.
 
 The real floor is whatever the highest `minos` among the bundled binaries is.
 PySide6 6.11's own bindings — `QtCore.abi3.so`, `QtWidgets.abi3.so`,
@@ -584,7 +628,9 @@ neight.py              — the entire application
 neight.ico / .icns     — app icons
 requirements.txt       — pinned runtime dependencies
 requirements-build.txt — minimal pinned distributable build tooling
-requirements-dev.txt   — build, design and hook tooling
+requirements-dev.txt   — build tooling plus pre-commit, for development
+requirements-design.txt — pillow, for the design/ scripts only (kept out of
+                         the development environment on purpose)
 buildme.bat            — Windows build script
 buildme_mac_app.sh     — macOS build script
 build_msix.ps1         — packages dist\Neight.exe as a Microsoft Store MSIX
@@ -594,7 +640,10 @@ packaging/             — the PyInstaller specs the build scripts use:
                          These are build inputs, not generated output — do not
                          build with a bare `pyinstaller ... neight.py`, which
                          overwrites a spec instead of using one.
-                         Also: AppxManifest.xml.template, msix_identity.json
+                         Also: Neight.entitlements (the Mac App Store sandbox
+                         entitlements, applied by the signer, not by this repo's
+                         build) and MAC-APP-STORE-SIGNING.md; plus
+                         AppxManifest.xml.template, msix_identity.json
                          and msix_assets/ for the MSIX package above.
 design/                — icon generators, MSIX asset generator, and
                          architecture infographic source

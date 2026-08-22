@@ -1,18 +1,20 @@
-# Neight — development, build and design dependencies
+# Neight — development dependencies
 #
 #   pip install -r requirements.txt -r requirements-dev.txt
 #
 # Nothing here is imported by neight.py at runtime; these are only needed to
-# build releases, generate design assets, or run the repository's checks.
+# build releases or run the repository's checks.
+#
+# Kept deliberately small.  PyInstaller's hooks discover optional packages that
+# happen to be installed and bundle them even though Neight never imports them,
+# so anything added here becomes dead weight in a distributable built from a
+# development environment by mistake.  `pillow` and `python-pptx` used to live
+# here and cost 18 MB in a shipped Neight.exe; see DEVELOPER.md.  Asset
+# generation dependencies now live in requirements-design.txt, installed only
+# when regenerating icons.
 
 # Packaging (buildme.bat / buildme_mac_app.sh)
 -r requirements-build.txt
-
-# Design asset generation only — not used by the application
-pillow==12.3.0
-
-# Slide deck generation (make_slides.py) — not used by the application
-python-pptx==1.0.2
 
 # Repository hooks: BOM check, line-ending check, Tamil spelling guard.
 # Enable with: pre-commit install

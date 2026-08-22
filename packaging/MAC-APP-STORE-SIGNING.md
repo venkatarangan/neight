@@ -6,6 +6,13 @@ Apple Developer identity and uploads it. That split is why the sandbox was
 impossible to reason about from the source for so long, and this file exists to
 close the gap.
 
+> **Handing a build over?** Send
+> [`HANDOVER-MAC-APP-STORE.md`](HANDOVER-MAC-APP-STORE.md) and
+> [`Neight.entitlements`](Neight.entitlements) with it. That document is the
+> self-contained version of this one, written for someone who does not have the
+> repository, and it carries the current version's artifact hash. This file is
+> the internal reference behind it — keep them in step.
+
 ## What this repository provides
 
 [`Neight.entitlements`](Neight.entitlements) is the source of truth for the
@@ -28,7 +35,9 @@ It declares four keys:
 
 `app-scope` is not optional. Without it `NSURL.bookmarkDataWithOptions:` returns
 nil, and the entire mechanism Neight uses to keep access to a file the user
-picked does nothing at all. This was added in 2026.082.
+picked does nothing at all. This was added in 2026.082, and 2026.083 is the
+first build that can actually be installed widely enough to prove it — 2026.082
+required macOS 26.
 
 Deliberately **absent**: any `com.apple.security.temporary-exception.files.*`
 entitlement. A blanket home-directory exception does make the file-open failure
@@ -67,8 +76,8 @@ Silicon only by design.
 
 ## What to ask the signer for
 
-Kept here because it will be needed again. As of 2026.082 the outstanding asks
-are, in order of value:
+Kept here because it will be needed again. As of 2026.083 these are still
+outstanding, in order of value:
 
 1. **A locally signed test build**, using the same entitlements and the same
    commands as a submission, sent back rather than uploaded. This is worth more

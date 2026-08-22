@@ -7,6 +7,46 @@ Anything untagged is cross-platform.
 
 ---
 
+## 2026.083 — 2026-08-22
+
+Rebuilds the macOS download so it runs on macOS 15 and later, instead of
+demanding macOS 26.
+
+### Fixed
+
+- **The macOS download runs on macOS 15 Sequoia and later again.** **[macOS]**
+  The 2026.082 build would install only on macOS 26, and said so honestly —
+  which still left almost everyone unable to run it. Nothing in Neight or Qt
+  needed macOS 26: the floor came from the interpreter that built it. Homebrew
+  compiles Python for whatever macOS is running it, and 57 of the binaries in
+  the bundle were CPython's own. Rebuilt with a python.org interpreter, whose
+  builds target macOS 10.15, the floor drops to **15.0** — the limit PySide6
+  6.11's bindings set, and as low as this app can currently go — with no source
+  change at all. The bundle now declares 15.0 and genuinely needs 15.0.
+
+  This also makes the file-open fix shipped in 2026.082 reachable: it corrected
+  a real bug, in a build most people could not install.
+
+### Changed
+
+- **`pillow` and `python-pptx` are out of the development requirements.**
+  Neight imports neither, but PyInstaller's hooks bundle whatever they can
+  import, and these two once added 18 MB to a shipped `Neight.exe` that was the
+  public download for three weeks. `python-pptx` is gone outright — the script
+  it was for is not in this repository. `pillow` moved to a new
+  `requirements-design.txt`, installed only when regenerating icons, so an
+  ordinary development environment can no longer produce a bloated build by
+  accident.
+
+- **The documented macOS requirement is now macOS 15 Sequoia**, in the README
+  and on the website. It previously said macOS 12 Monterey, which no build has
+  been able to honour.
+
+- **CI runs on Python 3.14**, matching the interpreter release builds use,
+  rather than 3.12.
+
+---
+
 ## 2026.082 — 2026-08-22
 
 Fixes the Mac App Store build's inability to open files, and stops Neight asking

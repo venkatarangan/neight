@@ -19,7 +19,7 @@ its own. Every network request happens because you clicked something.
 | | |
 |---|---|
 | **Windows** | Windows 10 (version 1809) or Windows 11, 64-bit |
-| **macOS** | macOS 12 Monterey or later, **Apple Silicon (arm64) only** — no Intel build |
+| **macOS** | macOS 15 Sequoia or later, **Apple Silicon (arm64) only** — no Intel build |
 | **Tamil typing** | A **built-in** Tamil keyboard layout (*Tamil 99*, *Tamil Phonetic*, or the macOS *Tamil* layout). Third-party input apps such as **NHM Writer** and **Azhagi** are not supported |
 
 Nothing else to install — no runtime, no framework, no admin rights for the

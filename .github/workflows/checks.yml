@@ -18,7 +18,11 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          # Matches the interpreter release builds use, so CI exercises the
+          # Python that actually ships.  See DEVELOPER.md -- release builds
+          # additionally require the python.org build of it, for its low
+          # macOS deployment floor, which setup-python does not guarantee.
+          python-version: '3.14'
 
       - name: Install runtime dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
@@ -64,7 +68,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          # Matches the interpreter release builds use, so CI exercises the
+          # Python that actually ships.  See DEVELOPER.md -- release builds
+          # additionally require the python.org build of it, for its low
+          # macOS deployment floor, which setup-python does not guarantee.
+          python-version: '3.14'
       - name: Install Ruff
         run: pip install ruff
       # Report only.  CI must never rewrite source: an automatic fix could
