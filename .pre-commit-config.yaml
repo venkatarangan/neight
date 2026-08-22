@@ -19,4 +19,3 @@ repos:
         entry: "சோல்வெளி"
         args: [--multiline]
         types_or: [python, html]
-        exclude: '^constants/tamil\.py$'

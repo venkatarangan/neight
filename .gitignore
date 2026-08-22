@@ -6,10 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
-# Build output. Release binaries are published to GitHub Releases, not
-# committed here — see release_macos.sh / release_windows.ps1.
+# Build output.  Binaries are published to the dist-latest branch by the build
+# scripts, never committed to main — see "Why dist/ Isn't on GitHub" in
+# DEVELOPER.md.
 dist/
-stable/
 
 # MSIX local test-signing certificate (build_msix.ps1 -Sign) — never commit
 # a private key, even a throwaway local test one.

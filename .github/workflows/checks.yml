@@ -97,6 +97,22 @@ jobs:
           done < <(git ls-files '*.py' '*.md' '*.html' '*.txt' '*.yml' '*.spec')
           exit $bad
 
+      # Was its own workflow (tamil-guard.yml) doing one grep on an older
+      # checkout action.  Same check, same scope as the pre-commit hook of the
+      # same name -- python and html -- kept here because pre-commit only
+      # protects contributors who ran `pre-commit install`.
+      - name: Tamil spelling (no long-vowel corruption of சொல்வெளி)
+        run: |
+          # -F, a literal match: the pattern is a fixed string, so this needs no
+          # PCRE and runs identically under BSD grep on a maintainer's Mac and
+          # GNU grep on the runner.  The old workflow used -P, which macOS grep
+          # does not support at all -- it could only ever be checked in CI.
+          if git ls-files -z '*.py' '*.html' | xargs -0 grep -nF "சோல்வெளி"; then
+            echo "::error::Wrong Tamil found: சோல்வெளி — use சொல்வெளி (short ொ)"
+            exit 1
+          fi
+          echo "Tamil spelling check passed."
+
       - name: Tamil source strings decode as UTF-8
         run: |
           python - <<'PY'
