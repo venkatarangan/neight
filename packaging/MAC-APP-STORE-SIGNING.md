@@ -12,9 +12,12 @@ Muthu Nedumaran's account. As of 2026-08-23 the listing still shows version
 and whose binaries actually need macOS 26 despite the 12.0 claim. The 12.0 was
 the signer's script overwriting the declared 15.0; that is fixed on their side.
 The file-open failure is fixed in this repository by routing sandboxed file I/O
-through Qt (see the 2026-08-23 session note) — a fix **2026.083 and 2026.084 do
-not contain**; their bookmark-based attempt never worked. Treat the Store build
-as broken until a build carrying the Qt I/O fix (2026.085 or later) ships.
+through Qt (see the 2026-08-23 session notes) — a fix **2026.083 and 2026.084 do
+not contain**; their bookmark-based attempt never worked. Saving needed a second
+fix on top of it, since `QSaveFile` cannot open a file inside the sandbox at all.
+**2026.086 is the first build carrying both**, and it is the one on
+`dist-latest`. Treat the Store build as broken until a signed 2026.086 or later
+ships.
 
 Note also that the repository stamps `CFBundleShortVersionString` with Neight's
 own version, yet the listing reads `1.0` — so something in the signing chain

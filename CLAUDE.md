@@ -70,8 +70,8 @@ speedup.
   file, and its `Info.plist` declares macOS 12 while its binaries need
   macOS 26. The real fix — sandboxed file I/O through Qt, whose file engine
   owns the panel grant; the 2026.082/083 bookmark attempt never worked — is in
-  source and ships with 2026.085. Do not describe the Store build as current
-  until a signed 2026.085 or later ships.
+  source and ships with 2026.086, the build now on `dist-latest`. Do not
+  describe the Store build as current until a signed 2026.086 or later ships.
 - **Direct downloads come from the `dist-latest` branch**, which every build
   republishes by amending its single commit and force-pushing. It is what the
   website and `README.md` link to, so **any local build immediately becomes the
