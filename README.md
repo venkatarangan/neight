@@ -33,6 +33,11 @@ and signing for you, and are the recommended route on both platforms.
 - **macOS:** [Get Neight from the Mac App Store](https://apps.apple.com/app/neight/id6800348235?mt=12) — signed, sandboxed, and updated by the App Store. No Gatekeeper prompt.
 - **Windows:** [Get Neight from the Microsoft Store](https://apps.microsoft.com/detail/9pj70ndp41lv) — no SmartScreen prompt, because Microsoft re-signs every Store package.
 
+> **Temporary note, macOS only — remove once the update is live.** The version
+> currently on the Mac App Store cannot open or save files. The fix is written
+> and ships in 2026.085, which is awaiting signing and review. Until it appears,
+> use the unsigned macOS download below.
+
 #### For developers — unsigned builds
 
 > These are the **latest builds**, published straight from a developer machine
@@ -63,6 +68,11 @@ branch. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 ### Install on macOS
 
 **From the Mac App Store (recommended):**
+
+> **Temporary note, macOS only — remove once the update is live.** The version
+> currently on the Mac App Store cannot open or save files. The fix is written
+> and ships in 2026.085, which is awaiting signing and review. Until it appears,
+> use the unsigned macOS download below.
 
 1. Open the [App Store listing](https://apps.apple.com/app/neight/id6800348235?mt=12) and click **Get**.
 2. Launch Neight from Launchpad or Applications. No Gatekeeper prompt appears,
@@ -120,8 +130,8 @@ Additional screenshots are in the [screenshots](screenshots) folder.
 
 - **Gutter line numbers** (`Ctrl+Shift+L`) — paragraph-level line numbers like a code editor
 - **Adjustable margins and line spacing** — five spacing presets (Condensed through Triple); viewport padding is added automatically so lines never clip at the window edge
-- **Auto-save** at configurable intervals (2, 5, 15 or 30 minutes, or off) — writes are atomic, run on a background thread, and never cause a visible pause
-- **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **File → Empty Recovery Folder** to delete old copies.
+- **Auto-save** at configurable intervals (2, 5, 15 or 30 minutes, or off) — writes run on a background thread and never cause a visible pause. They are atomic everywhere except in the Mac App Store build, where the sandbox does not permit the write-temp-then-rename pattern atomicity needs.
+- **Recovery copies for unsaved documents** — if you have typed text but not yet named the file, Neight silently writes a recovery copy to `~/Documents/Neight/` on every autosave tick. The recovery file is cleaned up automatically the moment you save, open another file, or start a new document. Use **File → View Recovery Folder** to open the folder, and **File → Empty Recovery Folder** to delete old copies. *(In the Mac App Store build from 2026.085 these live in `~/Library/Application Support/Neight/` instead — sandboxed apps cannot use your real Documents folder. **View Recovery Folder** always takes you to the right place.)*
 - **Smart suggested filename** — when you press `Ctrl+S` on an unsaved document, the save dialog opens pre-filled with a name derived from the first words of your text (up to 4 words, max 100 characters). Accept it, edit it, or choose a different location — the dialog behaves exactly as usual.
 - **Continue where you left off** — reopens your last file at startup (toggleable under Settings)
 - **Auto-Hide Scrollbar** — scrollbar flashes briefly when you scroll, then disappears to keep the writing area clean
@@ -232,7 +242,7 @@ See [ADVANCED.md](ADVANCED.md) for the full settings applied by each mode, and f
 [ADVANCED.md](ADVANCED.md) covers the features aimed at power users who want to go beyond the defaults:
 
 - **Writer (சொல்வெளி) Mode** and **Techie (நுட்பர்) Mode** — full settings tables
-- **Save Presets** — save your own settings as the baseline for a mode, stored in `~/Documents/Neight/`
+- **Save Presets** — save your own settings as the baseline for a mode, stored in `~/Documents/Neight/` (in the Mac App Store build from 2026.085, `~/Library/Application Support/Neight/`)
 - **Reading Time** — configurable Tamil and English reading speeds with per-script calculation
 - **Word Index Overlay** — number every word in your document; fully customizable appearance. The semi-transparent overlay is lovingly called the **butter paper effect** (like laying a translucent sheet over your manuscript to annotate word positions). See [ADVANCED.md](ADVANCED.md) for details.
 - **Language Switch configuration** — choose which two layouts to switch between
@@ -298,8 +308,9 @@ Neight is a personal project, vibe-coded with AI assistance and brewed at [venka
 ## Changelog
 
 [CHANGELOG.md](CHANGELOG.md) records what changed in each build, tagged by
-platform. The most recent entries cover the Mac App Store build's file-open
-failure and the macOS version floor it shipped with.
+platform. The most recent entries cover the Mac App Store build's inability to
+open or save files, the sandbox work that fixes it, and the macOS version floor
+it shipped with.
 
 ---
 

@@ -10,6 +10,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_selection_counts.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_unsaved_prompt.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_sandbox_qt_io.py
 ```
 
 Each script exits non-zero on failure and prints failures as GitHub Actions
@@ -64,8 +65,30 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
   would write an empty file, while an *opened* file emptied out stays a real
   change. Types through a `QTextCursor` rather than `setPlainText()`, which
   clears the modified flag and would make a broken gate look fine. Finally
-  checks that the macOS security-scoped-access helpers are inert off the
-  sandbox, since every read and write now runs inside one.
+  checks that sandbox detection stays off in an ordinary run, since a false
+  positive would silently reroute every read and write onto the Qt sandbox
+  path.
+
+- **`test_sandbox_qt_io.py`** — the Mac App Store build reads and writes user
+  files through `QFile`, because Qt's security-scoped file engine holds the
+  sandbox grant and Python's `open()` never sees it. (Not `QSaveFile`: it
+  builds its temp file through an engine it constructs directly, so the
+  security-scoped engine never sees that either, and its `EACCES`-only
+  fallback cannot fire on a sandbox denial, which is `EPERM`. That combination
+  is why 2026.084 could open files but not save them.) No test environment is
+  sandboxed, so the Qt branch would otherwise only ever run in the one build
+  nobody local can sign; this exercises the helpers directly and requires
+  byte-for-byte parity with the Python path over a mixed Tamil/English corpus
+  (BOM, CRLF, empty file), checks the `should_commit` withdrawal contract
+  autosave depends on — including that a *raising* `should_commit` propagates
+  and leaves the target untouched — and forces the sandbox gate on to run a
+  window-level open, save and background autosave end to end. It also pins the
+  two rules that are invisible until they break: Qt must receive the path
+  string **exactly** as the dialog returned it, since it keys its bookmark on
+  that, and app-private state (recovery copies, mode presets) must move to
+  Application Support when sandboxed rather than into the container's
+  invisible Documents. Redirects `Path.home()` before touching either, so it
+  never leaves folders in the real one.
 
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
 manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the

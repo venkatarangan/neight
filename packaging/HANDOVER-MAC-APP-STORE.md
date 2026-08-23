@@ -1,45 +1,93 @@
-# Neight 2026.083 — handover for the Mac App Store update
+# Neight 2026.085 — handover for the Mac App Store update
 
 **For:** whoever signs and submits Neight to the Mac App Store.
 **From:** the Neight repository, <https://github.com/venkatarangan/neight>.
-**Date:** 2026-08-22.
+**Date:** 2026-08-23.
 
-**Neight is already live on the Mac App Store** — thank you. This is an
-**update**, and it is an urgent one: the build currently on the Store **cannot
-open a single file**, on any Mac. This document is everything needed to sign
-the replacement, submit it, and confirm afterwards that the right thing
-shipped. It is self-contained — you do not need to read the rest of the
-repository.
+Thank you for the diagnostic run, and for the follow-up telling us **opening
+now works but saving does not** — that second report is what found the
+remaining bug. This is a **normal submission**, not another diagnostic: sign
+it as you did the 2026.084 test build and upload it. This document is
+self-contained — you do not need the rest of the repository.
 
-If you read only one section, read
-[The one entitlement that matters](#the-one-entitlement-that-matters). That
-entitlement is the fix, and without it this submission changes nothing.
+## What your diagnostic run found, and what changed
+
+Your log proved that the Open panel *was* granting access, and that Qt was
+converting the grant into a bookmark in its own store at the same instant
+Neight's Python-level read was denied. The inference you flagged was right:
+Qt 6.11 registers its own security-scoped file engine inside the sandbox, and
+that engine — not the app's code — owns the grant from the moment the panel
+closes. Access exists, but only for I/O that goes through Qt's file classes.
+
+So the fix was on our side and was exactly your first "where to look next"
+suggestion: **Neight now reads and writes user files through Qt** whenever it
+runs sandboxed. The bookmark machinery you watched fail in 2026.084 is deleted
+— Qt's own store does that job, including across relaunches. The
+launch-dependent sandbox detection you flagged is also fixed
+(`sandbox_check()` instead of the environment variable).
+
+### Why the first attempt still could not save
+
+Reads went through `QFile` and worked. Writes went through `QSaveFile`, and
+`QSaveFile` cannot work inside the App Sandbox at all. Reading Qt 6.11.1's
+`qsavefile.cpp`, two things compound:
+
+- It writes to a temp file **beside** the target, created through a
+  `QTemporaryFileEngine` it constructs *directly* — bypassing
+  `QAbstractFileEngine::create()`, so the security-scoped engine never sees
+  it. The panel grants the chosen *file*, not its *directory*, so creating
+  that sibling is denied.
+- `setDirectWriteFallback(true)` is the documented escape hatch, and it *does*
+  go through the engine — but Qt guards it on `errno == EACCES`. Sandbox
+  denials return **`EPERM`**. The fallback never fires, `open()` returns
+  false, and the user sees "Could not save file".
+
+This build writes with `QFile` opened `WriteOnly|Truncate` on the final path —
+which is precisely what `QSaveFile`'s own `openDirectly()` would have done had
+Qt's errno check let it run. Same door the working read path uses.
+
+One consequence worth knowing if a user ever reports it: **the sandboxed save
+is not atomic.** It cannot be — the sandbox forbids the write-temp-then-rename
+pattern. A crash during a save can leave the file truncated. Outside the
+sandbox (the direct download, Windows) saving is unchanged and still atomic.
+
+Both of your corrections to our documents were taken: local reproduction with
+a plain Developer ID / Development signature is now recorded as possible, and
+your `LSMinimumSystemVersion` finding is noted as resolved on your side.
+
+### Other sandbox fixes in the same build
+
+While tracing the save path we swept every other place Neight touches the
+filesystem. Settings were already correct. These were not:
+
+- **Recovery copies and mode presets** were written to `~/Documents/Neight`.
+  Inside the sandbox that is the *container's* Documents — the writes
+  succeeded, but into a folder no user can find and that is deleted with the
+  app. Sandboxed, they now go to Application Support, and every dialog that
+  names the folder shows the resolved path.
+- **PDF export** worked but never checked, so a denied write still showed a
+  success dialog. It now verifies the file was produced.
+- **"View Recovery Folder"** shelled out to `/usr/bin/open`, which a sandboxed
+  process may not exec. It now uses NSWorkspace via Qt.
+- **"Open .md files with Neight"** called Launch Services to set the default
+  handler, which the sandbox forbids. That button is now disabled in the Store
+  build, with a note pointing at Finder's Get Info → Change All instead.
+- **The Open and Save panels** started in `~`, which sandboxed is the
+  container root — an unrecognisable folder where a saved file effectively
+  vanishes. They now start in the user's real Documents.
 
 ## What is live right now
 
-Read from Apple's own lookup API on 2026-08-22, for
-[`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12):
+Unchanged since 2026-08-22, for
+[`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12): the
+listing shows version **1.0**, minimum **macOS 12.0**, and that build cannot
+open any file. This submission replaces it.
 
-| | |
-|---|---|
-| Version shown | **1.0** |
-| Minimum macOS | **12.0** |
-| Released | 2026-08-22 |
-| Bundle ID | `com.murasu.neight` |
-
-Two problems with that, both fixed in the bundle you are being sent:
-
-1. **It cannot open files.** See below — it predates the security-scoped
-   bookmark fix.
-2. **The macOS 12.0 minimum is wrong and harmful.** That build's binaries were
-   compiled for macOS 26. macOS reads the 12.0 claim, allows the install, and
-   the app then fails to launch. 2026.083 genuinely runs on macOS 15 and later,
-   and declares exactly that.
-
-There is also a question worth answering, flagged below: the Store says version
-**1.0**, but the bundle this repository builds stamps
-`CFBundleShortVersionString` with Neight's own version — `2026.083` for this
-one. Something in the signing chain is changing it.
+There is still one open question worth answering at upload time: the Store
+says version **1.0**, but the bundle stamps `CFBundleShortVersionString` with
+Neight's own version. If App Store Connect (or your process) maps it to `1.0`,
+just tell us what mapping you use, so a bug report naming a Store version can
+be traced to a build.
 
 ---
 
@@ -47,107 +95,75 @@ one. Something in the signing chain is changing it.
 
 | | |
 |---|---|
-| **Version** | 2026.083 |
+| **Version** | 2026.085 |
 | **Bundle identifier** | `com.murasu.neight` |
 | **Architecture** | Apple Silicon (arm64) only — deliberately no Intel or universal slice |
 | **Minimum macOS** | 15.0 (Sequoia) |
-| **Artifact** | `Neight-mac-arm64-unsigned.app.zip`, 41 MB |
-| **SHA-256** | `54cc0edc41e18db028aeb802df22cebcb81dabab37384057df81170a8bba6d34` |
+| **Artifact** | `Neight-mac-arm64-unsigned.app.zip` |
+| **SHA-256** | `FILL IN AFTER THE BUILD` — see note below |
 
-Download it directly if you would rather not use the file you were sent:
+> **The SHA-256 above must be filled in from the actual 2026.085 artifact
+> before this document is sent.** Any hash carried over from an earlier build
+> is wrong by definition — `buildme_mac_app.sh` produces a new artifact.
 
-```
-https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight-mac-arm64-unsigned.app.zip
-```
-
-Verify before you start — if this hash does not match, stop and ask, because the
-`dist-latest` branch is force-pushed on every build and may have moved on:
+Verify before you start — the `dist-latest` branch is force-pushed on every
+build and may have moved on:
 
 ```bash
 shasum -a 256 Neight-mac-arm64-unsigned.app.zip
 ditto -x -k Neight-mac-arm64-unsigned.app.zip .
 ```
 
-The bundle currently carries an **ad-hoc** signature and **no entitlements**.
-That is correct for the direct download it also serves as. Your signing replaces
-that signature entirely.
+The bundle carries an **ad-hoc** signature and **no entitlements**. That is
+correct for the direct download it also serves as. Your signing replaces that
+signature entirely.
 
 ---
 
-## The one entitlement that matters
+## Entitlements: same file, one shifted reason
 
-**Sign with `packaging/Neight.entitlements`, included alongside this document.**
-
-```bash
-codesign --force \
-         --sign "3rd Party Mac Developer Application: <NAME> (<TEAMID>)" \
-         --entitlements Neight.entitlements \
-         Neight.app
-```
-
-Its four keys, and why each is there:
+**Sign with `Neight.entitlements`, included alongside this document** — the
+same file and the same four keys as the 2026.084 test build:
 
 | Key | Why |
 |---|---|
 | `com.apple.security.app-sandbox` | Required for the Store. |
 | `com.apple.security.files.user-selected.read-write` | Read and write the files the user picks in the Open and Save panels. |
-| `com.apple.security.files.bookmarks.app-scope` | **Mint and redeem security-scoped bookmarks. Nothing works without this.** |
+| `com.apple.security.files.bookmarks.app-scope` | **Qt's file engine mints and redeems security-scoped bookmarks with this.** It is what makes access survive a relaunch. |
 | `com.apple.security.files.bookmarks.document-scope` | Bookmarks tied to a document rather than to the app. |
 
-### Why `app-scope` is not optional
+The bookmarks keys used to be justified by Neight's own bookmark code; that
+code is gone, but the keys stay — they are now what lets *Qt's* engine (the
+one your run caught writing `SecurityScopedBookmarks.plist`) do the same
+minting legitimately. Switching the write path from `QSaveFile` to `QFile`
+does not change this: both go through the same engine.
 
-The Store release before this one **could not open any file at all** — Desktop,
-Downloads, Dropbox, OneDrive, anywhere — failing with *Operation not permitted*
-for every user.
+Still deliberately absent, unchanged: any
+`com.apple.security.temporary-exception.files.*`. Please do not add one to get
+a build through.
 
-The cause: macOS grants access when the user picks a file in the Open panel, but
-that grant was gone a few milliseconds later when Python actually read the
-bytes. (A `stat()` on the path still succeeded in that window, because the
-sandbox treats reading a file's *metadata* and reading its *contents* as
-separate permissions — which is why it looked for a long time like a bad path
-rather than a lost permission.)
-
-Neight now mints a **security-scoped bookmark** the instant the panel returns
-and redeems it around every read and write. That call is
-`NSURL.bookmarkDataWithOptions:`, and **without
-`com.apple.security.files.bookmarks.app-scope` it returns nil** — silently. The
-app would then behave exactly as the broken release did, and the fix would have
-cost a review cycle to discover.
-
-So: if the entitlements file is not passed to `codesign`, this submission is
-pointless. That is the single highest-risk step in this handover.
-
-### What is deliberately absent
-
-No `com.apple.security.temporary-exception.files.*` of any kind. A blanket
-home-directory exception does make the symptom disappear — the read stops
-needing a scoped grant — but it asks App Review to grant a text editor standing
-access to the user's entire home directory. Please do not add one to get a
-build through.
+Your identity choice is yours: the 2026.084 run showed a Developer ID
+signature engages the sandbox and Powerbox correctly, and the Store submission
+uses your usual `3rd Party Mac Developer Application` / Apple Distribution
+identity as before.
 
 ---
 
 ## Rules for handling the bundle
 
-- **Do not edit anything inside the bundle**, `Info.plist` included. Every key
-  is set at build time from a version-controlled spec. If a shipped bundle turns
-  out to carry a key this repository never sets, something in the signing chain
-  added it, and that needs explaining rather than accepting. This has happened
-  before (see the question about 2026.081 below).
-- **Do not use `--deep`.** Apple deprecated it, and it signs nested code with
-  the *outer* bundle's options — wrong for anything carrying entitlements.
-  `codesign` walks the bundle correctly without it.
-- **`--options runtime` (hardened runtime) is not needed.** That is for
-  notarised direct distribution, not the Store.
-- **Do not re-zip with `zip`.** Use `ditto -c -k --sequesterRsrc --keepParent`,
-  which preserves the symlinks and resource forks a `.app` depends on.
+Unchanged, and your 2026.084 run already followed all of them:
 
----
+- **Do not edit anything inside the bundle**, `Info.plist` included — and with
+  your script's `LSMinimumSystemVersion` overwrite fixed, nothing should touch
+  it now. The bundle declares 15.0; it should still say 15.0 when submitted.
+- **Do not use `--deep`.** Sign nested code inside-out, as you did.
+- **`--options runtime` is not needed** for a Store build, per your own note.
+- **Do not re-zip with `zip`.** Use `ditto -c -k --sequesterRsrc --keepParent`.
 
 ## Verifying before you submit
 
 ```bash
-# 1. The entitlements actually made it in -- this is the check that matters.
+# 1. The entitlements actually made it in -- the check that matters most.
 codesign -d --entitlements :- Neight.app
 
 # 2. The signature is valid and covers nested code.
@@ -155,117 +171,72 @@ codesign --verify --strict --verbose=2 Neight.app
 
 # 3. Identity and architecture.
 codesign -dvv Neight.app 2>&1 | grep -E 'Authority|TeamIdentifier|Format'
+
+# 4. The floor was not overwritten.
+/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Neight.app/Contents/Info.plist
 ```
 
-Expected: step 1 lists all four keys above, `app-scope` among them. `Format`
-reads `app bundle with Mach-O thin (arm64)`.
-
-A genuine Store install, once delivered back through Apple, shows
-`Apple Mac OS Application Signing` as the authority, has
-`Contents/_MASReceipt/receipt`, and has **no** `embedded.provisionprofile` —
-Apple strips it when re-signing.
+Expected: all four entitlement keys; `Format` reads
+`app bundle with Mach-O thin (arm64)`; step 4 prints `15.0`.
 
 ---
 
-## Testing that the fix works
+## Please test before uploading
 
-The file-open fix **cannot be tested in an unsigned build**. It only does
-anything inside a sandboxed, entitled, signed one — which is why the request
-below is worth more than everything else in this document combined.
+Unlike 2026.083, this fix *can* be tested by you in minutes, with a locally
+signed build (Developer ID is fine for the test — your 2026.084 procedure
+exactly). On any Mac:
 
-Once you have a signed build, on a Mac that is not the build machine:
+1. Launch Neight **by double-clicking it in Finder** — not from Terminal. The
+   two launch paths behaved differently in the bug you found, and Finder is
+   how every user launches.
+2. **File > Open** a `.txt` on the Desktop. It must open. This worked in your
+   last run and must keep working.
+3. Open a file inside Dropbox / iCloud Drive / OneDrive.
+4. Edit and **File > Save**. **This is the step that failed for you last
+   time** — it is the one this build exists to fix.
+5. **File > Save As** to a new name, in a different folder. The Save panel
+   should open somewhere recognisable, not inside a `Library/Containers` path.
+6. Leave the window open and edited for one auto-save interval (Settings >
+   Auto-save; set it to the shortest option to avoid waiting). The status bar
+   must say "Auto-saved", not "Auto-save failed".
+7. **File > Export to PDF**. The PDF must actually appear where you put it.
+8. Quit, relaunch from Finder. With **Continue where you left off** enabled,
+   the file must come back — that is Qt's bookmark store surviving a restart —
+   and **saving it again must still work**.
 
-1. Launch Neight.
-2. **File > Open**, and open a `.txt` file on the Desktop. It must open and show
-   its contents. On the build currently live this fails with *Operation not
-   permitted*, which is the whole reason for this update.
-3. Open a file inside OneDrive or Dropbox — those go through a different macOS
-   mechanism and are worth checking separately.
-4. Edit it, **File > Save**. The save must succeed.
-5. Quit and relaunch. If **Reopen last file on launch** is enabled, the same
-   file must come back — that path depends on the bookmark surviving a restart,
-   which is the other half of the fix.
+If any step fails, run once with `NEIGHT_SANDBOX_DIAG=1` as you did for
+2026.084 and send the log — same location:
 
-If any step fails, capture this and send it back — it names the exact denial:
-
-```bash
-log stream --predicate 'eventMessage CONTAINS[c] "com.murasu.neight"' --info
+```
+~/Library/Containers/com.murasu.neight/Data/Library/Application Support/Neight/sandbox-diagnostics.log
 ```
 
-Note `CONTAINS[c]`. The case-sensitive form misses `com.murasu.neight` entirely,
-and an earlier investigation lost time concluding from its silence that there
-was no denial at all.
-
----
-
-## What would help most, coming back
-
-In order of value:
-
-1. **A locally signed test build** — same entitlements, same commands as a real
-   submission, sent back rather than uploaded. Sandbox behaviour cannot be
-   reproduced from an unsigned build, so without this every hypothesis costs a
-   full App Store review cycle to test. With it, minutes. This is the single
-   most useful thing.
-2. **The signing commands verbatim** — every `codesign` invocation with all
-   flags, in order; whether nested code is signed inside-out or only the outer
-   `.app`.
-3. **Anything you modify in the bundle before signing.** There is now direct
-   evidence that something does. The bundle this repository builds sets
-   `CFBundleShortVersionString` and `CFBundleVersion` to Neight's own version
-   (`2026.083`), but the Store listing shows **1.0**. Separately, 2026.081
-   shipped with `LSMinimumSystemVersion = 12.0` while the spec that built it
-   never set that key at all.
-
-   If you are rebuilding from source rather than signing the bundle you are
-   sent, that would explain both — and it matters, because a rebuild on a
-   different Python would reintroduce the macOS 26 floor this update exists to
-   fix. Please say which you do.
-4. **Which artifact and version you submitted**, plus your macOS and Xcode
-   versions.
-
----
-
-## Already ruled out — please don't re-investigate
-
-Time was spent on each of these; all are settled:
-
-- The delivered entitlements were correct **as far as they went** — the previous
-  release genuinely had `app-sandbox` and `files.user-selected.read-write`. What
-  was missing was the bookmarks key.
-- The app really does invoke the **native** Open panel:
-  `com.apple.appkit.xpc.openAndSavePanelService` runs with
-  `responsible=com.murasu.neight`. Qt's non-native dialog was never involved.
-- There is **no path rewriting** between the panel returning and the read.
-- The denial is a kernel **App Sandbox `deny(1) file-read-data`**, not TCC.
-  Privacy settings are not the problem.
-- An earlier analysis inferred an unbalanced
-  `stopAccessingSecurityScopedResource()` in Neight and recommended removing it.
-  **No such call existed** — the app had no bookmark code at the time. The
-  bookmark activity visible in that trace was AppKit's own.
+It now narrates the Qt read/write path instead of the bookmark path, and names
+the stage that failed (open / write / flush / close) with Qt's own error
+string — so one log should be enough to place any remaining problem exactly.
+If all eight steps pass, upload.
 
 ---
 
 ## Context you may want
 
-- **This version's other change.** 2026.083 differs from 2026.082 only in the
-  interpreter that built it. 2026.082 could be installed only on macOS 26,
-  because Homebrew's Python is compiled for whatever macOS is running it and 57
-  of the bundle's binaries were CPython's own. Rebuilt with a python.org
-  interpreter, the floor drops to 15.0 — the limit PySide6 6.11 sets. No source
-  changed.
-- **The app makes no network calls on its own.** It never checks for updates or
-  contacts a server unless the user clicks something. Worth knowing if App
+- **The only functional changes since 2026.083** are the sandboxed file I/O
+  fixes described above (2026.084 was your diagnostic build and was never
+  submitted). Nothing outside the sandbox path changed behaviour. The macOS
+  15.0 floor work from 2026.083 is carried forward.
+- **The app makes no network calls on its own.** It never checks for updates
+  or contacts a server unless the user clicks something. Worth knowing if App
   Review asks.
-- **Neight is a Tamil and English text editor**, PySide6 (Qt 6) on Python 3.14,
-  single-window, document-based. It declares plain-text and Markdown document
-  types so it appears in Finder's **Open With**.
-- **Version numbering.** Neight uses a `YYYY.NNN` scheme — `2026.083` is the
-  83rd build of 2026, not a semantic version. If the Store listing needs a
-  conventional-looking number, that is fine; just let us know what mapping you
-  use, so a bug report naming a Store version can be traced to a build.
+- **Neight is a Tamil and English text editor**, PySide6 (Qt 6) on Python
+  3.14, single-window, document-based. It declares plain-text and Markdown
+  document types so it appears in Finder's **Open With**.
+- **Version numbering.** `YYYY.NNN` — `2026.085` is the 85th build of 2026,
+  not a semantic version.
 - **Full reference:** `packaging/MAC-APP-STORE-SIGNING.md` in the repository,
   which this document condenses. The live listing is at
   <https://apps.apple.com/app/neight/id6800348235?mt=12>.
 
-Questions are welcome and cheaper than a rejected submission.
+Questions are welcome and cheaper than a rejected submission — and the
+diagnostic round trip you did is what made this a one-line-of-reasoning fix
+instead of another guess. Thank you.

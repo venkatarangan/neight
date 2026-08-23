@@ -37,9 +37,12 @@ Neight stores the following information **locally on your device only**:
   interval.
 - **Presets and recovery copies** — are stored in
   `%USERPROFILE%\Documents\Neight\` on Windows and
-  `~/Documents/Neight/` on macOS. Recovery copies contain only unsaved text
-  from the current document and are removed during normal save, open, new-file,
-  and close operations.
+  `~/Documents/Neight/` on macOS. In the Mac App Store version, from 2026.085,
+  they are stored inside the app's own sandbox container instead, under
+  `~/Library/Application Support/Neight/`; **File → View Recovery Folder** and
+  the preset dialogs always show the path actually in use. Recovery copies
+  contain only unsaved text from the current document and are removed during
+  normal save, open, new-file, and close operations.
 - **Autosave diagnostic logs** — are created beside `settings.json` only when
   an autosave write fails or its watchdog reports a problem.
 

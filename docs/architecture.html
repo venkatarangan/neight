@@ -378,6 +378,12 @@
       </div>
     </div>
 
+    <p style="max-width:72ch;margin:18px auto 0;font-size:13.5px;line-height:1.6;color:var(--ink-soft);text-align:center">
+      The data locations shown are those of the direct download. The Mac App
+      Store version runs sandboxed, and from 2026.085 keeps presets and recovery
+      copies inside its own container rather than in <code>~/Documents/Neight/</code>.
+    </p>
+
     <div class="context-strip">
       <div class="ctx-card">
         <div class="ctx-kicker">// core</div>
@@ -388,13 +394,13 @@
       <div class="ctx-card">
         <div class="ctx-kicker">// structure</div>
         <div class="ctx-title">Key Classes</div>
-        <p class="ctx-body"><b>NeightApplication</b> handles macOS Open With. <b>Notepad</b> is the main window. <b>CodeEditor</b> drives all editing. Custom layout, find/replace, line numbers, and word index are separate widgets.</p>
+        <p class="ctx-body"><b>NeightApplication</b> handles macOS Open With. <b>Notepad</b> is the main window. <b>CodeEditor</b> drives all editing. Custom layout, find/replace, line numbers, and word index are separate widgets. A small module-level layer routes file I/O through Qt when the Mac App Store build runs sandboxed.</p>
         <a class="ctx-link" href="https://github.com/venkatarangan/neight/blob/main/DEVELOPER.md" target="_blank" rel="noopener">Read the developer guide →</a>
       </div>
       <div class="ctx-card">
         <div class="ctx-kicker">// background</div>
         <div class="ctx-title">Background Services</div>
-        <p class="ctx-body">Auto-save writes run on a background thread so the UI never blocks. An update checker and recovery manager run silently. Reading time uses Tamil/English word speed tables.</p>
+        <p class="ctx-body">Auto-save writes run on a background thread so the UI never blocks. A recovery manager keeps a copy of unsaved drafts silently. Reading time uses Tamil/English word speed tables. Neight never checks for updates or contacts a server.</p>
         <a class="ctx-link" href="https://github.com/venkatarangan/neight/blob/main/DEVELOPER.md#performance-design" target="_blank" rel="noopener">Performance design notes →</a>
       </div>
     </div>

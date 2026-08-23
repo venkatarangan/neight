@@ -85,18 +85,12 @@ def unsaved_prompt(app, window) -> None:
           not (window.current_path is None and not window.editor.documentText().strip()),
           "emptying a saved file was treated as nothing to save")
 
-    # 5. The macOS sandbox helpers must be inert everywhere else, since every
-    #    read and write now runs inside one.
-    equal(neight._macos_is_sandboxed(), bool(
-        sys.platform == "darwin" and __import__("os").environ.get("APP_SANDBOX_CONTAINER_ID")),
-        "sandbox detection disagrees with the environment")
-    equal(neight.macos_create_bookmark(str(path)), None,
-          "minted a security-scoped bookmark outside a sandbox")
-    equal(neight.sandbox_bookmark_for(str(path)), None,
-          "found a stored bookmark outside a sandbox")
-    with neight.sandbox_access(str(path)) as grant:
-        equal(grant.path, str(path),
-              "scoped access rewrote the path outside a sandbox")
+    # 5. Sandbox detection must say "not sandboxed" here, because that answer
+    #    is what routes every read and write in this suite down the plain
+    #    Python path.  A false positive would silently move all file I/O onto
+    #    the Qt path and this test would no longer exercise what users run.
+    equal(neight._macos_is_sandboxed(), False,
+          "sandbox detection reports a sandbox in a plain test run")
 
 
 if __name__ == "__main__":

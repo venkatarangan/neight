@@ -7,16 +7,28 @@ impossible to reason about from the source for so long, and this file exists to
 close the gap.
 
 **Neight is live on the Mac App Store**: [`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12), published under
-Muthu Nedumaran's account. As of 2026-08-22 the listing shows version **1.0**
-with a **macOS 12.0** minimum — a build that predates the security-scoped
-bookmark fix, so **it cannot open any file**, and whose binaries actually need
-macOS 26 despite the 12.0 claim. Both are fixed in 2026.083, which has not been
-submitted. Treat the Store build as broken until a signed 2026.083 or later
-ships.
+Muthu Nedumaran's account. As of 2026-08-23 the listing still shows version
+**1.0** with a **macOS 12.0** minimum — a build that **cannot open any file**,
+and whose binaries actually need macOS 26 despite the 12.0 claim. The 12.0 was
+the signer's script overwriting the declared 15.0; that is fixed on their side.
+The file-open failure is fixed in this repository by routing sandboxed file I/O
+through Qt (see the 2026-08-23 session note) — a fix **2026.083 and 2026.084 do
+not contain**; their bookmark-based attempt never worked. Treat the Store build
+as broken until a build carrying the Qt I/O fix (2026.085 or later) ships.
 
 Note also that the repository stamps `CFBundleShortVersionString` with Neight's
 own version, yet the listing reads `1.0` — so something in the signing chain
 changes it. That is an open question, not a settled fact.
+
+> **Asking for a diagnostic run instead of a submission?**
+> [`SIGNER-DIAGNOSTIC-RUN.md`](SIGNER-DIAGNOSTIC-RUN.md) is the template — it
+> was sent for 2026.084 and answered on 2026-08-23, and that run found the root
+> cause. One claim in it is now known to be wrong: Powerbox **does** vend file
+> grants to an app with no provisioning profile, as long as it carries a real
+> Apple signature (Developer ID or Apple Development). A local identity is
+> therefore enough to reproduce sandbox behaviour here; only ad-hoc signatures
+> are denied at the panel. The diagnostic mode (`NEIGHT_SANDBOX_DIAG=1`)
+> remains in every build, off by default.
 
 > **Handing a build over?** Send
 > [`HANDOVER-MAC-APP-STORE.md`](HANDOVER-MAC-APP-STORE.md) and
@@ -42,14 +54,16 @@ It declares four keys:
 |---|---|
 | `com.apple.security.app-sandbox` | Required for the Store. |
 | `com.apple.security.files.user-selected.read-write` | Read and write files the user picks in the Open and Save panels. |
-| `com.apple.security.files.bookmarks.app-scope` | **Mint and redeem security-scoped bookmarks.** Neight does not work without this — see below. |
+| `com.apple.security.files.bookmarks.app-scope` | **Mint and redeem security-scoped bookmarks.** Qt's file engine needs this — see below. |
 | `com.apple.security.files.bookmarks.document-scope` | Bookmarks tied to a document rather than to the app. |
 
-`app-scope` is not optional. Without it `NSURL.bookmarkDataWithOptions:` returns
-nil, and the entire mechanism Neight uses to keep access to a file the user
-picked does nothing at all. This was added in 2026.082, and 2026.083 is the
-first build that can actually be installed widely enough to prove it — 2026.082
-required macOS 26.
+`app-scope` is not optional, but the consumer is not Neight's own code: since
+the Qt I/O fix, **Qt's security-scoped file engine** is what mints a bookmark
+from every Open/Save panel grant, stores it in
+`SecurityScopedBookmarks.plist` inside the container, and redeems it on later
+access — including after a relaunch, which is what keeps "continue where you
+left off" working. Without the entitlement `bookmarkDataWithOptions:` returns
+nil and access dies with the panel.
 
 Deliberately **absent**: any `com.apple.security.temporary-exception.files.*`
 entitlement. A blanket home-directory exception does make the file-open failure
@@ -62,7 +76,10 @@ Everything the app needs is set by `Neight.macos.spec` at build time, including
 `LSMinimumSystemVersion`, which `buildme_mac_app.sh` then corrects to the value
 the binaries actually require. If a shipped bundle carries an `Info.plist` key
 this repository never sets, something in the signing chain added it and that
-needs explaining, not accepting.
+needs explaining, not accepting. This has happened once and is settled: the
+`LSMinimumSystemVersion = 12.0` on the live listing was the signer's script
+overwriting the declared 15.0 — fixed on their side on 2026-08-23, along with a
+stray `--options runtime` that a Store build does not need.
 
 `--deep` is deprecated by Apple and signs nested code with the *outer* bundle's
 options, which is wrong for anything carrying entitlements. Do not use it.
@@ -88,23 +105,25 @@ Silicon only by design.
 
 ## What to ask the signer for
 
-Kept here because it will be needed again. As of 2026.083 these are still
-outstanding, in order of value:
+Kept here because it will be needed again. Updated after the 2026-08-23
+diagnostic round, which resolved most of the original list:
 
-1. **A locally signed test build**, using the same entitlements and the same
-   commands as a submission, sent back rather than uploaded. This is worth more
-   than everything else combined: the sandbox behaviour cannot be reproduced
-   from an unsigned build, so without it every hypothesis costs a full App Store
-   review cycle to test. With it, minutes.
-2. **The signing commands verbatim** — every `codesign` invocation with all
-   flags, in order; whether `--deep` or `--options runtime` are used; whether
-   nested code is signed inside-out or only the outer `.app`.
-3. **What they modify in the bundle before signing.** 2026.081 shipped with
-   `LSMinimumSystemVersion = 12.0` in its `Info.plist` while the spec that built
-   it never set that key, so something in the chain was editing the bundle.
-   Worth settling.
+1. ~~A locally signed test build~~ — **done** (2026.084, 2026-08-23). Better
+   still, that run established that a plain Developer ID or Apple Development
+   signature with no provisioning profile is enough for Powerbox to vend
+   grants, so any Apple developer identity reproduces sandbox behaviour
+   locally. The standing ask, if local reproduction is ever wanted here: an
+   export of the `Apple Development: Muthu Nedumaran (GQ3UG4GVPW)` identity,
+   which Muthu already holds.
+2. **The signing commands verbatim** — answered for 2026.084: nested code
+   signed inside-out, no `--deep`, nothing edited by hand,
+   `codesign --verify --strict` passing. Keep asking whenever the procedure
+   changes.
+3. ~~What they modify in the bundle before signing~~ — **settled**: their
+   script overwrote `LSMinimumSystemVersion` (source of the 12.0 on the live
+   listing) and applied `--options runtime`; both fixed on their side.
 4. **Which artifact and version they submitted**, plus their macOS and Xcode
-   versions.
+   versions — still worth recording with every submission.
 
 Ruled out already, so nobody repeats it: the delivered entitlements were correct
 as far as they went; the app really does invoke the native panel

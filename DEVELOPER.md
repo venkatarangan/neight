@@ -262,6 +262,12 @@ Python will honestly exclude every Mac older than that Python's target.
 [`packaging/Neight.entitlements`](packaging/Neight.entitlements) holds the
 sandbox entitlements for the Mac App Store build, and is the source of truth for
 them. Pass it to the signing step with `codesign --entitlements`.
+
+The two `com.apple.security.files.bookmarks.*` keys are required even though
+Neight mints no bookmarks itself: **Qt's security-scoped file engine** does that
+on the app's behalf, and needs the same permission. See
+[The macOS App Sandbox](#the-macos-app-sandbox-mac-app-store-build) for why that
+engine is involved at all.
 [`packaging/MAC-APP-STORE-SIGNING.md`](packaging/MAC-APP-STORE-SIGNING.md) has
 the full procedure, what each entitlement is for, and what to ask the person who
 signs and submits.
@@ -556,8 +562,11 @@ Neight is a single-file Python application (`neight.py`) built on PySide6. There
 - **`LineNumberArea` (QWidget)** — gutter sidebar showing paragraph-level line numbers
 - **`ClickableLabel` (QLabel)** — emits a `clicked` signal; used for the Words: status bar label
 - **`SettingsManager`** — settings path resolution (primary → fallback), load/save, legacy migration, autosave log path
+- **The macOS sandbox I/O layer** (module-level functions, not a class) — `_macos_is_sandboxed()`, `_sandbox_read_bytes()`, `_sandbox_write_text()`, `_get_app_data_dir()` and `_default_start_directory()`. Inside the Mac App Store sandbox, user-file I/O must go through Qt rather than Python, and app-private state must not go to `~/Documents`. Every one of these is a no-op outside the sandbox. See [The macOS App Sandbox](#the-macos-app-sandbox-mac-app-store-build) below — it is the least obvious part of the file.
 
 Dialogs such as the Language Switch settings, Appearance settings, and Reading Time settings are created inline within `Notepad` methods (`_show_keyboards_dialog`, `_show_appearance_dialog`, `_show_reading_time_dialog`). Autosave writes run on a plain `threading.Thread` (not a QThread subclass); results are marshalled back to the UI thread via Qt signals.
+
+**Data locations are conditional on macOS.** `settings.json` and the autosave log always sit in `~/Library/Application Support/Neight/` there. Presets and recovery copies go to `~/Documents/Neight/` in the direct download, but to Application Support in the sandboxed Store build from 2026.085 — `~/Documents` inside a sandbox is the container's, not the user's. The architecture diagram above shows the unsandboxed layout; treat its data-location boxes as the direct-download case.
 
 ---
 
@@ -600,6 +609,90 @@ required.
 - Files received via **Open With** before the main window is ready are buffered and opened as soon as the window appears, so nothing is lost even during a cold launch.
 
 > The app bundle targets **Apple Silicon (arm64)**. Intel Mac support would require a separate build on appropriate hardware.
+
+### The macOS App Sandbox (Mac App Store build)
+
+The Store build runs sandboxed; the direct download does not. Two rules follow
+from that, and both are easy to break by writing perfectly ordinary Python.
+
+**1. User files must be read and written through Qt, not Python.**
+
+Qt 6.11 registers a `SecurityScopedFileEngineHandler` in any sandboxed process.
+When the Open or Save panel closes, that engine consumes the Powerbox grant
+immediately, stores it as a bookmark in its own
+`SecurityScopedBookmarks.plist`, and redeems it only for I/O that goes through
+Qt's file classes. Python's `open()` and `pathlib` bypass file engines
+entirely, so they are denied with `EPERM` — "Operation not permitted" — on a
+file the user *just picked*. This is what made every Store build before
+2026.085 unable to open a file at all.
+
+So `_open_file_path` and `_write_to_path` branch on `_macos_is_sandboxed()` and
+route through `_sandbox_read_bytes` / `_sandbox_write_text`, which use `QFile`.
+Two things about that are load-bearing:
+
+- **The path string must be passed exactly as the dialog returned it.** Qt keys
+  its bookmark lookup on the incoming `fileName`. Calling `Path()` on it first
+  collapses `//` and `./` and rewrites a leading `~` — usually harmless, but
+  enough to miss the lookup. `tests/test_sandbox_qt_io.py` pins this.
+- **`QSaveFile` cannot be used, however tempting it looks.** It writes to a temp
+  file *beside* the target through a `QTemporaryFileEngine` it constructs
+  directly, bypassing `QAbstractFileEngine::create()` — so the security-scoped
+  engine never sees it — and the panel grants the chosen *file*, not its
+  *directory*, so creating that sibling is denied. Its `setDirectWriteFallback`
+  escape hatch *does* reach the engine, but Qt guards it on `errno == EACCES`
+  while sandbox denials return `EPERM`, so it never fires. This is why 2026.084
+  could open files but not save them. `_sandbox_write_text` therefore opens the
+  final path with `QFile` + `WriteOnly|Truncate`, which is what `QSaveFile`'s
+  own `openDirectly()` would have done.
+
+**The sandboxed save is consequently not atomic**, and cannot be — the sandbox
+forbids write-temp-then-rename. `_atomic_write_text` is untouched and still
+fsyncs before an atomic rename everywhere else, including for app-private files
+inside the container. Do not "fix" the sandboxed path by reintroducing a temp
+file; it is denied, not slow.
+
+**2. `Path.home()` is the container, not the user's home.**
+
+The sandbox redirects `HOME` to `~/Library/Containers/com.murasu.neight/Data/`,
+so `expanduser("~")` looks perfectly ordinary from inside and is wrong. That
+means:
+
+- `~/Documents/Neight/` is the *container's* Documents. Writes succeed, which is
+  why this hid for so long, but the files are invisible in Finder and deleted
+  with the app. `_get_app_data_dir()` returns Application Support when
+  sandboxed; presets and recovery copies use it.
+- Panels seeded from `Path.home()` opened inside the container.
+  `_default_start_directory()` uses `pwd.getpwuid(os.getuid()).pw_dir` — the
+  passwd database is *not* redirected — to find the real Documents folder, and
+  `_update_default_directory` refuses to persist a container path.
+
+**Detection.** `_macos_is_sandboxed()` asks the OS via
+`sandbox_check(getpid(), NULL, 0)`, cached. Do **not** key off
+`APP_SANDBOX_CONTAINER_ID`: the OS sets it under a Terminal launch but not
+under LaunchServices — a double-click, which is how every Store user launches —
+so it silently disabled the whole layer for exactly the people it existed for.
+It survives only as a fallback.
+
+**Things the sandbox forbids outright**, each already handled: exec'ing a binary
+outside the bundle (so revealing a folder uses `QDesktopServices` /
+NSWorkspace, not `/usr/bin/open`), and writing the Launch Services handler
+database (so "Open .md files with Neight" is disabled in the Store build, with a
+note pointing at Finder's Get Info → Change All). Reading the current handler is
+still permitted.
+
+**Diagnosing a signed build.** Nobody working on this repository can sign a
+sandboxed build, so the code narrates itself instead. Launch with
+`NEIGHT_SANDBOX_DIAG=1` and the file paths log every stage — open, write, flush,
+close — with Qt's own `errorString()`, to:
+
+```
+~/Library/Containers/com.murasu.neight/Data/Library/Application Support/Neight/sandbox-diagnostics.log
+```
+
+Unset, nothing is written or read and the whole cost is an environment lookup.
+Reproducing a sandbox bug locally needs only an Apple Development or Developer
+ID identity — no provisioning profile — as a signed diagnostic run established
+on 2026-08-23. Only ad-hoc signatures are refused at the panel.
 
 ### Autosave watchdog and diagnostic log
 
@@ -686,6 +779,9 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_text_integrity.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_cursor_layout.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_selection_counts.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_unsaved_prompt.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_sandbox_qt_io.py
 ```
 
 Each exits non-zero on failure and prints failures as GitHub Actions

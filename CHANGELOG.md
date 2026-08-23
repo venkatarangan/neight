@@ -7,6 +7,86 @@ Anything untagged is cross-platform.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The Mac App Store build can open and save files.** **[macOS]** Every
+  Store-build file operation failed with "Operation not permitted", because
+  the sandbox grant the Open/Save panel produces never reached Neight's code:
+  Qt 6.11 registers its own security-scoped file engine inside a sandbox,
+  which consumes the grant the moment the panel closes and stores it as a
+  bookmark only Qt's file classes can redeem. Python's `open()` bypasses that
+  engine, so both the reads and the 2026.082 bookmark machinery (which needed
+  a live grant to mint from) were denied — proven by a signed diagnostic run
+  of 2026.084 on 2026-08-23. User-file reads and writes now go through `QFile`
+  when sandboxed, so the grant Qt already holds is the one used; Qt persists
+  it across launches, which also keeps "continue where you left off" working.
+  The ctypes bookmark layer is removed. Off the sandbox — Windows, and the
+  direct macOS download — file I/O is byte-for-byte the code it was before,
+  guarded by `tests/test_sandbox_qt_io.py`.
+
+- **Saving, specifically, needed a second fix: `QSaveFile` cannot work inside
+  the App Sandbox at all.** **[macOS]** With reads going through Qt the signer
+  could open files but still not save one. `QSaveFile` writes to a temp file
+  *beside* the target, through a `QTemporaryFileEngine` it constructs directly
+  — bypassing `QAbstractFileEngine::create()`, so the security-scoped engine
+  never sees it — and the panel grants the chosen *file*, not its *directory*,
+  so creating that sibling is denied. `setDirectWriteFallback(true)` is Qt's
+  documented answer and does reach the engine, but Qt guards it on
+  `errno == EACCES` while sandbox denials return `EPERM`, so it never fires.
+  Sandboxed writes now use `QFile` opened `WriteOnly|Truncate` on the final
+  path — what `QSaveFile`'s own `openDirectly()` would have done. The
+  consequence is honest and unavoidable: **the sandboxed save is not atomic**,
+  because the sandbox forbids write-temp-then-rename. Everywhere else saving
+  is unchanged and still fsyncs before an atomic rename.
+
+- **Recovery copies and mode presets no longer disappear into the container.**
+  **[macOS]** Both were written to `~/Documents/Neight`, which inside the
+  sandbox is the *container's* Documents: the writes succeeded, but into a
+  folder no user can find in Finder and that macOS deletes with the app — so
+  the preset feature's promise to survive app deletion was false in the Store
+  build. Sandboxed, both now live in Application Support, where app-private
+  state belongs, and every dialog that names the folder shows the resolved
+  path instead of a hardcoded one. Off the sandbox nothing moves.
+
+- **PDF export reports failure instead of claiming success.** **[macOS]**
+  `QPrinter` writes through `QFile`, so the sandbox grant does apply — but
+  neither `setOutputFileName()` nor `print_()` tells the caller when the open
+  failed, so a denied export still showed its success dialog over a file that
+  was never written. Both exporters now verify the file exists and is
+  non-empty first.
+
+- **"View Recovery Folder" works in the Store build.** **[macOS]** It shelled
+  out to `/usr/bin/open`, which a sandboxed process may not exec. It now goes
+  through NSWorkspace via `QDesktopServices`, and falls back to showing the
+  path when that is refused.
+
+- **"Open .md files with Neight" no longer offers what it cannot do.**
+  **[macOS]** Setting the Launch Services default handler is forbidden inside
+  the sandbox, so the button always failed. In the Store build it is now
+  disabled, with a note pointing at Finder's Get Info → Open with → Change All
+  — the same honesty the Windows side already shows for its `UserChoice`
+  limitation. Reading the current handler is still permitted, so the dialog
+  keeps reporting the state it cannot change.
+
+- **The Open and Save panels start somewhere the user recognises.**
+  **[macOS]** They were seeded from `Path.home()`, which sandboxed is the
+  container root — so the Save panel opened in
+  `~/Library/Containers/…/Data` and a file saved there effectively vanished.
+  Sandboxed, they now start in the user's real Documents (found via the passwd
+  database, which the sandbox does not redirect), and a container path is
+  never persisted as the remembered directory. Windows, Linux and the direct
+  macOS download keep the `Path.home()` start they have always had.
+
+- **Sandbox detection no longer depends on how the app was launched.**
+  **[macOS]** It keyed off `APP_SANDBOX_CONTAINER_ID`, which the OS sets for a
+  Terminal launch but not under LaunchServices — a double click, which is how
+  every Store user launches. It now asks the OS directly via
+  `sandbox_check()`, with the environment variable as fallback.
+
+---
+
 ## 2026.083 — 2026-08-22
 
 Rebuilds the macOS download so it runs on macOS 15 and later, instead of

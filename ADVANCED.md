@@ -78,7 +78,12 @@ The built-in Writer and Techie modes are starting points. If you have invested t
 
 The next time you select **Writer (சொல்வெளி) Mode** or **Techie (நுட்பர்) Mode**, Neight silently loads your saved preset instead of the built-in defaults. If the file is missing or unreadable for any reason, Neight falls back to its built-in defaults automatically — nothing breaks.
 
-Both files survive app deletion and reinstallation. They are plain JSON and can be inspected, edited by hand, or copied between machines.
+Both files are plain JSON and can be inspected, edited by hand, or copied between machines. In the direct download and on Windows they also survive app deletion and reinstallation.
+
+> **Mac App Store version:** from 2026.085 these files live in
+> `~/Library/Application Support/Neight/` instead. See
+> [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+
 
 ## Reading Time
 
@@ -238,13 +243,18 @@ When you have typed content but have not yet named or saved the file, Neight sil
 
 - On the first autosave tick after the window opens with unsaved content, Neight creates a recovery file inside `~/Documents/Neight/` with a name like `recovery-12345-678901.txt` (process ID + random number).
 - Each subsequent tick overwrites the same file so only one copy accumulates per window session.
-- The write uses the same atomic pattern as normal autosave: a temp file is written and fsync'd first, then renamed over the previous copy — the recovery file is never left in a corrupt state.
+- The write is atomic: a temp file is written and fsync'd first, then renamed over the previous copy — the recovery file is never left in a corrupt state. This holds in every build, the Mac App Store one included, because recovery copies are written inside Neight's own folder rather than to a file you picked.
 - **The recovery file is deleted automatically** the moment you save the document (giving it a real name), open a different file, start a new document, or close the window and choose **Don't Save**. You do not need to clean up manually during normal use.
 - The feature is completely silent — no status bar message, no notification.
 
 ### Accessing recovery files
 
 **File → View Recovery Folder** opens `~/Documents/Neight/` in Finder (macOS) or Explorer (Windows). The folder is created automatically if it does not yet exist.
+
+> **Mac App Store version:** from 2026.085 these files live in
+> `~/Library/Application Support/Neight/` instead. See
+> [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+
 
 **File → Empty Recovery Folder** permanently deletes all `recovery-*.txt` and `recovery-*.md` files in the folder. A confirmation dialog warns before proceeding, and the file belonging to the current window (if any) is always skipped. Use this periodically to keep the folder tidy.
 
@@ -302,6 +312,41 @@ The first launch after upgrading to this behaviour performs a **one-time migrati
 
 **Help → Debug Info** always shows the path actually in use. Do not assume — check there.
 
+### The Mac App Store version keeps its files elsewhere
+
+From **2026.085**, the Mac App Store build keeps presets and recovery copies in
+`~/Library/Application Support/Neight/` rather than `~/Documents/Neight/`.
+
+App Store apps run inside a **sandbox**, and inside it `~` does not mean your
+home folder — macOS redirects it into a private container at
+`~/Library/Containers/com.murasu.neight/Data/`. Writing to `~/Documents/Neight/`
+from in there succeeds, which is why this went unnoticed for so long, but the
+files land in the *container's* Documents folder: somewhere Finder does not show
+you, and somewhere macOS deletes along with the app. A preset that promises to
+outlive the app, sitting in a folder that does not, is worse than one that is
+honestly app-private — so the sandboxed build puts both kinds of file where a
+sandboxed app is meant to keep its own state.
+
+Two consequences worth knowing:
+
+- **Presets do not survive deleting the App Store version.** They are plain
+  JSON, so copy them somewhere else first if you want to keep them.
+- **Every dialog that names the folder shows the resolved path.**
+  **File → View Recovery Folder** and the preset confirmation dialogs tell you
+  where the files actually are on your machine. Read the path they show rather
+  than assuming from this document.
+
+The Open and Save dialogs are also affected: they used to start in `~`, which
+inside the sandbox is that same container root — an unfamiliar folder where a
+saved file effectively disappeared. From 2026.085 they start in your real
+Documents folder, and can navigate anywhere from there as normal.
+
+**The direct download, Windows and Linux are unaffected.** None of them is
+sandboxed, and all of them keep using `~/Documents/Neight/`.
+
+> The version live on the Mac App Store today predates this and cannot open or
+> save files at all. Everything in this section applies from 2026.085 onward.
+
 ### Accessing settings files
 
 **Help → Debug Info** shows the exact paths to `settings.json` and today's autosave log, with buttons alongside each:
@@ -345,7 +390,12 @@ User mode presets (see [Save Presets](#save-presets-power-user-feature) above) a
 - `~/Documents/Neight/writer_mode.json`
 - `~/Documents/Neight/techie_mode.json`
 
-These files are plain JSON, survive app reinstallation, and can be copied between machines.
+These files are plain JSON and can be copied between machines. Outside the Mac App Store build they also survive app reinstallation.
+
+> **Mac App Store version:** from 2026.085 these files live in
+> `~/Library/Application Support/Neight/` instead. See
+> [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+
 
 ### Recovery folder
 
@@ -358,6 +408,11 @@ with preset files; they are separate from `settings.json`. This exact
 capitalization also applies on macOS, where paths can be case-sensitive. Files
 here are cleaned up automatically during normal use. Use **File → Empty
 Recovery Folder** to delete any leftovers.
+
+> **Mac App Store version:** from 2026.085 these files live in
+> `~/Library/Application Support/Neight/` instead. See
+> [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+
 
 ---
 
@@ -415,7 +470,7 @@ Deleting or replacing `Neight.app` does not touch that folder, so an update keep
 
 **One exception, and it applies only once.** Older versions stored `settings.json` *inside* the bundle, at a path such as `/Applications/Neight.app/Contents/MacOS/settings.json`. Those settings are migrated on the first launch of the new version — but only if the old bundle is still there to read from. If you delete the old `Neight.app` before launching the new one, the settings inside it are already gone. Check **Help → Debug Info** to see which path is in use.
 
-**To protect your preferences across updates,** use **Save Presets** (below). Preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset.
+**To protect your preferences across updates,** use **Save Presets** (below). In the direct download, preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset. In the Mac App Store build from 2026.085 they live inside the app's sandbox container instead and are deleted with the app, so copy them somewhere else first — see [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
 Note that `settings.json` also contains a few machine-specific values (last-opened file path, window size). If you move to a new machine those will not apply, but font, theme, line spacing, autosave interval and the rest carry over cleanly.
 
@@ -431,5 +486,13 @@ Use **Settings → Save current settings to → Writer Mode Preset** or **Techie
 ```
 
 These files live in your `Documents` folder — completely separate from the app and from `settings.json`. They survive app deletion, reinstallation, and a factory reset of `settings.json`. They are plain JSON and can be backed up, copied between machines, or opened in any text editor.
+
+> **Mac App Store version:** from 2026.085 these files live in
+> `~/Library/Application Support/Neight/` instead. See
+> [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+>
+> There they are *inside* the app's container, so they do **not** survive
+> deleting the app. Copy them out yourself to keep them.
+
 
 The next time you select **Help → Writer (சொல்வெளி) Mode** or **Help → Techie (நுட்பர்) Mode**, Neight loads your saved preset and restores all your preferences in one click.

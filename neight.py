@@ -17,7 +17,6 @@ import html
 import threading
 import random
 import shutil
-import base64
 import urllib.request
 import platform
 from datetime import datetime
@@ -26,7 +25,7 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 # Version information
-VERSION = "2026.083"
+VERSION = "2026.086"
 
 DEFAULT_GOOGLE_SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 DEFAULT_SORKUVAI_SEARCH_URL_PREFIX = "https://sorkuvai.tn.gov.in/?q="
@@ -46,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 # In Qt6/PySide6, QAction and QShortcut live in QtGui (moved from QtWidgets in Qt5)
 from PySide6.QtGui import QKeySequence, QPainter, QFont, QFontDatabase, QTextCursor, QTextBlockFormat, QAction, QShortcut, QColor, QPalette, QGuiApplication, QTextDocument, QDesktopServices, QIcon, QFileOpenEvent
-from PySide6.QtCore import Qt, QRect, QFileInfo, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QLockFile
+from PySide6.QtCore import Qt, QRect, QFile, QFileInfo, QIODevice, QTimer, Signal, QUrl, QRectF, QPoint, QPointF, QEvent, QLockFile
 QT_LIB = "PySide6"
 
 # PDF print-support imports (optional — export features require QtPrintSupport)
@@ -762,7 +761,15 @@ def _macos_set_default_handler(uti: str, bundle_id: str) -> bool:
     Unlike Windows, macOS lets an application set itself as the default handler
     through Launch Services, so this genuinely changes the default rather than
     only adding an "Open With" entry.
+
+    Except inside the App Sandbox, where writing the Launch Services handler
+    database is not permitted -- so the Mac App Store build refuses here rather
+    than calling and failing opaquely.  Reading the current handler
+    (_macos_default_handler) is allowed and still works, which is why the
+    dialog can report the state it cannot change.
     """
+    if _macos_is_sandboxed():
+        return False
     cf, ls = _macos_launch_services()
     if cf is None or ls is None or not bundle_id:
         return False
@@ -796,334 +803,297 @@ def _macos_markdown_is_default() -> bool:
 
 
 # ----------------------------------------------------------
-# macOS App Sandbox — security-scoped access to user-picked files
+# macOS App Sandbox — reading and writing user-picked files
 # ----------------------------------------------------------
 # Inside the Mac App Store build Neight runs sandboxed, and the only files it
-# may read are ones the user pointed at through the native Open panel (or handed
-# over from Finder).  macOS grants that access as a "sandbox extension" attached
-# to the run, and the grant is gone the moment the app relaunches -- and, on
-# recent macOS, can lapse between the panel closing and Python's open() call,
-# which is what produced "Operation not permitted" on files the user had just
-# picked.  A stat() on the path still succeeds in that state because sandbox
-# rules separate file-read-metadata from file-read-data, which is why the
-# failure looked so much like a bug in the path rather than in the permission.
+# may touch are ones the user pointed at through the native Open/Save panel (or
+# handed over from Finder).  On Qt 6.11, *Qt itself* owns that access: when the
+# sandbox is active QtCore registers a security-scoped file engine
+# (qt.core.io.security-scoped-fileengine) which consumes the Powerbox grant the
+# moment the panel closes, converts it into a bookmark in its own store
+# (SecurityScopedBookmarks.plist in the container), and thereafter re-opens the
+# grant transparently — but only for I/O that goes through Qt's file classes.
 #
-# The fix is a security-scoped bookmark: a token minted while access is alive
-# that can be redeemed for access later.  Minting one needs
-# com.apple.security.files.bookmarks.app-scope, which is why that entitlement is
-# in packaging/Neight.entitlements alongside files.user-selected.read-write.
+# Python's open()/pathlib bypass Qt's file engines entirely, so a plain read of
+# a just-picked file is denied with EPERM, while the very same path opens fine
+# through QFile.  A signed diagnostic run (2026-08-23, see
+# packaging/SIGNER-DIAGNOSTIC-RUN.md and the session note of the same date)
+# proved this end to end: at the second Python's open() was denied, QtCore had
+# already minted and stored a valid bookmark for that exact path.
 #
-# Everything here is best-effort and returns None on any failure.  Off macOS, or
-# outside the sandbox, or if the Objective-C bridge cannot be built, callers
-# fall through to a plain open() -- which is exactly what Neight did before, so
-# the worst case is the behaviour we already had.
-#
-# Uses ctypes rather than pyobjc deliberately: the same choice the Carbon and
-# Launch Services helpers above make, and it keeps pyobjc out of requirements
-# and out of the shipped bundle.
+# The rule that follows, and that this section implements: inside the sandbox,
+# every read or write of a user file goes through QFile, keyed by the
+# *exact* path string the dialog returned — Qt looks its bookmark up by the
+# incoming fileName, so canonicalising or resolving the path first would miss
+# it.  Outside the sandbox (Windows, Linux, the unsigned direct download, a
+# development run) nothing here is used and file I/O is the plain Python it
+# always was.  Qt's bookmark store persists across launches, which is what
+# keeps "reopen last file" working in the Store build.
 
-# NSURLBookmarkCreationWithSecurityScope / NSURLBookmarkResolutionWithSecurityScope
-_NS_BOOKMARK_CREATE_SCOPED = 1 << 11
-_NS_BOOKMARK_RESOLVE_SCOPED = 1 << 10
-
-_macos_objc_bridge = None
+_macos_sandbox_state: Optional[bool] = None
 
 
 def _macos_is_sandboxed() -> bool:
     """True when running inside a macOS App Sandbox container.
 
-    Set by the OS for every sandboxed process, so it distinguishes a Store
-    install from a development run or the unsigned direct download, where none
-    of this machinery is needed (or possible -- minting a scoped bookmark
-    requires the entitlement, which an ad-hoc signature cannot carry).
+    Asks the OS via sandbox_check(getpid(), NULL, 0), the supported probe.
+    The APP_SANDBOX_CONTAINER_ID environment variable is only a fallback: it
+    is present under a Terminal launch but absent under LaunchServices — a
+    double-click, which is how every Store user launches — so keying off it
+    alone silently disabled all of this for exactly the people it exists for.
+    (expanduser("~") is not a valid probe either: the sandbox redirects HOME
+    into the container, so the value looks ordinary from in here.)
     """
-    return sys.platform == "darwin" and bool(os.environ.get("APP_SANDBOX_CONTAINER_ID"))
-
-
-def _macos_objc():
-    """Return a small Objective-C message-sending bridge, or None.
-
-    Cached after the first call: loading the frameworks and registering
-    selectors costs more than the calls that use them.
-    """
-    global _macos_objc_bridge
-    if _macos_objc_bridge is not None:
-        return _macos_objc_bridge or None
+    global _macos_sandbox_state
+    if _macos_sandbox_state is not None:
+        return _macos_sandbox_state
     if sys.platform != "darwin":
-        _macos_objc_bridge = False
-        return None
+        _macos_sandbox_state = False
+        return False
     try:
-        import ctypes.util
-        objc = ctypes.CDLL(
-            ctypes.util.find_library("objc") or "/usr/lib/libobjc.dylib"
-        )
-        # Loading Foundation registers NSURL/NSData/NSString with the runtime.
-        ctypes.CDLL(
-            ctypes.util.find_library("Foundation")
-            or "/System/Library/Frameworks/Foundation.framework/Foundation"
-        )
-        objc.objc_getClass.restype = ctypes.c_void_p
-        objc.objc_getClass.argtypes = [ctypes.c_char_p]
-        objc.sel_registerName.restype = ctypes.c_void_p
-        objc.sel_registerName.argtypes = [ctypes.c_char_p]
-
-        def send(restype, *argtypes):
-            # objc_msgSend must be cast per signature: it is a variadic trampoline
-            # and ctypes has to know the exact argument types to marshal a call
-            # correctly on arm64.
-            signature = ctypes.CFUNCTYPE(
-                restype, ctypes.c_void_p, ctypes.c_void_p, *argtypes
-            )
-            return ctypes.cast(objc.objc_msgSend, signature)
-
-        bridge = {
-            "cls": lambda name: objc.objc_getClass(name.encode()),
-            "sel": lambda name: objc.sel_registerName(name.encode()),
-            "send": send,
-        }
-        if not bridge["cls"]("NSURL"):
-            _macos_objc_bridge = False
-            return None
-        _macos_objc_bridge = bridge
-        return bridge
+        libsandbox = ctypes.CDLL("/usr/lib/system/libsystem_sandbox.dylib")
+        libsandbox.sandbox_check.restype = ctypes.c_int
+        libsandbox.sandbox_check.argtypes = [
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+        ]
+        # With a NULL operation this returns nonzero iff the process is inside
+        # a sandbox, independent of how it was launched.
+        _macos_sandbox_state = bool(libsandbox.sandbox_check(os.getpid(), None, 0))
     except Exception:
-        _macos_objc_bridge = False
-        return None
+        _macos_sandbox_state = bool(os.environ.get("APP_SANDBOX_CONTAINER_ID"))
+    return _macos_sandbox_state
 
 
-def _macos_nsurl_for_path(bridge, path: str):
-    """Build an NSURL for a filesystem path.  Autoreleased -- do not release."""
-    nsstring = bridge["send"](ctypes.c_void_p, ctypes.c_char_p)(
-        bridge["cls"]("NSString"),
-        bridge["sel"]("stringWithUTF8String:"),
-        str(path).encode("utf-8"),
-    )
-    if not nsstring:
-        return None
-    return bridge["send"](ctypes.c_void_p, ctypes.c_void_p)(
-        bridge["cls"]("NSURL"), bridge["sel"]("fileURLWithPath:"), nsstring
-    )
+# Inside the sandbox HOME is redirected into the app container, so Path.home()
+# is ~/Library/Containers/<id>/Data.  That is the right place for app state and
+# the wrong place for anything a person is meant to find, which is why the
+# helpers below exist and are deliberately used in different places.
+
+_CONTAINER_PATH_MARKER = "/Library/Containers/"
 
 
-def _macos_nsstring_to_str(bridge, nsstring) -> str:
-    if not nsstring:
-        return ""
-    raw = bridge["send"](ctypes.c_char_p)(nsstring, bridge["sel"]("UTF8String"))
-    return raw.decode("utf-8", errors="replace") if raw else ""
+def _macos_real_home() -> Path:
+    """The user's actual home directory, not the sandbox container.
 
-
-def macos_create_bookmark(path) -> Optional[bytes]:
-    """Mint a security-scoped bookmark for a path the user just chose.
-
-    Call this while access is still live -- immediately after the Open panel
-    returns, or on a Finder-delivered QFileOpenEvent.  Returns None outside the
-    sandbox, or whenever macOS declines, which is the normal answer in an
-    unsandboxed development run.
+    The passwd database is not redirected by the sandbox, so getpwuid is the
+    way back to the real path when HOME has been rewritten.
     """
-    if not _macos_is_sandboxed():
-        return None
-    bridge = _macos_objc()
-    if bridge is None:
-        return None
-    try:
-        url = _macos_nsurl_for_path(bridge, path)
-        if not url:
-            return None
-        error = ctypes.c_void_p(0)
-        data = bridge["send"](
-            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_void_p),
-        )(
-            url,
-            bridge["sel"](
-                "bookmarkDataWithOptions:includingResourceValuesForKeys:"
-                "relativeToURL:error:"
-            ),
-            _NS_BOOKMARK_CREATE_SCOPED, None, None, ctypes.byref(error),
-        )
-        if not data:
-            return None
-        length = bridge["send"](ctypes.c_ulong)(data, bridge["sel"]("length"))
-        raw = bridge["send"](ctypes.c_void_p)(data, bridge["sel"]("bytes"))
-        if not raw or not length:
-            return None
-        return ctypes.string_at(raw, length)
-    except Exception:
-        return None
-
-
-class _MacosScopedAccess:
-    """Hold a security-scoped grant open for the duration of a file operation.
-
-    Used as a context manager.  ``path`` is the path to actually read or write:
-    the bookmark resolves to macOS's own canonical URL, which is the one the
-    grant is attached to, so a symlinked or FileProvider-backed location is
-    reached by the path the OS recorded rather than the one the user saw.
-    Falls back to the caller's path when there is nothing to resolve.
-    """
-
-    def __init__(self, path, bookmark: Optional[bytes]):
-        self.path = str(path)
-        self._bookmark = bookmark
-        self._url = None
-        self._started = False
-
-    def __enter__(self):
-        if not _macos_is_sandboxed() or not self._bookmark:
-            return self
-        bridge = _macos_objc()
-        if bridge is None:
-            return self
+    if sys.platform == "darwin":
         try:
-            nsdata = bridge["send"](ctypes.c_void_p, ctypes.c_char_p, ctypes.c_ulong)(
-                bridge["cls"]("NSData"),
-                bridge["sel"]("dataWithBytes:length:"),
-                self._bookmark, len(self._bookmark),
-            )
-            if not nsdata:
-                return self
-            stale = ctypes.c_byte(0)
-            error = ctypes.c_void_p(0)
-            url = bridge["send"](
-                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_byte), ctypes.POINTER(ctypes.c_void_p),
-            )(
-                bridge["cls"]("NSURL"),
-                bridge["sel"](
-                    "URLByResolvingBookmarkData:options:relativeToURL:"
-                    "bookmarkDataIsStale:error:"
-                ),
-                nsdata, _NS_BOOKMARK_RESOLVE_SCOPED, None,
-                ctypes.byref(stale), ctypes.byref(error),
-            )
-            if not url:
-                return self
-            started = bridge["send"](ctypes.c_byte)(
-                url, bridge["sel"]("startAccessingSecurityScopedResource")
-            )
-            if not started:
-                # Apple documents stopAccessing... on a URL that never started as
-                # undefined behaviour, and in practice it tears down the grant the
-                # Open panel already issued.  Never pair a stop with a failed start.
-                return self
-            # Retain: the URL is autoreleased, and the grant lives as long as it does.
-            bridge["send"](ctypes.c_void_p)(url, bridge["sel"]("retain"))
-            self._url = url
-            self._started = True
-            resolved = _macos_nsstring_to_str(
-                bridge, bridge["send"](ctypes.c_void_p)(url, bridge["sel"]("path"))
-            )
-            if resolved:
-                self.path = resolved
+            import pwd
+            real = pwd.getpwuid(os.getuid()).pw_dir
+            if real:
+                return Path(real)
         except Exception:
             pass
-        return self
+    return Path.home()
 
-    def __exit__(self, exc_type, exc, tb):
-        if not self._started or not self._url:
-            return False
-        try:
-            bridge = _macos_objc()
-            if bridge is not None:
-                bridge["send"](None)(
-                    self._url, bridge["sel"]("stopAccessingSecurityScopedResource")
-                )
-                bridge["send"](None)(self._url, bridge["sel"]("release"))
-        except Exception:
-            pass
-        self._url = None
-        self._started = False
+
+def _is_container_path(path) -> bool:
+    """True for a path inside a macOS app container."""
+    try:
+        return _CONTAINER_PATH_MARKER in str(path)
+    except Exception:
         return False
 
 
-def macos_scoped_access(path, bookmark: Optional[bytes]) -> _MacosScopedAccess:
-    """Context manager granting sandbox access to ``path`` for its body.
+def _default_start_directory() -> Path:
+    """Where the Open and Save panels should start.
 
-    Yields an object whose ``.path`` is the path to open.  A no-op everywhere
-    the sandbox is not involved, so callers can wrap unconditionally.
+    Seeded from Path.home() this used to be the container root in the Store
+    build: a folder the user does not recognise, and where a file they saved
+    effectively disappeared.  Point at their real Documents instead.  The panel
+    can still navigate anywhere, and Powerbox grants whatever they actually
+    pick, so this only decides where they land first.
+
+    Metadata reads are permitted in the sandbox even without a grant, so the
+    is_dir() probe here does not need one.
+
+    Only the sandboxed build changes: Windows, Linux and the direct macOS
+    download keep the plain Path.home() they have always started from, where
+    it means what the user expects.
     """
-    return _MacosScopedAccess(path, bookmark)
-
-
-# Bookmarks are kept beside the other macOS support files.  Inside the sandbox
-# Path.home() is the container, so this resolves to the container's own
-# Application Support directory, which is always writable without any grant.
-_SANDBOX_BOOKMARK_LIMIT = 200
-_sandbox_bookmarks: Optional[dict] = None
-
-
-def _sandbox_bookmark_store_path() -> Path:
-    return (
-        Path.home() / "Library" / "Application Support" / "Neight"
-        / "sandbox-bookmarks.json"
-    )
-
-
-def _load_sandbox_bookmarks() -> dict:
-    """Load the path -> base64 bookmark map, or an empty one."""
-    global _sandbox_bookmarks
-    if _sandbox_bookmarks is not None:
-        return _sandbox_bookmarks
-    _sandbox_bookmarks = {}
     if not _macos_is_sandboxed():
-        return _sandbox_bookmarks
+        return Path.home()
+    home = _macos_real_home()
+    documents = home / "Documents"
     try:
-        raw = json.loads(_sandbox_bookmark_store_path().read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            _sandbox_bookmarks = {
-                str(k): str(v) for k, v in raw.items() if isinstance(v, str)
-            }
-    except Exception:
-        # A missing or corrupt store is not an error: every bookmark in it can be
-        # re-minted the next time the user picks the file.
+        if documents.is_dir():
+            return documents
+    except OSError:
         pass
-    return _sandbox_bookmarks
+    return home
 
 
-def remember_sandbox_access(path) -> None:
-    """Record a redeemable grant for a file the user has just chosen.
+# Opt-in diagnostics for the sandboxed I/O path.
+#
+# Every build that can exercise this code end to end is signed on someone
+# else's machine — reproducing it locally needs an Apple developer identity (a
+# plain Developer ID or Apple Development signature is enough; the 2026-08-23
+# diagnostic run established that Powerbox does vend grants to such a build,
+# no provisioning profile required).  Until such an identity is available
+# here, this log is how a signed run elsewhere reports what actually happened.
+#
+# With NEIGHT_SANDBOX_DIAG set, the file-open and save paths narrate
+# themselves into a log inside the app container.  Unset — which is every
+# user's build — nothing is written and nothing is read from disk; the whole
+# cost is an environment lookup.
+_sandbox_diag_header_written = False
 
-    Must be called while the grant is live -- straight after the Open or Save
-    panel returns, or on a Finder-delivered QFileOpenEvent -- because minting a
-    bookmark is itself an access to the file.  Silent no-op outside the sandbox.
+
+def _sandbox_diag_enabled() -> bool:
+    return bool(os.environ.get("NEIGHT_SANDBOX_DIAG"))
+
+
+def _sandbox_diag(message: str) -> None:
+    """Append one timestamped line to the sandbox diagnostics log.
+
+    Best-effort and silent on failure: a diagnostic that can break the thing it
+    is diagnosing is worse than no diagnostic.  Inside the sandbox Path.home()
+    is the container, so this lands somewhere writable without any grant.
     """
-    if not _macos_is_sandboxed():
+    global _sandbox_diag_header_written
+    if not _sandbox_diag_enabled():
         return
-    bookmark = macos_create_bookmark(path)
-    if not bookmark:
-        return
-    store = _load_sandbox_bookmarks()
-    key = str(path)
-    # Re-insert at the end so the trim below drops the least recently used.
-    store.pop(key, None)
-    store[key] = base64.b64encode(bookmark).decode("ascii")
-    while len(store) > _SANDBOX_BOOKMARK_LIMIT:
-        store.pop(next(iter(store)))
     try:
-        target = _sandbox_bookmark_store_path()
+        target = (
+            Path.home() / "Library" / "Application Support" / "Neight"
+            / "sandbox-diagnostics.log"
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_text(target, json.dumps(store, indent=2))
+        with open(target, "a", encoding="utf-8") as handle:
+            if not _sandbox_diag_header_written:
+                # Identify the build in the log itself: the file is read by
+                # someone who was not at the keyboard when it was written.
+                _sandbox_diag_header_written = True
+                handle.write(
+                    f"\n=== Neight {VERSION} — {datetime.now():%Y-%m-%d %H:%M:%S} — "
+                    f"sandboxed={_macos_is_sandboxed()} "
+                    f"container={os.environ.get('APP_SANDBOX_CONTAINER_ID')!r} ===\n"
+                )
+            handle.write(f"{datetime.now():%H:%M:%S.%f}"[:-3] + f"  {message}\n")
     except Exception:
-        # Losing the store only costs the user a re-pick; never break the open.
         pass
 
 
-def sandbox_bookmark_for(path) -> Optional[bytes]:
-    """Return the stored bookmark for a path, or None."""
-    if not _macos_is_sandboxed():
-        return None
-    encoded = _load_sandbox_bookmarks().get(str(path))
-    if not encoded:
-        return None
+def _sandbox_read_bytes(path) -> bytes:
+    """Read a user-picked file through Qt so its sandbox grant applies.
+
+    Only for the sandboxed macOS build; callers gate on _macos_is_sandboxed().
+    ``path`` must be the string the file dialog (or QFileOpenEvent) returned,
+    untouched — Qt's security-scoped file engine looks its bookmark up by the
+    incoming fileName, and a resolved or canonicalised variant misses it.
+
+    Raises PermissionError when Qt reports the open was denied, OSError for
+    anything else, both carrying Qt's own errorString().
+    """
+    qfile = QFile(str(path))
+    if not qfile.open(QIODevice.OpenModeFlag.ReadOnly):
+        error = qfile.errorString()
+        _sandbox_diag(f"read: QFile open FAILED for {path} ({error})")
+        if qfile.error() == QFile.FileError.PermissionsError:
+            raise PermissionError(1, error, str(path))
+        raise OSError(f"{error}: {path}")
     try:
-        return base64.b64decode(encoded)
-    except Exception:
-        return None
+        raw = bytes(qfile.readAll().data())
+    finally:
+        qfile.close()
+    _sandbox_diag(f"read: QFile ok for {path} ({len(raw)} bytes)")
+    return raw
 
 
-def sandbox_access(path) -> _MacosScopedAccess:
-    """Open scoped access to ``path`` using whatever grant we have stored."""
-    return macos_scoped_access(path, sandbox_bookmark_for(path))
+def _sandbox_write_text(path, text: str, should_commit=None) -> bool:
+    """Write a user file through Qt so its sandbox grant applies.
+
+    The sandboxed counterpart of _atomic_write_text, with the same contract:
+    returns True when committed, False when ``should_commit`` withdrew the
+    write, raises on failure.
+
+    ``path`` must be the string the file dialog returned, untouched — Qt's
+    security-scoped file engine looks its bookmark up by the incoming
+    fileName, and a resolved or canonicalised variant misses it.
+
+    **Not QSaveFile, deliberately.**  QSaveFile cannot work inside the App
+    Sandbox, for two compounding reasons in Qt's own qsavefile.cpp:
+
+      * It writes to a temp file beside the target, created through a
+        QTemporaryFileEngine it constructs *directly* — bypassing
+        QAbstractFileEngine::create(), so the security-scoped engine is never
+        consulted and could not redirect it anyway.  The panel's grant covers
+        the chosen file, not its directory, so that creation is denied.
+      * setDirectWriteFallback(True) is the documented escape hatch, and it
+        does reach the engine handler, but Qt guards it on `errno == EACCES`.
+        macOS sandbox denials return EPERM, so the fallback never fires.
+
+    QFile has neither problem: QFilePrivate::engine() goes through
+    QAbstractFileEngine::create(fileName), which iterates registered handlers.
+    That is why the read path works, and this is the same door.  It is what
+    QSaveFile's own openDirectly() would have done had it been reached.
+
+    **This write is not atomic**, and cannot be: the sandbox forbids the
+    sibling-temp-then-rename pattern _atomic_write_text relies on.  A crash
+    mid-write can leave the file truncated.  Consequently ``should_commit`` is
+    consulted once, immediately before the destructive open — after that there
+    is nothing left to withdraw.
+
+    Unlike _atomic_write_text this does not create the parent directory: every
+    caller here writes to a path a panel handed back, whose directory exists.
+
+    UTF-8, no newline translation — identical bytes to what _atomic_write_text
+    produces on macOS, where newline=None translates nothing.
+    """
+    if should_commit is not None and not should_commit():
+        return False
+
+    payload = text.encode("utf-8")
+    qfile = QFile(str(path))
+    mode = QIODevice.OpenModeFlag.WriteOnly | QIODevice.OpenModeFlag.Truncate
+    if not qfile.open(mode):
+        error = qfile.errorString()
+        denied = qfile.error() == QFile.FileError.PermissionsError
+        _sandbox_diag(f"save: QFile open FAILED for {path} ({error})")
+        # A file delivered by Finder "Open With" carries a process-wide grant
+        # that POSIX open() honours directly, without any bookmark for Qt's
+        # engine to redeem.  Costs nothing when the Qt path works.
+        try:
+            with open(str(path), "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            _sandbox_diag(f"save: python fallback FAILED for {path} ({exc})")
+            if denied:
+                raise PermissionError(1, error, str(path))
+            raise OSError(f"{error}: {path}")
+        _sandbox_diag(f"save: python fallback ok for {path} ({len(payload)} bytes)")
+        return True
+
+    try:
+        offset = 0
+        while offset < len(payload):
+            # QIODevice.write can be short; the loop almost always runs once.
+            written = qfile.write(payload[offset:])
+            if written <= 0:
+                error = qfile.errorString()
+                _sandbox_diag(f"save: QFile write FAILED for {path} ({error})")
+                raise OSError(f"{error}: {path}")
+            offset += written
+        if not qfile.flush():
+            error = qfile.errorString()
+            _sandbox_diag(f"save: QFile flush FAILED for {path} ({error})")
+            raise OSError(f"{error}: {path}")
+    finally:
+        # close() flushes but swallows the error, so the check below is the
+        # one that can see a write that failed on the way out.
+        qfile.close()
+
+    if qfile.error() != QFile.FileError.NoError:
+        error = qfile.errorString()
+        _sandbox_diag(f"save: QFile close FAILED for {path} ({error})")
+        raise OSError(f"{error}: {path}")
+
+    _sandbox_diag(f"save: QFile ok for {path} ({len(payload)} bytes)")
+    return True
 
 
 def _win_open_default_apps_settings() -> bool:
@@ -3027,7 +2997,7 @@ class Notepad(QMainWindow):
         self.setMinimumWidth(520)  # Ensures the right-pinned Settings menu is never cut off
 
         self.settings = SettingsManager()
-        self.default_directory = Path.home()
+        self.default_directory = _default_start_directory()
         self._restore_maximized = False
         self._initial_file = initial_file
         self._restore_last_session = bool(restore_last_session)
@@ -3559,12 +3529,12 @@ class Notepad(QMainWindow):
             self.engineer_act.setFont(_tamil_menu_font)
         self.save_as_solveli_preset_act = QAction("Writer Mode Preset", self)
         self.save_as_solveli_preset_act.setToolTip(
-            "Save your current settings as the Writer Mode preset in your Documents folder. "
+            "Save your current settings as the Writer Mode preset. "
             "Next time you choose Writer Mode, this preset will be loaded instead of the built-in defaults."
         )
         self.save_as_engineer_preset_act = QAction("Techie Mode Preset", self)
         self.save_as_engineer_preset_act.setToolTip(
-            "Save your current settings as the Techie Mode preset in your Documents folder. "
+            "Save your current settings as the Techie Mode preset. "
             "Next time you choose Techie Mode, this preset will be loaded instead of the built-in defaults."
         )
 
@@ -4190,61 +4160,79 @@ class Notepad(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Invalid file path:\n{path}")
             return False
 
-        # Everything from here to the read happens under whatever sandbox grant
-        # we hold for this path.  Outside the Mac App Store build this is a
-        # no-op wrapper and read_path is just path_obj.  Inside it, read_path is
-        # the canonical location macOS attached the grant to, which is not always
-        # the path the user saw -- a FileProvider-backed OneDrive or Dropbox file
-        # resolves elsewhere, and reading the path as typed is denied.
-        with sandbox_access(path_obj) as grant:
-            read_path = Path(grant.path)
+        # Inside the Mac App Store sandbox every byte of this file must move
+        # through Qt, whose security-scoped file engine holds the grant the
+        # Open panel produced -- Python's open() bypasses that engine and is
+        # denied.  Outside the sandbox this is the plain Python read it always
+        # was.
+        sandboxed = _macos_is_sandboxed()
+        # Qt keys the stored grant on the *incoming* fileName, so every Qt call
+        # below gets the string exactly as it arrived.  path_obj has been
+        # through Path(), which collapses "//" and "./" and rewrites a leading
+        # "~" -- usually a no-op for a dialog-returned path, but precisely the
+        # kind of mismatch that would miss the bookmark lookup.  It is still
+        # what the non-sandboxed branch and every user-facing message use, and
+        # the only form that can carry a "~" Qt would not expand.
+        raw_path = str(path)
+        qt_path = raw_path if (sandboxed and raw_path.startswith("/")) else str(path_obj)
+        if sandboxed:
+            info = QFileInfo(qt_path)
+            exists = info.exists() and info.isFile()
+        else:
+            info = None
+            exists = path_obj.exists() and path_obj.is_file()
+        if not exists:
+            if notify_errors:
+                QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
+            return False
 
-            if not read_path.exists() or not read_path.is_file():
-                if notify_errors:
-                    QMessageBox.warning(self, "File Not Found", f"File not found:\n{path_obj}")
-                return False
+        try:
+            if sandboxed:
+                file_size = info.size()
+            else:
+                file_size = path_obj.stat().st_size
+        except Exception as e:
+            if notify_errors:
+                QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
+            return False
 
-            try:
-                file_size = read_path.stat().st_size
-            except Exception as e:
-                if notify_errors:
-                    QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
-                return False
+        if file_size > self._MAX_OPEN_FILE_BYTES:
+            limit_mb = self._MAX_OPEN_FILE_BYTES // (1024 * 1024)
+            actual_mb = file_size / (1024 * 1024)
+            if notify_errors:
+                QMessageBox.warning(
+                    self,
+                    "File Too Large",
+                    f"This file is {actual_mb:.1f} MB, which exceeds the {limit_mb} MB limit.\n\n"
+                    "Neight is a plain-text editor and is not designed for very large files.",
+                )
+            return False
 
-            if file_size > self._MAX_OPEN_FILE_BYTES:
-                limit_mb = self._MAX_OPEN_FILE_BYTES // (1024 * 1024)
-                actual_mb = file_size / (1024 * 1024)
-                if notify_errors:
-                    QMessageBox.warning(
+        try:
+            if sandboxed:
+                raw_bytes = _sandbox_read_bytes(qt_path)
+            else:
+                raw_bytes = path_obj.read_bytes()
+        except PermissionError as e:
+            # The sandbox refused the read even through Qt, so no grant for
+            # this path survives anywhere; the honest recovery is to let the
+            # user point at the file again through the Open panel, which
+            # produces a fresh one.  Say so, rather than reporting the errno.
+            if notify_errors:
+                if sandboxed:
+                    QMessageBox.critical(
                         self,
-                        "File Too Large",
-                        f"This file is {actual_mb:.1f} MB, which exceeds the {limit_mb} MB limit.\n\n"
-                        "Neight is a plain-text editor and is not designed for very large files.",
+                        "Permission Denied",
+                        f"macOS did not grant Neight access to:\n{path_obj}\n\n"
+                        "Choose the file again with File › Open to restore access.",
                     )
-                return False
-
-            try:
-                raw_bytes = read_path.read_bytes()
-            except PermissionError as e:
-                # The sandbox refused the read.  Either we never held a grant for
-                # this path or it lapsed; either way the honest recovery is to let
-                # the user point at the file again through the Open panel, which
-                # mints a fresh one.  Say so, rather than reporting the errno.
-                if notify_errors:
-                    if _macos_is_sandboxed():
-                        QMessageBox.critical(
-                            self,
-                            "Permission Denied",
-                            f"macOS did not grant Neight access to:\n{path_obj}\n\n"
-                            "Choose the file again with File › Open to restore access.",
-                        )
-                    else:
-                        QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
-                return False
-            except Exception as e:
-                if notify_errors:
+                else:
                     QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
-                return False
+            return False
+        except Exception as e:
+            if notify_errors:
+                QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+            return False
 
         # Decode by explicit BOM first.  A UTF-32 BOM starts with the UTF-16 BOM
         # bytes, so testing UTF-16 first would decode a UTF-32 file into garbage
@@ -4444,13 +4432,6 @@ class Notepad(QMainWindow):
             str(self.default_directory),
             "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)",
         )
-        # Mint the sandbox grant before anything else touches the app: on macOS
-        # the access the Open panel just granted can lapse within milliseconds,
-        # and _post_file_dialog() below crosses into Carbon to resync the
-        # keyboard layout.  Nothing runs between the panel returning and the
-        # bookmark being taken.
-        if path:
-            remember_sandbox_access(path)
         self._post_file_dialog()
         if path:
             self._open_file_path(path)
@@ -4522,10 +4503,6 @@ class Notepad(QMainWindow):
             self._update_export_menu_visibility()
             self._update_title()
             return False
-        # Only now does the file exist, and a bookmark can only be minted for a
-        # file that does: this is the earliest point a Save As target can be
-        # recorded for later autosaves and for reopening after a relaunch.
-        remember_sandbox_access(path)
         self._update_default_directory(Path(path).parent)
         self._update_export_menu_visibility()
         return True
@@ -4542,11 +4519,13 @@ class Notepad(QMainWindow):
             # temp name unique per call, so it can no longer collide with the
             # autosave worker writing the same target.
             #
-            # Saving needs the same sandbox grant reading does, and needs it for
-            # the containing directory too: the atomic write creates a temp file
-            # beside the target before renaming over it.
-            with sandbox_access(path_obj) as grant:
-                _atomic_write_text(Path(grant.path), self.editor.documentText())
+            # In the sandboxed Store build the write must go through Qt for the
+            # same reason the read must: Qt's file engine holds the panel's
+            # grant, Python's open() does not see it.
+            if _macos_is_sandboxed():
+                _sandbox_write_text(path, self.editor.documentText())
+            else:
+                _atomic_write_text(path_obj, self.editor.documentText())
             # The file now matches what we write, so any pending conversion has
             # happened and must not be reported again.
             self._source_encoding = "utf-8"
@@ -4609,12 +4588,18 @@ class Notepad(QMainWindow):
                 # same file inside this window.  should_commit is evaluated just
                 # before the rename, so a snapshot superseded mid-write is dropped
                 # rather than written over the newer content.
-                # The sandbox grant is process-wide, so opening it here on the
-                # worker thread is as good as on the UI thread — and it has to be
-                # here, because the grant must still be open when the write runs.
-                with sandbox_access(path) as grant:
+                # In the sandboxed Store build the write goes through Qt instead,
+                # whose file engine holds the grant; the grant is process-wide,
+                # so redeeming it on this worker thread works the same as on the
+                # UI thread.
+                if _macos_is_sandboxed():
+                    committed = _sandbox_write_text(
+                        path, text,
+                        should_commit=lambda: generation == self._save_generation,
+                    )
+                else:
                     committed = _atomic_write_text(
-                        Path(grant.path), text,
+                        Path(path), text,
                         should_commit=lambda: generation == self._save_generation,
                     )
                 if committed:
@@ -4679,8 +4664,7 @@ class Notepad(QMainWindow):
         # Generate a unique recovery path the first time we need it.
         if self._recovery_path is None:
             try:
-                folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
-                folder.mkdir(parents=True, exist_ok=True)
+                folder = Notepad._get_app_data_dir()  # creates it if needed
             except Exception:
                 return  # Cannot create folder — skip silently this tick
             rand = random.randint(100_000, 999_999)
@@ -4735,10 +4719,9 @@ class Notepad(QMainWindow):
                 pass
 
     def _view_recovery_folder(self):
-        """Open the recovery folder in Finder (macOS) or Explorer (Windows)."""
+        """Reveal the recovery folder in Finder (macOS) or Explorer (Windows)."""
         try:
-            folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
-            folder.mkdir(parents=True, exist_ok=True)
+            folder = Notepad._get_app_data_dir()  # creates it if needed
         except Exception as e:
             QMessageBox.warning(
                 self, "Recovery Folder",
@@ -4747,10 +4730,20 @@ class Notepad(QMainWindow):
             return
         try:
             if sys.platform == "darwin":
-                subprocess.run(["open", str(folder)], check=False)
+                # NSWorkspace, which Qt uses under openUrl, is the mechanism a
+                # sandboxed app is permitted to reveal a folder with.  The
+                # previous subprocess call to /usr/bin/open could not work in
+                # the Store build: the sandbox does not let a process exec a
+                # binary outside its own bundle.
+                opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
             elif sys.platform == "win32":
                 subprocess.run(["explorer", str(folder)], check=False)
+                opened = True
             else:
+                opened = False
+            if not opened:
+                # Always name the resolved path: inside the sandbox this folder
+                # is in Application Support, not where the user would guess.
                 QMessageBox.information(
                     self, "Recovery Folder",
                     f"Recovery folder location:\n{folder}"
@@ -4766,7 +4759,7 @@ class Notepad(QMainWindow):
         folder.  The file this window is currently writing to (if any) is
         never deleted.
         """
-        folder = Path.home() / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
+        folder = Notepad._get_app_data_dir()
         ret = QMessageBox.warning(
             self,
             "Empty Recovery Folder",
@@ -5751,7 +5744,8 @@ class Notepad(QMainWindow):
             
             # Print to PDF
             doc.print_(printer)
-            
+            self._verify_pdf_written(save_path)
+
             self.status.showMessage(f"Exported to: {save_path}", 3000)
             self._show_export_success_dialog("Text file", save_path)
             
@@ -5760,6 +5754,26 @@ class Notepad(QMainWindow):
                 self,
                 "Export Failed",
                 f"Could not export to PDF:\n{str(e)}"
+            )
+
+    @staticmethod
+    def _verify_pdf_written(save_path: str) -> None:
+        """Raise if QPrinter did not actually produce the PDF.
+
+        QPrinter opens its output through QFile -- so inside the sandbox the
+        panel's grant does apply, the same way it does for a text save -- but
+        neither setOutputFileName() nor QTextDocument.print_() reports a
+        failure to the caller.  Without this the export path shows its success
+        dialog over a file that was never written.
+
+        QFileInfo rather than Path.exists(), so the check goes through the same
+        file engine that did the writing.
+        """
+        info = QFileInfo(save_path)
+        if not info.exists() or info.size() <= 0:
+            raise OSError(
+                "The PDF was not written.  macOS may have denied access to "
+                f"this location:\n{save_path}"
             )
 
     def _show_export_success_dialog(self, export_label: str, save_path: str, note: str = ""):
@@ -6192,7 +6206,8 @@ th {{ background-color: {table_head_bg}; }}
             
             # Print to PDF
             doc.print_(printer)
-            
+            self._verify_pdf_written(save_path)
+
             self.status.showMessage(f"Exported to: {save_path}", 3000)
             
             msg = ""
@@ -6670,13 +6685,32 @@ th {{ background-color: {table_head_bg}; }}
                         md_status.setText(
                             f"Default app for .md files: <b>{html.escape(current)}</b>"
                         )
-                        md_btn.setEnabled(True)
+                        md_btn.setEnabled(not _macos_is_sandboxed())
 
+                sandbox_note = None
                 md_btn = QPushButton("Open .md files with Neight", dialog)
                 md_btn.setToolTip(
                     "Makes Neight the default application for Markdown files "
                     "(net.daringfireball.markdown) via Launch Services."
                 )
+                if _macos_is_sandboxed():
+                    # The Mac App Store build cannot write the Launch Services
+                    # handler database.  Offering a button that always fails is
+                    # worse than saying so and naming the one route that works,
+                    # which is the same honesty the Windows side already shows.
+                    md_btn.setEnabled(False)
+                    md_btn.setToolTip(
+                        "The App Store version of Neight is sandboxed and cannot "
+                        "change this setting."
+                    )
+                    sandbox_note = QLabel(
+                        "To make Neight the default: select a <b>.md</b> file in "
+                        "Finder, press <b>\u2318I</b>, choose Neight under "
+                        "<b>Open with</b>, then click <b>Change All\u2026</b>",
+                        dialog,
+                    )
+                    sandbox_note.setWordWrap(True)
+                    sandbox_note.setStyleSheet("color: palette(mid);")
 
                 def _on_set_md_default() -> None:
                     if _macos_set_default_handler(_MACOS_MARKDOWN_UTI, bundle_id):
@@ -6697,6 +6731,8 @@ th {{ background-color: {table_head_bg}; }}
                 md_btn.clicked.connect(_on_set_md_default)
                 layout.addWidget(md_status)
                 layout.addWidget(md_btn)
+                if sandbox_note is not None:
+                    layout.addWidget(sandbox_note)
                 _refresh_md_status()
                 del is_default
 
@@ -7908,9 +7944,14 @@ th {{ background-color: {table_head_bg}; }}
                 try:
                     self.default_directory = Path(default_dir)
                 except Exception:
-                    self.default_directory = Path.home()
+                    self.default_directory = _default_start_directory()
         else:
-            self.default_directory = Path.home()
+            self.default_directory = _default_start_directory()
+        # Builds before 2026.085 seeded this from Path.home(), which inside the
+        # sandbox is the container -- so a stored container path is stale state
+        # from a build that did not know better, not a place the user chose.
+        if _macos_is_sandboxed() and _is_container_path(self.default_directory):
+            self.default_directory = _default_start_directory()
 
         size_info = data.get("window_size") if isinstance(data, dict) else None
         if isinstance(size_info, dict):
@@ -8276,22 +8317,32 @@ th {{ background-color: {table_head_bg}; }}
         key = Notepad._normalize_line_spacing_preset(preset)
         return mapping.get(key, 100)
 
-    # Presets and recovery copies share one folder under Documents.  Spelled
-    # once, because it used to be spelled two ways: presets wrote to a
-    # lowercase "neight" while recovery used "Neight".  On macOS and Windows
-    # the filesystem is case-insensitive by default, so those were the same
-    # directory and the split was invisible; on a case-sensitive filesystem
-    # they were two, which is the bug this constant closes.
+    # Presets and recovery copies share one folder.  Spelled once, because it
+    # used to be spelled two ways: presets wrote to a lowercase "neight" while
+    # recovery used "Neight".  On macOS and Windows the filesystem is
+    # case-insensitive by default, so those were the same directory and the
+    # split was invisible; on a case-sensitive filesystem they were two, which
+    # is the bug this constant closes.
     USER_DOCUMENTS_DIR_NAME = "Neight"
     _LEGACY_USER_DOCUMENTS_DIR_NAME = "neight"
 
     @staticmethod
-    def _get_user_documents_dir() -> Path:
-        """Return ~/Documents/Neight/, creating it if needed.
+    def _get_app_data_dir() -> Path:
+        """Return the folder holding presets and recovery copies, creating it.
 
-        Keeping presets in a named subfolder makes them easy for end-users
-        to find while avoiding clutter in the top-level Documents folder.
-        Works on macOS, Linux, and modern Windows.
+        Off the sandbox that is ~/Documents/Neight/: a named subfolder end
+        users can find, without cluttering the top of Documents.  macOS,
+        Linux and modern Windows all behave the same here.
+
+        **Inside the Mac App Store sandbox it is Application Support instead.**
+        There ~/Documents is the *container's* Documents -- writes succeed, but
+        the files land in ~/Library/Containers/<id>/Data/Documents/Neight/,
+        which the user never sees in Finder and which is deleted with the app.
+        A preset that claims to survive app deletion, sitting somewhere it does
+        not, is worse than one that is honestly app-private, so the sandboxed
+        build puts both kinds of file where a sandboxed app is meant to put its
+        own state.  Every dialog that names this folder shows the resolved
+        path, not a hardcoded one.
 
         Adopts presets from the old lowercase spelling if they are in a
         genuinely separate directory, which only happens on a case-sensitive
@@ -8299,16 +8350,22 @@ th {{ background-color: {table_head_bg}; }}
         settings migration: copying is reversible, deleting is not.
         """
         home = Path.home()
-        docs = home / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
+        if _macos_is_sandboxed():
+            docs = home / "Library" / "Application Support" / Notepad.USER_DOCUMENTS_DIR_NAME
+            legacy = home / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
+        else:
+            docs = home / "Documents" / Notepad.USER_DOCUMENTS_DIR_NAME
+            legacy = home / "Documents" / Notepad._LEGACY_USER_DOCUMENTS_DIR_NAME
         try:
             docs.mkdir(parents=True, exist_ok=True)
         except OSError:
             return docs  # read-only or unusual FS — callers handle write failures
 
-        legacy = home / "Documents" / Notepad._LEGACY_USER_DOCUMENTS_DIR_NAME
         try:
             # samefile() is the check that matters: where the filesystem folds
             # case these two paths are one directory and there is nothing to do.
+            # Sandboxed, the legacy folder is the container's Documents, where
+            # builds before this one wrote -- same adoption, same reasoning.
             if legacy.is_dir() and not legacy.samefile(docs):
                 for name in ("writer_mode.json", "techie_mode.json"):
                     source, target = legacy / name, docs / name
@@ -8342,7 +8399,7 @@ th {{ background-color: {table_head_bg}; }}
         # Preset files are small JSON objects; anything larger than 512 KB is
         # treated as corrupt / malicious and silently ignored.
         _PRESET_MAX_BYTES = 512 * 1024
-        preset_path = self._get_user_documents_dir() / "writer_mode.json"
+        preset_path = self._get_app_data_dir() / "writer_mode.json"
         _writer_preset_bad = False   # set True when the file must be rewritten
         _writer_preset_bad_reason = ""  # human-readable reason for the status bar
         if preset_path.exists():
@@ -8570,7 +8627,7 @@ th {{ background-color: {table_head_bg}; }}
         # Preset files are small JSON objects; anything larger than 512 KB is
         # treated as corrupt / malicious and silently ignored.
         _PRESET_MAX_BYTES = 512 * 1024
-        preset_path = self._get_user_documents_dir() / "techie_mode.json"
+        preset_path = self._get_app_data_dir() / "techie_mode.json"
         _techie_preset_bad = False   # set True when the file must be rewritten
         _techie_preset_bad_reason = ""  # human-readable reason for the status bar
         if preset_path.exists():
@@ -8801,18 +8858,23 @@ th {{ background-color: {table_head_bg}; }}
             return False
 
     def _save_as_solveli_preset(self):
-        """Save the current configuration to ~/Documents/neight/writer_mode.json.
+        """Save the current configuration to writer_mode.json in the app data folder.
 
-        The file survives app deletion and is loaded automatically the next
-        time the user selects Help \u2192 Writer Mode, replacing the built-in defaults.
+        Loaded automatically the next time the user selects Help \u2192 Writer Mode,
+        replacing the built-in defaults.  Off the sandbox that folder is
+        ~/Documents/Neight/ and the file outlives the app; in the Mac App
+        Store build it is Application Support inside the container, so it does
+        *not* survive deleting the app -- _get_app_data_dir explains why.  The
+        dialog below shows the resolved path either way, so what the user is
+        told is true on their machine.
         """
-        docs = self._get_user_documents_dir()
+        docs = self._get_app_data_dir()
         preset_path = docs / "writer_mode.json"
         reply = QMessageBox.question(
             self,
             "Save Writer Mode Preset",
-            "This will overwrite the Writer Mode preset in your Documents folder "
-            "with your current settings.\n\n"
+            "This will overwrite the Writer Mode preset with your current "
+            "settings:\n\n"
             f"{preset_path}\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
@@ -8834,18 +8896,23 @@ th {{ background-color: {table_head_bg}; }}
             )
 
     def _save_as_engineer_preset(self):
-        """Save the current configuration to ~/Documents/neight/techie_mode.json.
+        """Save the current configuration to techie_mode.json in the app data folder.
 
-        The file survives app deletion and is loaded automatically the next
-        time the user selects Help \u2192 Techie Mode, replacing the built-in defaults.
+        Loaded automatically the next time the user selects Help \u2192 Techie Mode,
+        replacing the built-in defaults.  Off the sandbox that folder is
+        ~/Documents/Neight/ and the file outlives the app; in the Mac App
+        Store build it is Application Support inside the container, so it does
+        *not* survive deleting the app -- _get_app_data_dir explains why.  The
+        dialog below shows the resolved path either way, so what the user is
+        told is true on their machine.
         """
-        docs = self._get_user_documents_dir()
+        docs = self._get_app_data_dir()
         preset_path = docs / "techie_mode.json"
         reply = QMessageBox.question(
             self,
             "Save Techie Mode Preset",
-            "This will overwrite the Techie Mode preset in your Documents folder "
-            "with your current settings.\n\n"
+            "This will overwrite the Techie Mode preset with your current "
+            "settings:\n\n"
             f"{preset_path}\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
@@ -8962,6 +9029,11 @@ th {{ background-color: {table_head_bg}; }}
             candidate = candidate.expanduser()
         except Exception:
             pass
+        # A container path here would come from Qt handing back a
+        # container-relative location, never from a deliberate choice; storing
+        # it would make the next panel open somewhere the user cannot see.
+        if _macos_is_sandboxed() and _is_container_path(candidate):
+            return
         if getattr(self, "default_directory", None) is not None:
             if str(candidate) == str(self.default_directory):
                 self.default_directory = candidate
@@ -9616,10 +9688,6 @@ class NeightApplication(QApplication):
         if event.type() == QEvent.Type.FileOpen:
             path = event.file()
             if path:
-                # Finder's hand-off carries its own sandbox grant.  Record it the
-                # moment it arrives, before any prompt can steal the window's
-                # attention, so the file stays openable afterwards.
-                remember_sandbox_access(path)
                 if self._main_window is not None:
                     # Post-startup: a file was opened while the app is already running.
                     win = self._main_window
