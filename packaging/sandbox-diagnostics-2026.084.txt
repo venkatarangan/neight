@@ -1,0 +1,27 @@
+# Redacted for the public repository: the signer's local macOS account name
+# has been replaced with [signer] throughout. Nothing else changed from the
+# log received on 2026-08-23.
+
+=== Neight 2026.084 — 2026-08-23 18:17:39 — sandboxed=True container='com.murasu.neight' ===
+18:17:39.409  grant: NO panel access for /Users/[signer]/Dropbox/sample.txt (PermissionError(1, 'Operation not permitted'))
+18:17:39.411  mint: FAILED for /Users/[signer]/Dropbox/sample.txt — bookmarkDataWithOptions returned nil (NSCocoaErrorDomain/256: The file “sample.txt” couldn’t be opened.)
+18:17:39.411  access: no scoped grant attempted for /Users/[signer]/Dropbox/sample.txt (sandboxed=True, bookmark=MISSING)
+18:17:39.411  read: DENIED on /Users/[signer]/Dropbox/sample.txt
+18:17:51.481  grant: NO panel access for /Users/[signer]/Dropbox/sample.txt (PermissionError(1, 'Operation not permitted'))
+18:17:51.482  mint: FAILED for /Users/[signer]/Dropbox/sample.txt — bookmarkDataWithOptions returned nil (NSCocoaErrorDomain/256: The file “sample.txt” couldn’t be opened.)
+18:17:51.482  access: no scoped grant attempted for /Users/[signer]/Dropbox/sample.txt (sandboxed=True, bookmark=MISSING)
+18:17:51.482  read: DENIED on /Users/[signer]/Dropbox/sample.txt
+18:18:02.768  grant: NO panel access for /Users/[signer]/Desktop/dt_sample.txt (PermissionError(1, 'Operation not permitted'))
+18:18:02.768  mint: FAILED for /Users/[signer]/Desktop/dt_sample.txt — bookmarkDataWithOptions returned nil (NSCocoaErrorDomain/256: The file “dt_sample.txt” couldn’t be opened.)
+18:18:02.769  access: no scoped grant attempted for /Users/[signer]/Desktop/dt_sample.txt (sandboxed=True, bookmark=MISSING)
+18:18:02.769  read: DENIED on /Users/[signer]/Desktop/dt_sample.txt
+
+=== Neight 2026.084 — 2026-08-23 18:20:02 — sandboxed=True container='com.murasu.neight' ===
+18:20:02.736  grant: NO panel access for /Users/[signer]/Desktop/dt_sample.txt (PermissionError(1, 'Operation not permitted'))
+18:20:02.738  mint: FAILED for /Users/[signer]/Desktop/dt_sample.txt — bookmarkDataWithOptions returned nil (NSCocoaErrorDomain/256: The file “dt_sample.txt” couldn’t be opened.)
+18:20:02.739  access: no scoped grant attempted for /Users/[signer]/Desktop/dt_sample.txt (sandboxed=True, bookmark=MISSING)
+18:20:02.739  read: DENIED on /Users/[signer]/Desktop/dt_sample.txt
+18:20:20.635  grant: NO panel access for /Users/[signer]/Dropbox/sample.txt (PermissionError(1, 'Operation not permitted'))
+18:20:20.636  mint: FAILED for /Users/[signer]/Dropbox/sample.txt — bookmarkDataWithOptions returned nil (NSCocoaErrorDomain/256: The file “sample.txt” couldn’t be opened.)
+18:20:20.636  access: no scoped grant attempted for /Users/[signer]/Dropbox/sample.txt (sandboxed=True, bookmark=MISSING)
+18:20:20.637  read: DENIED on /Users/[signer]/Dropbox/sample.txt

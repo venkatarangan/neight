@@ -7,6 +7,10 @@
 > with no provisioning profile, provided it carries a real Developer ID or
 > Apple Development signature — only ad-hoc signatures are refused. Local
 > reproduction is therefore possible with any Apple developer identity.
+> The signer's full results are in
+> [`SIGNER-DIAGNOSTIC-2026.084-RESULTS.md`](SIGNER-DIAGNOSTIC-2026.084-RESULTS.md)
+> and the raw log in
+> [`sandbox-diagnostics-2026.084.txt`](sandbox-diagnostics-2026.084.txt).
 
 # Neight — a diagnostic run, before the next submission
 
