@@ -66,12 +66,12 @@ speedup.
 - **Stable installs go through the stores** — both are live: Microsoft Store and
   Mac App Store (`id6800348235`, published under Muthu Nedumaran's account).
   These are the *only* stable channels.
-- **The live Mac App Store build is behind, and broken.** It cannot open any
-  file, and its `Info.plist` declares macOS 12 while its binaries need
-  macOS 26. The real fix — sandboxed file I/O through Qt, whose file engine
-  owns the panel grant; the 2026.082/083 bookmark attempt never worked — is in
-  source and ships with 2026.086, the build now on `dist-latest`. Do not
-  describe the Store build as current until a signed 2026.086 or later ships.
+- **The live Mac App Store build is current.** 2026.086 — the fix for the
+  sandboxed file I/O bug (Qt's own security-scoped file engine owns the panel
+  grant; the 2026.082/083 bookmark attempt never worked) — has shipped and is
+  live on the Store as of 2026-08-24. Do not describe the Store build as
+  broken or as unable to open/save files; that was true only of builds before
+  2026.086.
 - **Direct downloads come from the `dist-latest` branch**, which every build
   republishes by amending its single commit and force-pushing. It is what the
   website and `README.md` link to, so **any local build immediately becomes the

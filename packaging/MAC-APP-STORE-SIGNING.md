@@ -6,18 +6,15 @@ Apple Developer identity and uploads it. That split is why the sandbox was
 impossible to reason about from the source for so long, and this file exists to
 close the gap.
 
-**Neight is live on the Mac App Store**: [`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12), published under
-Muthu Nedumaran's account. As of 2026-08-23 the listing still shows version
-**1.0** with a **macOS 12.0** minimum — a build that **cannot open any file**,
-and whose binaries actually need macOS 26 despite the 12.0 claim. The 12.0 was
-the signer's script overwriting the declared 15.0; that is fixed on their side.
-The file-open failure is fixed in this repository by routing sandboxed file I/O
-through Qt (see the 2026-08-23 session notes) — a fix **2026.083 and 2026.084 do
-not contain**; their bookmark-based attempt never worked. Saving needed a second
-fix on top of it, since `QSaveFile` cannot open a file inside the sandbox at all.
-**2026.086 is the first build carrying both**, and it is the one on
-`dist-latest`. Treat the Store build as broken until a signed 2026.086 or later
-ships.
+**Neight is live and current on the Mac App Store**: [`id6800348235`](https://apps.apple.com/app/neight/id6800348235?mt=12), published under
+Muthu Nedumaran's account. **2026.086**, signed and live as of 2026-08-24, is
+the first build carrying the complete sandboxed file I/O fix: reads and writes
+now route through Qt (see the 2026-08-23 session notes), fixing both the
+file-open failure that 2026.083/2026.084's bookmark-based attempt never solved,
+and the separate save failure caused by `QSaveFile` being unable to open a file
+inside the sandbox at all. The earlier `LSMinimumSystemVersion = 12.0` /
+macOS-26-binaries mismatch is also resolved — the signer's script was
+overwriting the declared 15.0, fixed on their side.
 
 Note also that the repository stamps `CFBundleShortVersionString` with Neight's
 own version, yet the listing reads `1.0` — so something in the signing chain

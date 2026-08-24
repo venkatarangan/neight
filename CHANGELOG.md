@@ -7,7 +7,7 @@ Anything untagged is cross-platform.
 
 ---
 
-## Unreleased
+## 2026.086 — 2026-08-24
 
 ### Fixed
 

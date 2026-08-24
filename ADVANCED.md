@@ -80,7 +80,7 @@ The next time you select **Writer (சொல்வெளி) Mode** or **Techie 
 
 Both files are plain JSON and can be inspected, edited by hand, or copied between machines. In the direct download and on Windows they also survive app deletion and reinstallation.
 
-> **Mac App Store version:** from 2026.085 these files live in
+> **Mac App Store version:** from 2026.086 these files live in
 > `~/Library/Application Support/Neight/` instead. See
 > [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
@@ -251,7 +251,7 @@ When you have typed content but have not yet named or saved the file, Neight sil
 
 **File → View Recovery Folder** opens `~/Documents/Neight/` in Finder (macOS) or Explorer (Windows). The folder is created automatically if it does not yet exist.
 
-> **Mac App Store version:** from 2026.085 these files live in
+> **Mac App Store version:** from 2026.086 these files live in
 > `~/Library/Application Support/Neight/` instead. See
 > [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
@@ -314,7 +314,7 @@ The first launch after upgrading to this behaviour performs a **one-time migrati
 
 ### The Mac App Store version keeps its files elsewhere
 
-From **2026.085**, the Mac App Store build keeps presets and recovery copies in
+From **2026.086**, the Mac App Store build keeps presets and recovery copies in
 `~/Library/Application Support/Neight/` rather than `~/Documents/Neight/`.
 
 App Store apps run inside a **sandbox**, and inside it `~` does not mean your
@@ -338,14 +338,14 @@ Two consequences worth knowing:
 
 The Open and Save dialogs are also affected: they used to start in `~`, which
 inside the sandbox is that same container root — an unfamiliar folder where a
-saved file effectively disappeared. From 2026.085 they start in your real
+saved file effectively disappeared. From 2026.086 they start in your real
 Documents folder, and can navigate anywhere from there as normal.
 
 **The direct download, Windows and Linux are unaffected.** None of them is
 sandboxed, and all of them keep using `~/Documents/Neight/`.
 
 > The version live on the Mac App Store today predates this and cannot open or
-> save files at all. Everything in this section applies from 2026.085 onward.
+> save files at all. Everything in this section applies from 2026.086 onward.
 
 ### Accessing settings files
 
@@ -392,7 +392,7 @@ User mode presets (see [Save Presets](#save-presets-power-user-feature) above) a
 
 These files are plain JSON and can be copied between machines. Outside the Mac App Store build they also survive app reinstallation.
 
-> **Mac App Store version:** from 2026.085 these files live in
+> **Mac App Store version:** from 2026.086 these files live in
 > `~/Library/Application Support/Neight/` instead. See
 > [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
@@ -409,7 +409,7 @@ capitalization also applies on macOS, where paths can be case-sensitive. Files
 here are cleaned up automatically during normal use. Use **File → Empty
 Recovery Folder** to delete any leftovers.
 
-> **Mac App Store version:** from 2026.085 these files live in
+> **Mac App Store version:** from 2026.086 these files live in
 > `~/Library/Application Support/Neight/` instead. See
 > [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
@@ -470,7 +470,7 @@ Deleting or replacing `Neight.app` does not touch that folder, so an update keep
 
 **One exception, and it applies only once.** Older versions stored `settings.json` *inside* the bundle, at a path such as `/Applications/Neight.app/Contents/MacOS/settings.json`. Those settings are migrated on the first launch of the new version — but only if the old bundle is still there to read from. If you delete the old `Neight.app` before launching the new one, the settings inside it are already gone. Check **Help → Debug Info** to see which path is in use.
 
-**To protect your preferences across updates,** use **Save Presets** (below). In the direct download, preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset. In the Mac App Store build from 2026.085 they live inside the app's sandbox container instead and are deleted with the app, so copy them somewhere else first — see [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
+**To protect your preferences across updates,** use **Save Presets** (below). In the direct download, preset files live in your `Documents` folder, entirely outside the bundle, and survive app deletion, reinstallation, and a factory reset. In the Mac App Store build from 2026.086 they live inside the app's sandbox container instead and are deleted with the app, so copy them somewhere else first — see [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 
 Note that `settings.json` also contains a few machine-specific values (last-opened file path, window size). If you move to a new machine those will not apply, but font, theme, line spacing, autosave interval and the rest carry over cleanly.
 
@@ -487,7 +487,7 @@ Use **Settings → Save current settings to → Writer Mode Preset** or **Techie
 
 These files live in your `Documents` folder — completely separate from the app and from `settings.json`. They survive app deletion, reinstallation, and a factory reset of `settings.json`. They are plain JSON and can be backed up, copied between machines, or opened in any text editor.
 
-> **Mac App Store version:** from 2026.085 these files live in
+> **Mac App Store version:** from 2026.086 these files live in
 > `~/Library/Application Support/Neight/` instead. See
 > [The Mac App Store version keeps its files elsewhere](#the-mac-app-store-version-keeps-its-files-elsewhere).
 >

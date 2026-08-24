@@ -378,10 +378,10 @@ blocks it, right-click → **Open**, or `xattr -dr com.apple.quarantine
 bundle identifier `com.murasu.neight`. Signing and submission happen on the
 signer's machine, not here; this repository only produces the unsigned bundle.
 
-> **The live Store build is behind, and broken**: it cannot open any file, and
-> declares macOS 12 while its binaries need macOS 26. **2026.086** is the first
-> build carrying the complete fix, and has not been submitted yet. Do not
-> describe the Store build as current until a signed 2026.086 or later ships.
+> **The live Store build is current.** **2026.086** — the first build carrying
+> the complete sandboxed file I/O fix — is signed and live on the Store as of
+> 2026-08-24. Earlier builds could not open any file and declared macOS 12
+> while their binaries needed macOS 26; neither is true of the current build.
 
 ### Signing for the Mac App Store
 

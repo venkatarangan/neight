@@ -7947,7 +7947,7 @@ th {{ background-color: {table_head_bg}; }}
                     self.default_directory = _default_start_directory()
         else:
             self.default_directory = _default_start_directory()
-        # Builds before 2026.085 seeded this from Path.home(), which inside the
+        # Builds before 2026.086 seeded this from Path.home(), which inside the
         # sandbox is the container -- so a stored container path is stale state
         # from a build that did not know better, not a place the user chose.
         if _macos_is_sandboxed() and _is_container_path(self.default_directory):

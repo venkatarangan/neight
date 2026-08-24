@@ -37,7 +37,7 @@ Neight stores the following information **locally on your device only**:
   interval.
 - **Presets and recovery copies** — are stored in
   `%USERPROFILE%\Documents\Neight\` on Windows and
-  `~/Documents/Neight/` on macOS. In the Mac App Store version, from 2026.085,
+  `~/Documents/Neight/` on macOS. In the Mac App Store version, from 2026.086,
   they are stored inside the app's own sandbox container instead, under
   `~/Library/Application Support/Neight/`; **File → View Recovery Folder** and
   the preset dialogs always show the path actually in use. Recovery copies
