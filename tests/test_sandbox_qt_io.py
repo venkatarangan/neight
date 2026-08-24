@@ -204,9 +204,142 @@ def sandbox_qt_io() -> None:
         equal(autosaved.read_bytes().decode("utf-8"), CORPUS,
               "the sandboxed autosave did not write the document")
 
+        # --- the grant key survives the open -------------------------------
+        # The read is keyed on the exact string the panel returned; every later
+        # save has to present that same string.  Storing only the Path()-
+        # normalised current_path meant a file opened fine and could then never
+        # be written -- the shipped 2026.086 bug.
+        keyed = workdir / "keyed.txt"
+        keyed.write_bytes(CORPUS.encode("utf-8"))
+        odd_open = str(keyed.parent) + "//" + keyed.name
+        check(window._open_file_path(odd_open, notify_errors=False),
+              "the gated open failed on the grant-key path")
+        equal(window._grant_path, odd_open,
+              "the exact path the read was keyed on was not kept")
+        check(window.current_path != odd_open,
+              "current_path is expected to hold the normalised form")
+
+        written = []
+        original_write = neight._sandbox_write_text
+        try:
+            neight._sandbox_write_text = lambda pth, txt, **kw: (
+                written.append(pth), original_write(pth, txt, **kw))[1]
+            check(window.save_file(), "the save after the gated open failed")
+        finally:
+            neight._sandbox_write_text = original_write
+        equal(written, [odd_open],
+              "the save was keyed on the normalised path, not the grant's")
+
         window.close()
     finally:
         neight._macos_is_sandboxed = original
+
+    # --- handing a file to another application -----------------------------
+    # openUrl does not go through a file engine, so LaunchServices checks this
+    # process's own access.  Inside the sandbox the file is opened through Qt
+    # first, both to wake the dormant grant and as a detector: no grant means
+    # no openUrl call, so macOS never gets to post its own alert.
+    original = neight._macos_is_sandboxed
+    original_open_url = neight.QDesktopServices.openUrl
+    try:
+        neight._macos_is_sandboxed = lambda: True
+        target = workdir / "\u0b8f\u0bb1\u0bcd\u0bb1\u0bc1\u0bae\u0ba4\u0bbf.pdf"
+        target.write_bytes(b"%PDF-1.4\n")
+        odd = str(target.parent) + "//" + target.name
+
+        seen = []
+        live = []
+
+        def _fake_open_url(url):
+            seen.append(url.toLocalFile())
+            # The scoped access has to be live *while* LaunchServices looks:
+            # the handle must still be open at this point, not closed on the
+            # way out of the helper.
+            live.append(all(h.isOpen() for h in neight._sandbox_external_open_handles)
+                        and bool(neight._sandbox_external_open_handles))
+            return True
+
+        neight.QDesktopServices.openUrl = _fake_open_url
+        check(neight._sandbox_open_externally(odd),
+              "the sandboxed external open reported failure on a readable file")
+        equal(seen, [odd],
+              "the external open resolved the path before Qt saw it")
+        equal(live, [True],
+              "the file handle was not open while openUrl ran")
+
+        # No grant, no call: Neight reports it rather than letting macOS do it.
+        seen.clear()
+        missing = str(workdir / "\u0b87\u0bb2\u0bcd\u0bb2\u0bc8.pdf")
+        check(not neight._sandbox_open_externally(missing),
+              "the external open claimed success on an unreadable file")
+        equal(seen, [], "openUrl was called for a file with no grant")
+    finally:
+        neight.QDesktopServices.openUrl = original_open_url
+        neight._macos_is_sandboxed = original
+        del neight._sandbox_external_open_handles[:]
+
+    # --- a failed autosave must be loud, and must not lose the text ---------
+    # A three-second status message is how someone keeps typing for an hour
+    # into a file that is no longer being written.
+    fake_home = pathlib.Path(tempfile.mkdtemp())
+    original_home = neight.Path.home
+    original = neight._macos_is_sandboxed
+    original_write = neight._sandbox_write_text
+    original_exec = neight.QMessageBox.exec
+    try:
+        neight.Path.home = staticmethod(lambda: fake_home)
+        neight._macos_is_sandboxed = lambda: True
+        # The report is modal; offscreen it would block the run forever.
+        neight.QMessageBox.exec = lambda self: 0
+
+        window = neight.Notepad(initial_file=None, restore_last_session=False)
+        doomed = workdir / "\u0b95\u0bc8\u0baf\u0bc6\u0bb4\u0bc1\u0ba4\u0bcd\u0ba4\u0bc1.txt"
+        doomed.write_bytes(b"old")
+        window.current_path = str(doomed)
+        window._grant_path = str(doomed)
+        window.editor.setPlainText(CORPUS)
+        window.editor.document().setModified(True)
+        window._start_autosave()
+
+        def _denied(*_a, **_kw):
+            raise PermissionError(1, "Operation not permitted", str(doomed))
+
+        neight._sandbox_write_text = _denied
+        window._autosave()
+        for _ in range(200):
+            neight.QApplication.processEvents()
+            if not window._autosave_in_progress:
+                break
+            time.sleep(0.01)
+        equal(window._autosave_in_progress, False,
+              "the failing autosave worker never reported back")
+
+        equal(window.editor.document().isModified(), True,
+              "a failed autosave left the document looking saved")
+        equal(window.autosave_enabled, False,
+              "autosave kept running after it failed")
+        equal(window._autosave_failure_reported, True,
+              "the autosave failure was not reported")
+
+        app_dir = fake_home / "Library" / "Application Support" / "Neight"
+        copies = sorted(app_dir.glob("unsaved-*"))
+        equal(len(copies), 1,
+              f"expected exactly one failure copy, found {[c.name for c in copies]}")
+        equal(copies[0].read_text(encoding="utf-8"), CORPUS,
+              "the failure copy does not hold the document text")
+        equal(doomed.read_bytes(), b"old",
+              "the failed autosave wrote to the target after all")
+
+        # Closing a still-dirty window would raise the unsaved-changes prompt,
+        # which offscreen has nothing to dismiss it.  The assertions above are
+        # the point; the flag has served it.
+        window.editor.document().setModified(False)
+        window.close()
+    finally:
+        neight.QMessageBox.exec = original_exec
+        neight._sandbox_write_text = original_write
+        neight._macos_is_sandboxed = original
+        neight.Path.home = original_home
 
 
 def main() -> None:
@@ -217,6 +350,11 @@ def main() -> None:
     # tests/_harness.py, which does the same for the harness runner).
     store = pathlib.Path(tempfile.mkdtemp()) / "settings.json"
     neight.SettingsManager._determine_active_path = lambda self: store
+    # And home, for the same reason: _get_app_data_dir() builds on Path.home(),
+    # and opening a file takes an advisory lock under it.  Sections below
+    # redirect it again to assert on the resolved paths; they restore to this.
+    run_home = pathlib.Path(tempfile.mkdtemp())
+    neight.Path.home = staticmethod(lambda: run_home)
 
     app = neight.NeightApplication(sys.argv)  # noqa: F841 -- Qt needs one alive
     sandbox_qt_io()

@@ -47,6 +47,13 @@ def main(run) -> None:
     store = pathlib.Path(tempfile.mkdtemp()) / "settings.json"
     neight.SettingsManager._determine_active_path = lambda self: store
 
+    # Redirect home for the same reason.  _get_app_data_dir() builds on
+    # Path.home(), and opening a file now takes an advisory lock under it, so
+    # without this every test run leaves lock and recovery files in the real
+    # ~/Documents/Neight of whoever executes it.
+    fake_home = pathlib.Path(tempfile.mkdtemp())
+    neight.Path.home = staticmethod(lambda: fake_home)
+
     app = neight.NeightApplication(sys.argv)
     window = neight.Notepad(initial_file=None, restore_last_session=False)
     run(app, window)

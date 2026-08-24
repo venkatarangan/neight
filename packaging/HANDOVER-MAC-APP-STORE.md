@@ -200,10 +200,38 @@ exactly). On any Mac:
 6. Leave the window open and edited for one auto-save interval (Settings >
    Auto-save; set it to the shortest option to avoid waiting). The status bar
    must say "Auto-saved", not "Auto-save failed".
-7. **File > Export to PDF**. The PDF must actually appear where you put it.
+7. **File > Export to PDF**. The PDF must actually appear where you put it,
+   **and clicking Open in the confirmation dialog must open it in Preview.**
+   That click is what failed in 2026.086, with a macOS alert saying Neight
+   does not have permission to open the file it had just written.
 8. Quit, relaunch from Finder. With **Continue where you left off** enabled,
    the file must come back — that is Qt's bookmark store surviving a restart —
    and **saving it again must still work**.
+9. Keep one file open and save it **several times over several minutes**, with
+   auto-save running between the saves. A user reported a save that worked
+   once and then failed on permissions later in the same session; if that
+   happens here, the auto-save log (below) now records how each write went.
+10. Open **one file in two windows** (File > New Window, then open the same
+    file in it). The second window must say the file is already open, must
+    show "(open in another window)" in its title, and must **not** auto-save.
+    Save from the first window and let the second one's auto-save tick pass:
+    the first window's text must survive. Then save by hand from the second —
+    that is still allowed, and is expected to win.
+
+    This step is also the one that tests whether a second instance is what
+    broke the save in step 9. All instances share one container and therefore
+    one `SecurityScopedBookmarks.plist`, which Qt writes with no cross-process
+    lock. If saving from the second window makes the *first* window's next save
+    fail, the log will now show it: every line carries its process ID, and each
+    sandboxed write records `lock=held` or `lock=not-held`.
+
+11. **File > New Window.** Does a second window open at all in the signed
+    build — with its own Dock presence and menu bar — and can it open a file
+    through its own panel? New Window spawns a *separate process*
+    (`subprocess.Popen` on the bundle's own binary), and whether that works
+    under the Store sandbox has never been confirmed. Step 10 depends on it,
+    and so does the leading theory for the step 9 failure: if a second instance
+    cannot start, two instances cannot be what broke the save.
 
 If any step fails, run once with `NEIGHT_SANDBOX_DIAG=1` as you did for
 2026.084 and send the log — same location:
@@ -215,7 +243,15 @@ If any step fails, run once with `NEIGHT_SANDBOX_DIAG=1` as you did for
 It now narrates the Qt read/write path instead of the bookmark path, and names
 the stage that failed (open / write / flush / close) with Qt's own error
 string — so one log should be enough to place any remaining problem exactly.
-If all eight steps pass, upload.
+
+For step 9 send the **auto-save log** as well, from the same folder. Every
+sandboxed write now appends a `SANDBOX SAVE:` line to it whether or not
+diagnostics are on, naming which door the write took (`qfile` = Qt's bookmark
+resolved, `python-fallback` = it did not but a process-wide grant covered the
+file, `denied` = neither), which thread wrote, and how many writes that grant
+had already served.
+
+If all eleven steps pass, upload.
 
 ---
 

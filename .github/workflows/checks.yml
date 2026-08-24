@@ -58,6 +58,7 @@ jobs:
           python tests/test_selection_counts.py
           python tests/test_unsaved_prompt.py
           python tests/test_sandbox_qt_io.py
+          python tests/test_document_lock.py
 
   lint:
     name: Lint

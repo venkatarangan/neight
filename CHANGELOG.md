@@ -7,6 +7,85 @@ Anything untagged is cross-platform.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Two Neight windows on one file no longer destroy each other's work.**
+  **[Both]** Every window is its own *process* — **New Window** spawns one —
+  and both ran auto-save against the same path with nothing coordinating them.
+  Neither window ever noticed the file changing underneath it, so whichever
+  auto-save landed last won and the other window's writing was gone, silently
+  and with no error anywhere. A document is now owned by one instance, through
+  the same `QLockFile` mechanism that already stops two windows losing each
+  other's preferences. A second window still opens the file and stays fully
+  editable, says so in its title, and keeps every auto-save tick in a recovery
+  copy — but does not write the shared file in the background. A manual save
+  there still goes through: the person is present, and was told when the file
+  opened.
+
+- **A denied save says what is likely wrong again.** **[Windows]** The new
+  save-failure dialog treated every `PermissionError` as the macOS sandbox
+  withdrawing a grant, and dropped the underlying error text. On Windows that
+  same exception is what a read-only file, or one held open by another program,
+  raises — so the message said less than the plain "Could not save file" it
+  replaced. It now names both likely causes and carries the original error.
+
+- **The auto-save log now says which window wrote each line.** **[Both]** There
+  is one log per day for the whole app, appended by every instance, so two
+  windows' lines interleaved with no way to tell them apart — precisely the
+  situation the log is most needed to describe. Every line carries its process
+  ID now, the way recovery filenames already did.
+
+- **"Open" after exporting to PDF no longer fails in the Store build.**
+  **[macOS]** The export succeeded, but clicking **Open** in the confirmation
+  dialog produced a macOS alert — *The application "Neight" does not have
+  permission to open …*. `QDesktopServices.openUrl` does not go through a file
+  engine at all: it asks LaunchServices, which first checks whether *this*
+  process may read the file. Inside the sandbox Qt holds the panel's grant
+  dormant as a bookmark, so the process had no live access, and `openUrl`
+  returned `True` regardless — Neight could not even tell it had failed. The
+  file is now opened through `QFile` first, which wakes the grant and keeps it
+  live for the check, with the handle deliberately held open across the call.
+  A file with no grant at all is reported by Neight rather than by macOS. The
+  `Path.resolve()` the URL was built from is gone too: it broke the very rule
+  the rest of the sandbox code follows, since Qt keys its bookmark on the
+  incoming path string.
+
+- **A file that opened could then be impossible to save.** **[macOS]** The open
+  path carefully passed Qt the exact string the panel returned — and then
+  stored `current_path` in its `Path()`-normalised form, which every later save
+  used. Wherever `Path()` altered the spelling at all (a redundant separator,
+  a `./`, a `~`), the read found Qt's grant and no save ever did, and the same
+  normalised value was persisted as the file to reopen on the next launch. The
+  grant's own spelling is now kept alongside `current_path` and is what
+  sandboxed writes and the reopen record use.
+
+- **A failed auto-save is no longer a three-second status message.**
+  **[Both]** It restored the dirty flag, flashed *"Auto-save failed"*
+  for three seconds, and let the timer keep firing — so a sandbox permission
+  withdrawal in the middle of a session was, in practice, silent, and the
+  writing kept going into a file that was no longer being written. Now: a copy
+  of the current text is written first, into the app data folder where no grant
+  is needed and the write cannot be denied; auto-save stops rather than
+  pretending; and a dialog names the file, the copy's location, and the fact
+  that the changes are *not* saved. When the cause is a sandbox denial it
+  offers **Save As…**, which is the only thing that mints a fresh grant — the
+  save-side match for the message the open path has always shown. A manual
+  save that is denied says the same thing instead of reporting the errno.
+
+- **Sandboxed saves now record how they went.** **[macOS]** `NEIGHT_SANDBOX_DIAG`
+  can never explain a user's report: it is opt-in by environment variable, and
+  Store users launch through LaunchServices where no such variable exists. Each
+  sandboxed write now appends one line to the always-on auto-save log, already
+  reachable from **Help › Debug Info** — which door the write took (Qt's
+  bookmark resolved, a process-wide grant covered it, or neither), on which
+  thread, and how many writes the grant had already served. That is what tells
+  an unresolvable bookmark apart from a wrong lookup key the next time this
+  happens, without another signed diagnostic round trip.
+
+---
+
 ## 2026.086 — 2026-08-24
 
 ### Fixed

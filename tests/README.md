@@ -11,6 +11,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_input_gestures.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_selection_counts.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_unsaved_prompt.py
 QT_QPA_PLATFORM=offscreen python3 tests/test_sandbox_qt_io.py
+QT_QPA_PLATFORM=offscreen python3 tests/test_document_lock.py
 ```
 
 Each script exits non-zero on failure and prints failures as GitHub Actions
@@ -89,6 +90,35 @@ plain scripts rather than pytest so CI needs nothing beyond `requirements.txt`.
   Application Support when sandboxed rather than into the container's
   invisible Documents. Redirects `Path.home()` before touching either, so it
   never leaves folders in the real one.
+
+  Three later sections cover what 2026.086 still got wrong. The grant key has
+  to be *kept*, not just used once: a file opened with the exact string and
+  saved with `current_path`'s normalised one opens fine and can then never be
+  written, so the save after an open must still be keyed on the original.
+  Handing a file to another application needs the access *live* — the file is
+  opened through `QFile` first, and the handle must still be open while
+  `openUrl` runs, with no `openUrl` call at all when there is no grant. And a
+  failed autosave must keep a copy in the app data folder, leave the document
+  modified, and stop autosaving, because a status message that disappears in
+  three seconds is how a person loses an afternoon's writing.
+
+- **`test_document_lock.py`** — one document, one owning instance. Every Neight
+  window is its own *process*: `new_window()` spawns one, and
+  `NeightApplication` keeps a single `_main_window` that Finder's "Open With"
+  reuses rather than opening a second window in-process. So two windows on one
+  file means two processes writing it, and nothing used to stop them — both ran
+  autosave against the same path, and neither ever noticed the file changing
+  underneath it, so whichever autosave landed last won and the other window's
+  afternoon was gone. Checks that the lock key is the *normalised* path
+  (deliberately the opposite choice from `_grant_path`, since two instances
+  that spelled one file differently still have to collide), that it never lands
+  beside the user's file (the sandbox forbids creating a sibling there), that a
+  second instance still opens the file and stays editable but does not own it,
+  and — the point of the whole thing — that the non-owner's autosave leaves the
+  file byte-for-byte alone while keeping the typing in a recovery copy. Also
+  that a manual save is still allowed, and that Save As, New and closing each
+  hand the document on. Not sandbox-specific: New Window is a separate process
+  on Windows too, so nothing here forces the macOS gate.
 
 Not covered here — these need a real trackpad, keyboard or Finder, so they stay
 manual: the *feel* of pinch-to-zoom (the arithmetic is covered above, the

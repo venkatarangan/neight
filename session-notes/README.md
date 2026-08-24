@@ -33,3 +33,8 @@ file, and by these instead for anything current:
 | 2026-08-20 | [Update checker removed for App Store review, selection counts added, direct downloads moved to `dist-latest`](2026-08-20-store-distribution-and-status-bar-work.md) |
 | 2026-08-21 | [Windows rebuilt at 2026.081, download shrunk 26%, file associations fixed for the Store build](2026-08-21-windows-catchup-and-clean-rebuild.md) |
 | 2026-08-22 | [Mac App Store file-open permission bug fixed with security-scoped bookmarks; spurious save prompt removed; built 2026.082](2026-08-22-sandbox-file-open-and-save-prompt.md) |
+| 2026-08-22 | [2026.083 rebuilt on a python.org Python, dropping the macOS floor; handover package prepared for the signer](2026-08-22-macos-floor-rebuild-and-signer-handover.md) |
+| 2026-08-23 | [Qt owns the sandbox grant; file I/O moved onto `QFile` and the bookmark machinery removed](2026-08-23-qt-file-engine-fix.md) |
+| 2026-08-23 | [`QSaveFile` cannot work in the sandbox; every macOS file pathway swept](2026-08-23-sandbox-save-sweep.md) |
+| 2026-08-23 | [Windows handoff: the sandbox fix is macOS-only, verified](2026-08-23-windows-handoff.md) |
+| 2026-08-24 | [Two sandbox holes 2026.086 left open; a document lock so two instances stop overwriting each other; a sandbox compliance audit](2026-08-24-store-open-and-save-permission.md) |

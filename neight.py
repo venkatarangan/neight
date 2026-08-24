@@ -13,6 +13,7 @@ import time
 import webbrowser
 import unicodedata
 import ctypes
+import hashlib
 import html
 import threading
 import random
@@ -829,6 +830,21 @@ def _macos_markdown_is_default() -> bool:
 # development run) nothing here is used and file I/O is the plain Python it
 # always was.  Qt's bookmark store persists across launches, which is what
 # keeps "reopen last file" working in the Store build.
+#
+# The rule reaches further than the two I/O calls, and both extensions were
+# bugs in the shipped 2026.086:
+#
+#   * **The key has to be *kept*, not just used once.**  current_path is stored
+#     in its Path()-normalised form, so a file opened with the exact string and
+#     saved with the normalised one opens fine and can then never be written.
+#     _grant_path holds the spelling the grant is under; _io_path() is what
+#     every sandboxed write goes through.
+#   * **Handing a path to another process needs the access *live*.**
+#     QDesktopServices.openUrl does not go through a file engine at all — it
+#     asks LaunchServices, which checks this process's own access first, and
+#     Qt is holding the grant dormant as a bookmark.  _sandbox_open_externally
+#     opens the file through QFile to wake the grant and keeps the handle open
+#     across the call.
 
 _macos_sandbox_state: Optional[bool] = None
 
@@ -1002,7 +1018,7 @@ def _sandbox_read_bytes(path) -> bytes:
     return raw
 
 
-def _sandbox_write_text(path, text: str, should_commit=None) -> bool:
+def _sandbox_write_text(path, text: str, should_commit=None, route=None) -> bool:
     """Write a user file through Qt so its sandbox grant applies.
 
     The sandboxed counterpart of _atomic_write_text, with the same contract:
@@ -1041,8 +1057,19 @@ def _sandbox_write_text(path, text: str, should_commit=None) -> bool:
 
     UTF-8, no newline translation — identical bytes to what _atomic_write_text
     produces on macOS, where newline=None translates nothing.
+
+    ``route`` is an optional list the chosen door is appended to -- "qfile",
+    "python-fallback", "superseded", or "denied (...)".  Callers own the list,
+    so nothing is shared between the UI thread and the autosave worker; it
+    exists so a save failure in the field can be told apart from a bookmark
+    that resolved but a write that failed for an ordinary reason.
     """
+    def _route(name: str) -> None:
+        if route is not None:
+            route.append(name)
+
     if should_commit is not None and not should_commit():
+        _route("superseded")
         return False
 
     payload = text.encode("utf-8")
@@ -1062,10 +1089,12 @@ def _sandbox_write_text(path, text: str, should_commit=None) -> bool:
                 os.fsync(handle.fileno())
         except OSError as exc:
             _sandbox_diag(f"save: python fallback FAILED for {path} ({exc})")
+            _route(f"denied ({error})")
             if denied:
                 raise PermissionError(1, error, str(path))
             raise OSError(f"{error}: {path}")
         _sandbox_diag(f"save: python fallback ok for {path} ({len(payload)} bytes)")
+        _route("python-fallback")
         return True
 
     try:
@@ -1093,7 +1122,64 @@ def _sandbox_write_text(path, text: str, should_commit=None) -> bool:
         raise OSError(f"{error}: {path}")
 
     _sandbox_diag(f"save: QFile ok for {path} ({len(payload)} bytes)")
+    _route("qfile")
     return True
+
+
+# Handles kept alive across an external open; see _sandbox_open_externally.
+_sandbox_external_open_handles: list = []
+
+
+def _sandbox_open_externally(path) -> bool:
+    """Hand a user file to its default application.
+
+    QDesktopServices.openUrl does not go through a file engine -- it passes the
+    URL to LaunchServices, which checks whether *this* process may read the
+    file before it will hand it to another app.  Inside the sandbox Qt is
+    holding the panel's grant as a dormant bookmark, so the process has no live
+    access and macOS refuses with its own alert ("The application Neight does
+    not have permission to open ...").  openUrl still returns True, so the
+    failure is invisible to the caller.
+
+    Opening the file through QFile first solves both halves: it makes Qt's
+    security-scoped engine resolve its bookmark and *start* the access, so the
+    grant is live for LaunchServices, and a failed open is a reliable signal
+    that no grant exists -- in which case openUrl is never called and Neight
+    reports the problem itself instead of letting macOS do it.
+
+    ``path`` must be the string the file dialog returned, untouched: Qt looks
+    its bookmark up by the incoming fileName, so a resolved or canonicalised
+    variant misses it.
+
+    Off the sandbox this is the plain openUrl it has always been.
+    """
+    url = QUrl.fromLocalFile(str(path))
+    if not _macos_is_sandboxed():
+        return QDesktopServices.openUrl(url)
+
+    qfile = QFile(str(path))
+    if not qfile.open(QIODevice.OpenModeFlag.ReadOnly):
+        _sandbox_diag(f"open-external: QFile open FAILED for {path} ({qfile.errorString()})")
+        return False
+
+    # Registered before the call, not after: the handle has to be alive *during*
+    # openUrl, and this way it still is if openUrl raises.  Deliberately not
+    # closed on the way out either -- Qt may dispatch the open asynchronously,
+    # and closing stops the scoped access, which would race LaunchServices'
+    # permission check.  A read-only handle held for ten seconds costs nothing.
+    _sandbox_external_open_handles.append(qfile)
+
+    def _release():
+        qfile.close()
+        try:
+            _sandbox_external_open_handles.remove(qfile)
+        except ValueError:
+            pass
+
+    QTimer.singleShot(10_000, _release)
+    opened = QDesktopServices.openUrl(url)
+    _sandbox_diag(f"open-external: openUrl returned {opened} for {path}")
+    return opened
 
 
 def _win_open_default_apps_settings() -> bool:
@@ -3108,6 +3194,23 @@ class Notepad(QMainWindow):
         self._base_extra_selections = []
 
         self.current_path = None
+        # The path string exactly as it arrived from the Open/Save panel, from
+        # a Finder hand-over, or from settings.  current_path is the normalised
+        # form every display and Path() call wants; inside the sandbox Qt looks
+        # its stored grant up by the *incoming* fileName, so writes must use
+        # this one instead.  See _io_path() and the sandbox section above.
+        self._grant_path: Optional[str] = None
+        # Sandboxed writes since the current grant was minted.  Logged with
+        # each save so a failure that only appears after N writes -- an
+        # exhausted or evicted grant -- can be told apart from one that was
+        # wrong from the first save.
+        self._saves_since_grant = 0
+        # Set when an autosave failure has already been reported, so a document
+        # that cannot be written does not produce one dialog per tick.  Cleared
+        # by the next successful save.
+        self._autosave_failure_reported = False
+        # Advisory ownership of the open document; see _acquire_document_lock.
+        self._document_lock = None
         self._recovery_path: Optional[Path] = None
         self._recovery_in_progress = False
         self.autosave_timer = QTimer(self)
@@ -4095,6 +4198,8 @@ class Notepad(QMainWindow):
         self.editor.clear()
         self._set_line_spacing_preset(getattr(self, '_line_spacing_preset', 'single_line'), save=False, show_status=False)
         self.current_path = None
+        self._grant_path = None
+        self._release_document_lock()
         # A new document carries no inherited on-disk format.
         self._source_encoding = ""
         self._source_had_bom = False
@@ -4309,6 +4414,12 @@ class Notepad(QMainWindow):
         self._source_had_bom = had_bom
         self._source_newline = source_newline
         self.current_path = str(path_obj)
+        # qt_path is the string Qt was handed for the read, and is therefore the
+        # key its grant is stored under.  Keeping it is the whole point: every
+        # later save of this file has to present the same key.
+        self._grant_path = qt_path
+        self._saves_since_grant = 0
+        owned = self._acquire_document_lock(self.current_path)
         self.editor.document().setModified(False)
         self._update_default_directory(path_obj.parent)
         self._update_title()
@@ -4316,6 +4427,13 @@ class Notepad(QMainWindow):
         self._update_export_menu_visibility()
         if show_status:
             self.status.showMessage(f"Opened: {path_obj}", 2000)
+        if not owned:
+            self._write_autosave_log(
+                f"DOCUMENT LOCK: not acquired, another instance owns "
+                f"{self.current_path!r}; autosave will write a recovery copy instead"
+            )
+            if notify_errors:
+                self._warn_document_open_elsewhere()
         # Announced after the "Opened" message so the conversion note is what the
         # user is left looking at.
         self._warn_if_save_will_convert()
@@ -4497,17 +4615,179 @@ class Notepad(QMainWindow):
         # after the bytes are safely on disk.  Committing first meant a failed
         # write left the window claiming to be a file that was never created.
         previous_path = self.current_path
+        previous_grant = self._grant_path
         self.current_path = path
-        if not self._write_to_path(path):
+        self._grant_path = path
+        self._saves_since_grant = 0
+        if not self._write_to_path(path, allow_save_as=False):
             self.current_path = previous_path
+            self._grant_path = previous_grant
             self._update_export_menu_visibility()
             self._update_title()
             return False
         self._update_default_directory(Path(path).parent)
         self._update_export_menu_visibility()
+        # The bytes are committed, so this window owns the new file.  Ownership
+        # of the *previous* one is given up by _acquire_document_lock.
+        if not self._acquire_document_lock(path):
+            self._write_autosave_log(
+                f"DOCUMENT LOCK: not acquired after Save As, another instance "
+                f"owns {path!r}"
+            )
+            self._warn_document_open_elsewhere()
+        self._update_title()
         return True
 
-    def _write_to_path(self, path: str) -> bool:
+    # ------------------------------------------------------------------
+    # One document, one owning instance
+    # ------------------------------------------------------------------
+    # Every Neight window is its own *process* -- new_window() spawns one, and
+    # NeightApplication keeps a single _main_window that Finder's "Open With"
+    # reuses rather than opening a second window in here.  So two windows on
+    # one file means two processes writing it, and until this existed nothing
+    # stopped them: both ran autosave against the same path, and neither ever
+    # noticed the file changing underneath it (there is no file watcher and no
+    # mtime check anywhere in Neight).  Whichever autosave landed last won, and
+    # the other window's work was gone.
+    #
+    # The lock is advisory and is the same QLockFile mechanism SettingsManager
+    # already uses to stop two windows losing each other's preferences.
+
+    @staticmethod
+    def _document_lock_path(path) -> Path:
+        """Where the advisory lock for ``path`` lives.
+
+        In the app data folder, never beside the user's file: inside the
+        sandbox the panel grants the chosen *file*, not its directory, so
+        creating a sibling there is denied -- the same wall QSaveFile hits.
+        The app data folder is inside the container when sandboxed, which is
+        both always writable and shared by every instance, which is the point.
+
+        Keyed on the **normalised** spelling, deliberately the opposite choice
+        from _grant_path: Qt's bookmark must be looked up by the exact string
+        the panel returned, but two instances that reached the same file by
+        differently spelled paths still have to collide here.
+        """
+        key = hashlib.sha256(str(Path(path)).encode("utf-8")).hexdigest()[:16]
+        folder = Notepad._get_app_data_dir() / "locks"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"doc-{key}.lock"
+
+    def _holds_document_lock(self) -> bool:
+        """True when this window owns the document it has open.
+
+        An untitled document has nothing to own, and counts as owned: there is
+        no shared file for another instance to be writing.
+        """
+        # getattr on both: _update_title runs during construction, before
+        # either attribute exists.
+        if getattr(self, "current_path", None) is None:
+            return True
+        lock = getattr(self, "_document_lock", None)
+        return lock is not None and lock.isLocked()
+
+    def _acquire_document_lock(self, path) -> bool:
+        """Take ownership of ``path``, releasing whatever this window held.
+
+        Returns False when another live instance owns it.  Never raises: a lock
+        that cannot be created (an unwritable app data folder, say) must not
+        stop the user opening their file, so the failure degrades to "owned",
+        which is exactly the behaviour of every build before this one.
+        """
+        self._release_document_lock()
+        try:
+            lock = QLockFile(str(Notepad._document_lock_path(path)))
+            # Not stale by age: a document can sit open for a working day.
+            # QLockFile still reclaims a lock whose owning process is gone,
+            # which is the reclamation actually wanted here.
+            lock.setStaleLockTime(0)
+            acquired = lock.tryLock(0)
+        except Exception:
+            self._document_lock = None
+            return True
+        self._document_lock = lock
+        return acquired
+
+    def _release_document_lock(self) -> None:
+        lock = getattr(self, "_document_lock", None)
+        if lock is not None:
+            try:
+                lock.unlock()
+            except Exception:
+                pass
+        self._document_lock = None
+
+    def _document_lock_owner_pid(self) -> Optional[int]:
+        """The PID holding the document, or None if it cannot be read."""
+        lock = getattr(self, "_document_lock", None)
+        if lock is None:
+            return None
+        try:
+            info = lock.getLockInfo()
+        except Exception:
+            return None
+        # PySide6 returns (pid, hostname, appname).
+        if not info:
+            return None
+        pid = info[0]
+        return int(pid) if pid else None
+
+    def _warn_document_open_elsewhere(self) -> None:
+        """Say plainly that another window owns this file.
+
+        The document stays fully editable: refusing to open it, or forcing it
+        read-only, takes away something the user may well want and Neight has
+        no read-only mode to fall back on.  What is withdrawn is the
+        *background* write, which is the one that can overwrite the other
+        window without anybody noticing.
+        """
+        pid = self._document_lock_owner_pid()
+        where = f"another Neight window (process {pid})" if pid else "another Neight window"
+        QMessageBox.warning(
+            self,
+            "Already Open",
+            f"{Path(self.current_path).name} is already open in {where}.\n\n"
+            "Auto-save is off in this window, so it cannot overwrite the other "
+            "one in the background. Your typing is still kept in a recovery "
+            "copy on every auto-save tick.\n\n"
+            "Saving here yourself will still overwrite whatever the other "
+            "window has written.",
+        )
+
+    def _io_path(self, path: str) -> str:
+        """The string to hand Qt when writing ``path`` inside the sandbox.
+
+        current_path is stored in its Path()-normalised form, which is what
+        every display, Path() call and settings write wants.  Qt's
+        security-scoped file engine is the one consumer that cannot use it: it
+        looks its stored grant up by the *incoming* fileName, so a save keyed
+        on the normalised spelling misses the grant the read was given and is
+        denied -- a file that opens fine and can then never be saved.
+
+        So when the caller means the file this window has a grant for, hand
+        back the grant's own spelling.  The comparison normalises both sides,
+        which is the only way the two forms can be recognised as one file.
+
+        Off the sandbox nothing here applies and the path passes through.
+        """
+        if not _macos_is_sandboxed():
+            return path
+        grant = self._grant_path
+        if not grant:
+            return path
+        try:
+            same = str(Path(grant)) == str(Path(path))
+        except Exception:
+            same = grant == path
+        return grant if same else path
+
+    def _write_to_path(self, path: str, allow_save_as: bool = True) -> bool:
+        """Write the document to ``path``, reporting any failure to the user.
+
+        ``allow_save_as`` is False when the caller is already a Save As: the
+        failure dialog would otherwise offer to reopen the panel the user just
+        came out of.
+        """
         try:
             path_obj = Path(path)
             # A manual save supersedes any queued autosave: bumping the generation
@@ -4523,7 +4803,13 @@ class Notepad(QMainWindow):
             # same reason the read must: Qt's file engine holds the panel's
             # grant, Python's open() does not see it.
             if _macos_is_sandboxed():
-                _sandbox_write_text(path, self.editor.documentText())
+                io_path = self._io_path(path)
+                route: list = []
+                self._saves_since_grant += 1
+                try:
+                    _sandbox_write_text(io_path, self.editor.documentText(), route=route)
+                finally:
+                    self._log_sandbox_save("manual", io_path, route)
             else:
                 _atomic_write_text(path_obj, self.editor.documentText())
             # The file now matches what we write, so any pending conversion has
@@ -4532,6 +4818,12 @@ class Notepad(QMainWindow):
             self._source_had_bom = False
             self._source_newline = self.NATIVE_NEWLINE
             self.editor.document().setModified(False)
+            self._autosave_failure_reported = False
+            if not self._holds_document_lock():
+                self._write_autosave_log(
+                    f"DOCUMENT LOCK: manual save written without ownership; "
+                    f"another instance may hold newer content.  path={path!r}"
+                )
             self._clear_recovery_file()
             self._update_default_directory(path_obj.parent)
             self._update_title()
@@ -4540,8 +4832,57 @@ class Notepad(QMainWindow):
                 self._start_autosave()
             return True
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
+            self._report_save_failure(path, e, allow_save_as=allow_save_as)
             return False
+
+    def _report_save_failure(self, path: str, exc: Exception,
+                             allow_save_as: bool = True) -> None:
+        """Explain a failed manual save, and offer the one route that recovers.
+
+        Inside the sandbox a denied write is not a broken disk: macOS has
+        withdrawn the grant for this file, and re-picking it through the Save
+        panel mints a fresh one.  Reporting the bare errno instead sends the
+        user looking for a problem that is not there -- the same reasoning as
+        the Permission Denied message on the read side in _open_file_path.
+        """
+        denied = isinstance(exc, PermissionError)
+        offer_save_as = allow_save_as and denied and _macos_is_sandboxed()
+
+        if offer_save_as:
+            text = (
+                f"macOS did not grant Neight permission to write:\n{path}\n\n"
+                "Choosing the file again with Save As restores access.\n\n"
+                "Your changes are NOT saved."
+            )
+        elif denied:
+            # Off the sandbox this is an ordinary permissions story, and the
+            # errno is part of telling it.  An earlier version of this branch
+            # dropped it and so said *less* than the bare "Could not save file"
+            # it replaced -- on Windows, where a read-only file or one held open
+            # by another program raises exactly this, that was a step backwards.
+            text = (
+                f"Permission to write this file was denied:\n{path}\n\n"
+                "The file may be read-only, or open in another program.\n\n"
+                f"{exc}\n\n"
+                "Your changes are NOT saved."
+            )
+        else:
+            text = f"Could not save file:\n{exc}"
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical)
+        box.setWindowTitle("Save Failed")
+        box.setText(text)
+        if offer_save_as:
+            save_as_btn = box.addButton("Save As\u2026", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Close)
+            box.setDefaultButton(save_as_btn)
+        else:
+            save_as_btn = None
+            box.addButton(QMessageBox.Close)
+        box.exec()
+        if save_as_btn is not None and box.clickedButton() is save_as_btn:
+            self.save_file_as()
 
     def _autosave(self):
         """Autosave the current file.
@@ -4558,6 +4899,15 @@ class Notepad(QMainWindow):
             return
         if not self.editor.document().isModified():
             return
+        if not self._holds_document_lock():
+            # Another instance owns this file.  Writing it here would overwrite
+            # whatever that window has typed, with nothing to warn either
+            # person -- so the tick goes to a recovery copy instead.  The
+            # user's work is still saved every tick, just not over someone
+            # else's.  A manual save is still allowed: they are present, and
+            # they were told when the file opened.
+            self._recovery_write()
+            return
         # Guard against overlapping writes (shouldn't happen at 2–30 min
         # intervals, but safe-guards against very slow filesystems).
         if getattr(self, '_autosave_in_progress', False):
@@ -4566,6 +4916,9 @@ class Notepad(QMainWindow):
         # Capture everything needed by the worker on the UI thread.
         text = self.editor.documentText()
         path = self.current_path
+        # Resolved here rather than in the worker: _grant_path is UI-thread
+        # state, and the worker must not read it while a save is reassigning it.
+        io_path = self._io_path(path)
 
         # Optimistically clear the dirty flag now; restored on failure.
         self.editor.document().setModified(False)
@@ -4593,10 +4946,15 @@ class Notepad(QMainWindow):
                 # so redeeming it on this worker thread works the same as on the
                 # UI thread.
                 if _macos_is_sandboxed():
-                    committed = _sandbox_write_text(
-                        path, text,
-                        should_commit=lambda: generation == self._save_generation,
-                    )
+                    route: list = []
+                    self._saves_since_grant += 1
+                    try:
+                        committed = _sandbox_write_text(
+                            io_path, text, route=route,
+                            should_commit=lambda: generation == self._save_generation,
+                        )
+                    finally:
+                        self._log_sandbox_save("autosave", io_path, route)
                 else:
                     committed = _atomic_write_text(
                         Path(path), text,
@@ -4613,6 +4971,7 @@ class Notepad(QMainWindow):
 
     def _on_autosave_success(self):
         """Called on the UI thread after a successful background autosave."""
+        self._autosave_failure_reported = False
         self._autosave_in_progress = False
         self._autosave_started_at = 0.0
         self._update_title()
@@ -4632,13 +4991,109 @@ class Notepad(QMainWindow):
         )
 
     def _on_autosave_failure(self, exc: Exception):
-        """Called on the UI thread after a failed background autosave."""
+        """Called on the UI thread after a failed background autosave.
+
+        This used to restore the dirty flag, flash a three-second status
+        message and log.  A message that disappears in three seconds is exactly
+        how someone keeps typing for an hour into a file that is no longer
+        being written -- the macOS sandbox can withdraw access to a file mid
+        session, and the loss is silent.  So: keep a copy somewhere that cannot
+        fail, stop pretending autosave is working, and say so in a dialog the
+        user has to dismiss.
+        """
         self._autosave_in_progress = False
         self._autosave_started_at = 0.0
         # Restore the dirty flag so the user is not left with an unsaved file.
         self.editor.document().setModified(True)
-        self.status.showMessage("Auto-save failed — check disk or permissions", 3000)
         self._write_autosave_log(f"FAIL: {exc!r}  path={self.current_path!r}")
+
+        # The copy comes first: whatever else goes wrong below, the text is on
+        # disk.  Current document text, not the worker's snapshot -- the user
+        # has kept typing since the write started, and the newer content is the
+        # one worth keeping.
+        copy_path = self._write_failure_copy(self.editor.documentText())
+
+        # Autosave has failed once; letting the timer keep firing would clear
+        # the dirty flag optimistically on every tick and rewrite this dialog's
+        # reason each time.  A successful manual save restarts it.
+        self._stop_autosave()
+
+        if self._autosave_failure_reported:
+            return
+        self._autosave_failure_reported = True
+
+        denied = isinstance(exc, PermissionError)
+        offer_save_as = denied and _macos_is_sandboxed()
+
+        lines = [f"Neight could not auto-save:\n{self.current_path}"]
+        if offer_save_as:
+            # The read path says the same thing at _open_file_path; this is the
+            # save-side half of it.  Re-picking the file through the panel is
+            # the only way to mint a fresh grant.
+            lines.append(
+                "macOS has withdrawn Neight's permission to write this file. "
+                "Choosing it again through Save As restores access."
+            )
+        elif denied:
+            lines.append("Permission to write this file was denied.")
+        else:
+            lines.append(f"The write failed with:\n{exc}")
+        lines.append("Your changes are NOT saved to that file.")
+        if copy_path is not None:
+            lines.append(f"A copy of the current text was kept here:\n{copy_path}")
+        else:
+            lines.append(
+                "Neight could not keep a backup copy either — copy your text "
+                "elsewhere before closing this window."
+            )
+        lines.append("Auto-save is now off for this document until a save succeeds.")
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Auto-save Failed")
+        box.setText("\n\n".join(lines))
+        if offer_save_as:
+            save_as_btn = box.addButton("Save As\u2026", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Close)
+            box.setDefaultButton(save_as_btn)
+        else:
+            save_as_btn = None
+            box.addButton(QMessageBox.Close)
+        box.exec()
+        if save_as_btn is not None and box.clickedButton() is save_as_btn:
+            self.save_file_as()
+
+    def _write_failure_copy(self, text: str) -> Optional[Path]:
+        """Keep a copy of ``text`` where writing cannot be denied.
+
+        Deliberately not the _recovery_write machinery: that is asynchronous,
+        keeps one file per window session, and is deleted by
+        _clear_recovery_file on the next successful save.  This one has to
+        land *before* the dialog that reports the failure is shown, and has to
+        survive as evidence, so it is a plain synchronous write with its own
+        name.  Blocking the UI thread briefly on an error path is the right
+        trade: the alternative is telling the user about a backup that may not
+        exist yet.
+
+        _get_app_data_dir() is inside the container in the sandboxed build, so
+        this write needs no grant and cannot hit the permission failure that
+        brought us here.  Returns the path written, or None if even this
+        failed.
+        """
+        try:
+            folder = Notepad._get_app_data_dir()
+            stem = Path(self.current_path).stem if self.current_path else "untitled"
+            suffix = Path(self.current_path).suffix if self.current_path else ".txt"
+            if suffix.lower() not in (".txt", ".md", ".markdown"):
+                suffix = ".txt"
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            target = folder / f"unsaved-{stem}-{stamp}{suffix}"
+            _atomic_write_text(target, text)
+            self._write_autosave_log(f"FAILURE COPY: kept text at {target}")
+            return target
+        except Exception as copy_exc:
+            self._write_autosave_log(f"FAILURE COPY FAILED: {copy_exc!r}")
+            return None
 
     # ------------------------------------------------------------------
     # Recovery writes (for unsaved documents with no current_path)
@@ -4731,10 +5186,20 @@ class Notepad(QMainWindow):
         try:
             if sys.platform == "darwin":
                 # NSWorkspace, which Qt uses under openUrl, is the mechanism a
-                # sandboxed app is permitted to reveal a folder with.  The
-                # previous subprocess call to /usr/bin/open could not work in
-                # the Store build: the sandbox does not let a process exec a
-                # binary outside its own bundle.
+                # sandboxed app is permitted to reveal a folder with, and it
+                # needs no child process at all.
+                #
+                # This comment used to give the reason as "the sandbox does not
+                # let a process exec a binary outside its own bundle".  That is
+                # false, and it was read as a general rule and applied
+                # elsewhere before anyone checked it: the sandbox permits
+                # fork/exec and children simply inherit it, which is why
+                # webbrowser.open -- /bin/sh, then /usr/bin/osascript -- still
+                # opens the Google and Sorkuvai searches from the Store build,
+                # verified there by hand.  Why the earlier /usr/bin/open call
+                # failed was never established.  openUrl is the right mechanism
+                # either way, so the call stands and only the reasoning is
+                # withdrawn.
                 opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
             elif sys.platform == "win32":
                 subprocess.run(["explorer", str(folder)], check=False)
@@ -4835,17 +5300,53 @@ class Notepad(QMainWindow):
                 "Auto-save watchdog triggered — check today's autosave log in Help › Debug Info", 5000
             )
 
+    def _log_sandbox_save(self, kind: str, io_path: str, route: list) -> None:
+        """Record how a sandboxed write went, in the always-on autosave log.
+
+        NEIGHT_SANDBOX_DIAG cannot answer a user's report: it is opt-in by
+        environment variable, and Store users launch through LaunchServices
+        where no such variable exists.  This log is always on and is already
+        reachable from Help \u203a Debug Info, so the next time a file that
+        opened fine cannot be saved, the record says which door the write took
+        ("qfile" = Qt's bookmark resolved; "python-fallback" = it did not, but
+        a process-wide grant covered the file; "denied" = neither), on which
+        thread, and how many writes the grant had already served.
+        """
+        outcome = route[0] if route else "raised"
+        keyed = "grant" if io_path == self._grant_path else "current_path"
+        # Qt's bookmark store is one plist per container, shared by every
+        # instance and written with no cross-process lock -- the hazard
+        # SettingsManager.lock() exists to answer for settings.json.  A denied
+        # save in an instance that does not own the document, alongside a
+        # successful one in the instance that does, is the evidence that the
+        # store is where the grant went.  Without this field the two instances'
+        # lines are indistinguishable.
+        owns = "held" if self._holds_document_lock() else "not-held"
+        self._write_autosave_log(
+            f"SANDBOX SAVE: {kind} route={outcome} keyed-on={keyed} lock={owns} "
+            f"writes-since-grant={self._saves_since_grant} path={io_path!r}"
+        )
+
     def _write_autosave_log(self, message: str):
         """Append a timestamped line to the autosave diagnostic log.
-        Runs on the UI thread; failures are silently ignored so a broken
-        log path never interrupts the user.
+
+        Called from the UI thread and from the autosave worker: every write is
+        a single short line opened O_APPEND, which the OS will not interleave.
+        Failures are silently ignored so a broken log path never interrupts the
+        user.
+
+        The PID matters because there is one log per day for the whole app and
+        every window is its own process, so without it two instances' lines
+        interleave with no way to tell them apart -- which is exactly the
+        situation this log is most needed to describe.  Recovery filenames
+        (recovery-<PID>-<random>) already identify themselves the same way.
         """
         try:
             log_path = self.settings.log_path
             log_path.parent.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open(log_path, "a", encoding="utf-8") as fh:
-                fh.write(f"[{timestamp}] {message}\n")
+                fh.write(f"[{timestamp}] [pid {os.getpid()}] {message}\n")
         except Exception:
             pass
 
@@ -5827,9 +6328,16 @@ class Notepad(QMainWindow):
             self.status.showMessage("Export path copied to clipboard", 2500)
 
         def open_exported_pdf():
-            file_url = QUrl.fromLocalFile(str(Path(save_path).resolve()))
-            if not QDesktopServices.openUrl(file_url):
-                QMessageBox.warning(dialog, "Open Failed", f"Could not open:\n{save_path}")
+            # save_path exactly as the panel returned it -- resolving it first
+            # would miss the grant Qt stored under that string.
+            if not _sandbox_open_externally(save_path):
+                QMessageBox.warning(
+                    dialog,
+                    "Could Not Open",
+                    f"The PDF was exported successfully, but Neight could not "
+                    f"hand it to another application:\n\n{save_path}\n\n"
+                    "Open it from Finder instead.",
+                )
 
         copy_btn.clicked.connect(copy_path_to_clipboard)
         open_btn.clicked.connect(open_exported_pdf)
@@ -8048,7 +8556,10 @@ th {{ background-color: {table_head_bg}; }}
             height = max(height, 200)
             autosave_interval = getattr(self, '_autosave_interval_minutes', data.get("autosave_interval", 5))
             if self.current_path:
-                last_opened_file = self.current_path
+                # The grant's own spelling, so a relaunch hands Qt back the key
+                # its bookmark is stored under and "continue where you left
+                # off" can still read the file in the sandboxed build.
+                last_opened_file = self._grant_path or self.current_path
             elif not self._restore_last_session:
                 # Keep the previously remembered file when this window was created
                 # as an explicit empty window via the New Window menu action.
@@ -9204,7 +9715,11 @@ th {{ background-color: {table_head_bg}; }}
     def _update_title(self, *_):
         name = "Untitled" if self.current_path is None else QFileInfo(self.current_path).fileName()
         modified = "*" if self.editor.document().isModified() else ""
-        self.setWindowTitle(f"{name}{modified} - Neight")
+        # The "already open" dialog is gone in a second; this is not.  Without
+        # it the one window that is not auto-saving looks exactly like the one
+        # that is.
+        shared = "" if self._holds_document_lock() else " (open in another window)"
+        self.setWindowTitle(f"{name}{modified}{shared} - Neight")
 
     def _on_preview_splitter_moved(self, _pos: int, _index: int) -> None:
         """Remember a divider the user dragged, and persist it when they settle."""
@@ -9668,6 +10183,7 @@ th {{ background-color: {table_head_bg}; }}
     # Confirm close with save prompt and persist settings
     def closeEvent(self, event):
         if self._maybe_save_changes():
+            self._release_document_lock()
             self._clear_recovery_file()
             if not getattr(self, '_settings_reset_pending', False):
                 self._save_preferences()
