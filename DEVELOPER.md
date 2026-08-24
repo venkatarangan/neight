@@ -93,69 +93,8 @@ which is exactly what happened, and why `pillow` is no longer in
 
 ### Windows build
 
-The standard build script increments the version number automatically and then runs PyInstaller.
-
-```bat
-buildme.bat
-```
-
-For a release build, use an environment containing `requirements.txt` plus the
-pinned PyInstaller version and **nothing else**. Do not build from the general
-development environment: optional design and presentation packages can be
-discovered by PyInstaller hooks and silently added to the executable even though
-Neight never imports them. This is not theoretical: an ordinary development
-`.venv` — `requirements.txt` plus `requirements-dev.txt`, nothing unusual —
-produced a **68.2 MB** `Neight.exe` where the same source built clean gives
-**50.4 MB**. `pillow` and `python-pptx` were the culprits (`python-pptx` also
-drags in `lxml` and `xlsxwriter`). That 68.2 MB build was the public Windows
-download for three weeks.
-
-Since 2026.083 neither is in `requirements-dev.txt`: `python-pptx` is gone
-entirely — the `make_slides.py` it existed for is not in this repository —
-and `pillow` moved to [requirements-design.txt](requirements-design.txt),
-installed only when regenerating icons. A development environment is therefore
-no longer capable of producing that build. Keep it that way: the separation
-above is still the rule, because the next optional package added anywhere will
-behave exactly the same.
-
-```powershell
-Remove-Item -Recurse -Force .venv   # if the existing one has drifted
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt -r requirements-build.txt
-buildme.bat
-```
-
-Reinstall `requirements-dev.txt` **after** the build to get the pre-commit hooks
-back. Doing it in that order is the whole point — the development environment is
-fine to have, just not while PyInstaller is looking.
-
-#### Rebuilding without a version bump
-
-```bat
-buildme.bat --no-bump
-```
-
-Skips step 1 below and builds the version already committed in `neight.py`.
-
-Use it when Windows is catching up to a version macOS already set. The two
-platforms build on separate machines, so `VERSION` drifts between them; bumping
-on a catch-up build would leave the two `dist-latest` artifacts permanently one
-version apart, which is visible to anyone comparing the website's two download
-links. It also leaves the working tree clean, so `build_msix.ps1` can run
-straight afterwards without an intervening commit.
-
-What it does:
-1. Runs `python increment_version.py` to bump `VERSION` in `neight.py`
-   (skipped with `--no-bump`)
-2. Runs PyInstaller from the checked-in spec: `pyinstaller packaging\Neight.windows.spec`
-3. Produces `dist\Neight.exe`
-4. Publishes `dist\Neight.exe` to the `dist-latest` branch on a best-effort
-   basis without changing the working tree
-
-After a successful build the script confirms that `dist\Neight.exe` is now the
-public Windows download, and points at `build_msix.ps1` for the Store package.
+See [Windows](#windows) — the clean-build-environment requirement, the build
+itself, and the Store package are all covered there.
 
 ### macOS build
 
@@ -198,9 +137,7 @@ The artifacts, and the URLs they are served from:
 
 Both are **unsigned**, always the newest build, and carry no version history —
 each build replaces the last. These are the links to give a developer or a
-technical tester. `.github/workflows/release-assets-check.yml` checks daily that
-both still resolve, since a force-pushed branch leaves no history to notice a
-broken publish from.
+technical tester.
 
 ### Commit the version bump
 
@@ -219,117 +156,162 @@ this — it refuses to package while the tree has uncommitted changes.
 
 ---
 
-## Microsoft Store (MSIX) Packaging
+## Windows
 
-Neight's `.exe` triggers SmartScreen warnings for new users because it isn't
-signed by a certificate with an established reputation. Publishing through
-the Microsoft Store sidesteps that entirely — the Store re-signs every
-package with its own certificate on publish, so an end user never sees a
-SmartScreen prompt. Registration is free for an individual developer account
-(Microsoft dropped the old $19 fee).
+Building the `.exe`, the Microsoft Store package, and Explorer's file
+associations — the Windows-specific counterpart to [macOS](#macos) below.
 
-This packages the existing `Neight.exe` as a classic Win32 app under the
-**Desktop Bridge** (`EntryPoint="Windows.FullTrustApplication"`), not as a
+### Building the app
+
+```bat
+buildme.bat
+```
+
+increments `VERSION` and runs PyInstaller against the checked-in
+`packaging\Neight.windows.spec`. For a release build, use an environment
+holding only `requirements.txt` plus the pinned PyInstaller version —
+**nothing else**. This is not theoretical: an ordinary development `.venv`
+(`requirements.txt` plus `requirements-dev.txt`) produced a **68.2 MB**
+`Neight.exe` where the same source built clean gives **50.4 MB** — `pillow`
+and `python-pptx`, discovered and bundled by PyInstaller's hooks even though
+Neight never imports either, were the culprits. That 68.2 MB build was the
+public Windows download for three weeks. Since 2026.083 neither package is in
+`requirements-dev.txt` (`pillow` moved to
+[requirements-design.txt](requirements-design.txt), installed only when
+regenerating icons), so a development environment can no longer produce that
+build — keep it that way; the next optional package added anywhere will
+behave the same way.
+
+```powershell
+Remove-Item -Recurse -Force .venv   # if the existing one has drifted
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-build.txt
+buildme.bat
+```
+
+Reinstall `requirements-dev.txt` **after** the build, to get the pre-commit
+hooks back — the development environment is fine to have, just not while
+PyInstaller is looking.
+
+`buildme.bat --no-bump` builds the version already committed in `neight.py`
+instead of bumping it. Use it when Windows is catching up to a version macOS
+already set — the two platforms build on separate machines, so `VERSION`
+drifts between them, and bumping again on a catch-up build would leave the
+two `dist-latest` artifacts permanently one version apart. It also leaves the
+tree clean, so `build_msix.ps1` can run straight afterwards without an
+intervening commit.
+
+Either way, the last step force-pushes `dist\Neight.exe` to `dist-latest` —
+see [Publishing a build](#publishing-a-build) — and the script points at
+`build_msix.ps1` for the Store package afterwards.
+
+### The two channels
+
+**Direct download** — `Neight.exe` on `dist-latest`, unsigned, always the
+newest build:
+`https://raw.githubusercontent.com/venkatarangan/neight/dist-latest/dist/Neight.exe`.
+It triggers a SmartScreen warning, since it isn't signed by a certificate
+with an established reputation.
+
+**Microsoft Store** — live at
+[apps.microsoft.com/detail/9pj70ndp41lv](https://apps.microsoft.com/detail/9pj70ndp41lv).
+The Store re-signs every package with its own certificate on publish, so a
+Store install never shows the SmartScreen prompt the direct download does.
+
+### Microsoft Store (MSIX) Packaging
+
+Packages the existing `Neight.exe` as a classic Win32 app under the
+**Desktop Bridge** (`EntryPoint="Windows.FullTrustApplication"`), not a
 native UWP rewrite — no application source changes are needed.
 
-### One-time account setup — already done
+**Account setup is already done.** `packaging/msix_identity.json` holds the
+real Partner Center values (`Package/Identity/Name`, `.../Publisher`,
+`Properties/PublisherDisplayName`), so a clean clone builds the MSIX with no
+setup. They are not secret — they ship inside every installed copy — which is
+why they're committed. Rebuilding this from scratch would mean registering a
+free individual developer account at
+[partner.microsoft.com/dashboard](https://partner.microsoft.com/dashboard),
+reserving the `Neight` name under **Apps and games → + New product**, and
+copying those three values from that app's **Product identity** page —
+byte-for-byte, or the package is rejected.
 
-**This is complete and nothing here needs redoing.** The listing is live at
-[apps.microsoft.com/detail/9pj70ndp41lv](https://apps.microsoft.com/detail/9pj70ndp41lv),
-and `packaging/msix_identity.json` holds the real Partner Center values, so a
-clean clone builds the MSIX with no setup. Kept as a record of where those
-values came from, and for anyone rebuilding this from scratch:
-
-1. Register a free individual developer account at
-   [partner.microsoft.com/dashboard](https://partner.microsoft.com/dashboard).
-   Identity verification can take a few days.
-2. **Apps and games → + New product → reserve the name** `Neight`.
-3. Open that app's **Product identity** page (under App management) and copy
-   the three values shown there — **Package/Identity/Name**,
-   **Package/Identity/Publisher**, **Package/Properties/PublisherDisplayName**
-   — into `packaging/msix_identity.json`. Do not guess these values; they must
-   match Partner Center's records byte-for-byte or the package will be rejected.
-
-The three values are not secret — they ship inside every installed copy — which
-is why they are committed rather than kept out of the repository.
-
-### Building the package
+**Building:**
 
 ```powershell
 buildme.bat                 # produces dist\Neight.exe, as usual
 build_msix.ps1              # produces dist\Neight.msix
 ```
 
-Use `buildme.bat --no-bump` when repackaging a version that is already
-committed — it leaves `neight.py` unmodified, so the working tree stays clean
-and `build_msix.ps1` runs straight afterwards. A plain `buildme.bat` bumps
-`VERSION`, which must then be committed before `build_msix.ps1` will run.
+Use `buildme.bat --no-bump` when repackaging an already-committed version —
+`build_msix.ps1` refuses to run while the tree has uncommitted changes, since
+a Store submission must always trace back to source on `main`. Build the
+`.exe` from the clean environment above first — the MSIX packages whatever
+`dist\Neight.exe` happens to be, so a development-environment build ships the
+same bloat to the Store.
 
-Build the `.exe` from a clean environment (above) — the MSIX packages whatever
-`dist\Neight.exe` happens to be, so a development-environment build gets
-published to the Store with the same bloat.
+`build_msix.ps1` also converts `VERSION` into the 4-part numeric version MSIX
+requires (`"2026.086"` → `2026.86.0.0`); stages `Neight.exe`, the logo assets
+from `packaging/msix_assets/Assets/` (regenerate from `neight.ico` with
+`python design/gen_msix_assets.py`), and a rendered
+`packaging/AppxManifest.xml.template` into `dist\msix_staging\`, deleting and
+recreating that directory each run so a stray file from a locally-registered
+test install can never end up in a shipped package; parses the staged
+manifest before packing, since `makeappx` reports any XML problem as the same
+opaque *"the package manifest is not valid"* with no line number (a double
+hyphen inside an XML comment is enough to trigger it); and runs
+`makeappx.exe pack` (Windows SDK — installed with Visual Studio, or
+standalone from the
+[Windows SDK downloads page](https://developer.microsoft.com/windows/downloads/windows-sdk/))
+to produce `dist\Neight.msix`.
 
-To test the package locally without submitting, enable Developer Mode and
-register it in place:
-
-```powershell
-Add-AppxPackage -Register dist\msix_staging\AppxManifest.xml
-```
-
-Two things to know about that. It installs *from the build folder*, so
-rebuilding changes the installed app underneath itself, and the register fails
-with `0x80073D02` while any instance is running — close Neight first. And it
-replaces a Store-installed copy; reinstall from the listing to get back. This
-is the only way to test file associations, which do not exist until the package
-is installed.
-
-`build_msix.ps1`:
-
-- refuses to run while `packaging/msix_identity.json` still has placeholder
-  values, or while the working tree has uncommitted changes (the packaged
-  version must match what's committed, so a Store submission can always be
-  traced back to source on `main`);
-- converts Neight's `VERSION` into the 4-part numeric version MSIX requires
-  (e.g. `"2026.081"` becomes `2026.81.0.0`);
-- stages `Neight.exe` plus the logo assets from
-  `packaging/msix_assets/Assets/` (regenerate them from `neight.ico` any time
-  with `python design/gen_msix_assets.py`) and a rendered
-  `packaging/AppxManifest.xml.template` into `dist\msix_staging\`, deleting and
-  recreating that directory each run — so a stray file left there by a
-  locally-registered test install can never end up in a shipped package;
-- parses the staged manifest before packing. `makeappx` reports any XML problem
-  as the same opaque *"the package manifest is not valid"* with no line number,
-  and a double hyphen inside an XML comment is enough to trigger it;
-- runs `makeappx.exe pack` (from the Windows SDK — installed with Visual
-  Studio, or standalone from the
-  [Windows SDK downloads page](https://developer.microsoft.com/windows/downloads/windows-sdk/))
-  to produce `dist\Neight.msix`.
-
-### Testing locally before submitting
-
-Fastest path — no signing needed, just enable **Settings → Privacy & security
-→ For developers → Developer Mode** once, then:
+**Testing locally**, no signing needed — enable **Settings → Privacy &
+security → For developers → Developer Mode** once, then:
 
 ```powershell
 Add-AppxPackage -Register dist\msix_staging\AppxManifest.xml
 ```
 
-To test the actual signed `.msix` file (closer to what Partner Center will
-receive), run `build_msix.ps1 -Sign`. On first use this creates a throwaway
-local test certificate (`packaging\NeightTestCert.pfx`/`.cer`, gitignored —
-**never commit these**), signs the package with it, and prints the
-`Import-Certificate` / `Add-AppxPackage` commands to trust and install it.
-This certificate is for local testing only; it is never uploaded anywhere,
-and has no bearing on Store submission.
+This installs *from the build folder*, so rebuilding changes the installed
+app underneath itself, and registration fails with `0x80073D02` while any
+instance is running — close Neight first. It also replaces a Store-installed
+copy; reinstall from the listing to get back. It's the only way to test file
+associations, which don't exist until the package is installed — see
+[File associations](#file-associations) below.
 
-### Submitting to the Store
+To test the actual signed `.msix` (closer to what Partner Center receives),
+run `build_msix.ps1 -Sign`. On first use this creates a throwaway local test
+certificate (`packaging\NeightTestCert.pfx`/`.cer`, gitignored — **never
+commit these**) and prints the `Import-Certificate` / `Add-AppxPackage`
+commands to trust and install it. Local testing only; never uploaded, and has
+no bearing on Store submission.
 
-Partner Center → your app → **Packages** → upload `dist\Neight.msix`
-directly. Partner Center signs it with the Store's own certificate on
-publish, so the local test certificate above is not required for submission.
+**Submitting:** Partner Center → your app → **Packages** → upload
+`dist\Neight.msix` directly. Partner Center signs it with the Store's own
+certificate on publish, so the local test certificate above isn't required.
 Store listing content (description, screenshots, age rating) is filled in
-separately in Partner Center and isn't something a script can meaningfully
-automate.
+separately in Partner Center.
+
+### File associations
+
+`.txt`, `.md` and `.markdown` are declared in
+`packaging/AppxManifest.xml.template` — the only mechanism the shell honours
+for a packaged app, and what puts Neight in Explorer's **Open With** menu on
+a Store install. The unpackaged `.exe` has no association at all, so neither
+a source checkout nor a bare `Neight.exe` can exercise this path; test it by
+registering the package locally (above) and checking `.txt`, `.md` and
+`.markdown` by hand.
+
+**No application can make itself the default handler on Windows** — the
+`UserChoice` registry value has been hash-protected since Windows 8.
+Appearing in Open With is the most any app may do; don't accept a "fix" that
+claims otherwise. Do not reintroduce registry writes to
+`HKCU\Software\Classes`: Neight used to do this and it broke on the move to
+the Store, since the writes don't survive and the open command would name a
+`WindowsApps` path containing the version number, which disappears at the
+next update. `_win_repair_orphaned_associations()` exists to clean up what
+that left behind.
 
 ---
 
@@ -660,7 +642,7 @@ design/                — icon generators, MSIX asset generator, and
                          architecture infographic source
 knownbugs/             — documented Qt-level bugs, validation runs and fix records
 session-notes/         — per-session handoff records (see "Session notes" above)
-tests/                 — regression suite, run in CI on Windows and macOS
+tests/                 — regression suite, run in CI on ubuntu-latest
 screenshots/           — screenshots used in documentation
 dist/                  — build output (gitignored — see "Why dist/ Isn't on GitHub")
 CHANGELOG.md           — what changed in each build, tagged by platform
@@ -682,7 +664,7 @@ the July 2026 history rewrite means an old clone cannot fast-forward.
 ### Regression suite
 
 Plain scripts rather than pytest, so CI needs nothing beyond `requirements.txt`.
-Run them before pushing — CI runs exactly these:
+Run them before pushing:
 
 ```bash
 QT_QPA_PLATFORM=offscreen python3 tests/test_startup_settings.py
@@ -695,8 +677,11 @@ QT_QPA_PLATFORM=offscreen python3 tests/test_sandbox_qt_io.py
 ```
 
 Each exits non-zero on failure and prints failures as GitHub Actions
-annotations. See [tests/README.md](tests/README.md) for what each one guards and
-why.
+annotations. `.github/workflows/checks.yml` runs exactly these, but only on
+`ubuntu-latest` — there is no Windows or macOS leg, so a platform-specific
+regression (like a Windows path-handling bug) is only caught by running the
+suite locally on that platform before pushing. See
+[tests/README.md](tests/README.md) for what each one guards and why.
 
 ---
 
@@ -722,7 +707,7 @@ Three layers of protection have been added to this project:
 
 1. **Pre-commit hook** (`.pre-commit-config.yaml`) — a `pygrep`-based hook scans `.py` and `.html` files for the corrupted form before every commit and aborts with an error if it is found. It also enforces UTF-8 encoding and LF line endings.
 
-2. **GitHub Actions workflow** (`.github/workflows/tamil-guard.yml`) — runs on every push and pull request. Uses `grep -P` (PCRE) to check all `.py` and `.html` files. If the corrupted form is found, the build fails with an explicit error message.
+2. **GitHub Actions** (`.github/workflows/checks.yml`, `encoding-guards` job) — runs on every push and pull request, checking all `.py` and `.html` files. If the corrupted form is found, the build fails with an explicit error message.
 
 3. **Copilot repository instructions** (`.github/copilot-instructions.md`) —
    tell AI coding tools not to retype, autocomplete, or modify Tamil strings,

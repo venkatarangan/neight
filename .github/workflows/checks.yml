@@ -4,15 +4,14 @@ on: [push, pull_request]
 
 jobs:
   # The application imports PySide6 at module scope, so "does it even parse and
-  # import" needs a real Qt install and an offscreen platform plugin.  Running it
-  # on both target platforms is what catches a change that only compiles on one.
+  # import" needs a real Qt install and an offscreen platform plugin. Runs on
+  # ubuntu-latest only -- there is no per-platform matrix here, so a Windows-
+  # or macOS-only regression will not be caught in CI. Run the regression
+  # suite locally on the platform you're changing before pushing; see
+  # DEVELOPER.md's "Regression suite" section.
   import-and-construct:
-    name: Import and construct (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
+    name: Import and construct
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -44,11 +43,9 @@ jobs:
           print('constructed OK on', sys.platform)
           "
 
-      # These live in tests/ rather than inline here so they can be run locally,
-      # which is the only way a change that breaks one gets noticed before it is
-      # pushed.  The startup guard was previously an inline heredoc: PowerShell
-      # is the default shell on the Windows runner and could not parse it, so
-      # that half of the matrix had never actually executed the check.
+      # These live in tests/ rather than inline here so they can be run locally
+      # too -- the only way a Windows- or macOS-only regression gets noticed,
+      # since this job only runs on ubuntu-latest.
       - name: Regression suite
         env:
           QT_QPA_PLATFORM: offscreen
