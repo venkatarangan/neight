@@ -4174,7 +4174,7 @@ class Notepad(QMainWindow):
         # what the non-sandboxed branch and every user-facing message use, and
         # the only form that can carry a "~" Qt would not expand.
         raw_path = str(path)
-        qt_path = raw_path if (sandboxed and raw_path.startswith("/")) else str(path_obj)
+        qt_path = raw_path if (sandboxed and not raw_path.startswith("~")) else str(path_obj)
         if sandboxed:
             info = QFileInfo(qt_path)
             exists = info.exists() and info.isFile()
