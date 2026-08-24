@@ -132,8 +132,18 @@ if "%PUBLISH_RESULT%"=="0" (
 )
 echo.
 
-echo This build is now the public Windows download - dist-latest is
-echo what the website and README link to, so it went live above.
+REM Keyed on whether the publish actually happened.  This banner used to
+REM print unconditionally, so a build whose publish was skipped -- no
+REM remote, a missing artifact, no network -- still ended by announcing it
+REM had gone live, directly below the warning saying it had not.
+if "%PUBLISH_RESULT%"=="0" (
+    echo This build is now the public Windows download - dist-latest is
+    echo what the website and README link to, so it went live above.
+) else (
+    echo NOT published. The public Windows download is unchanged --
+    echo dist-latest still holds whatever it held before this run.
+    echo What is in dist\ here is a local artifact only.
+)
 echo.
 echo For the Microsoft Store, package it with build_msix.ps1.
 echo.

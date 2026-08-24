@@ -271,6 +271,33 @@ A separate question — whether `_validate_url`'s HEAD request can work without
 **closed by the user without change**. `_validate_url` and PRIVACY.md item 4
 stay as they are.
 
+## A test build, and a build script that lied about it
+
+Built 2026.087 locally so the changes could be tried by hand. `buildme_mac_app.sh`
+has no flag for this: it bumps `VERSION` first and force-pushes `dist-latest`
+last, so running it *is* publishing. The way through is a throwaway clone with
+`origin` removed -- the publish step is best-effort and skips cleanly with "No
+'origin' remote configured", leaving the real tree clean and the public download
+untouched.
+
+Doing that exposed a defect in both build scripts. The closing banner --
+"This build is now the public macOS download ... it went live the moment it was
+published above" -- printed **unconditionally**, three lines below the warning
+saying the publish had failed. `buildme.bat` had the identical bug and already
+had a `PUBLISH_RESULT` variable it was not consulting. Both banners are now
+keyed on whether the publish actually happened.
+
+Worth stating the asymmetry the fix protects: of the two ways to be wrong,
+telling someone a private build is public wastes a little worry; telling them a
+public build is private does not. The old text could do the second.
+
+**What that build can and cannot verify.** It is signed ad-hoc and deliberately
+*without* `packaging/Neight.entitlements` -- the script says why: sandboxing a
+direct-download build that has no provisioning profile would only break it. So
+`_macos_is_sandboxed()` is False in it and **neither sandbox fix is reachable**.
+The document lock, the auto-save failure dialog and ordinary regressions are
+all testable; the PDF "Open" fix and the grant-key fix still need the signer.
+
 ## Still open
 
 **The reported intermittent save failure has no identified root cause.** What

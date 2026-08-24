@@ -237,9 +237,11 @@ publish_to_dist_latest() {
 
 echo "Publishing unsigned build to the '${DIST_LATEST_BRANCH}' branch..."
 if publish_to_dist_latest "dist/${ZIP_NAME}"; then
+    PUBLISHED=1
     echo "Published ${ZIP_NAME} to '${DIST_LATEST_BRANCH}'."
     echo "Raw URL: https://raw.githubusercontent.com/venkatarangan/neight/${DIST_LATEST_BRANCH}/dist/${ZIP_NAME}"
 else
+    PUBLISHED=0
     echo "Warning: could not publish to '${DIST_LATEST_BRANCH}' (see above)."
     echo "The local build in dist/ is unaffected; re-run this script to retry."
 fi
@@ -251,11 +253,25 @@ echo "2) Drag Neight.app to Applications"
 echo "3) First launch: right-click Neight.app -> Open -> Open"
 echo "4) If blocked, run: xattr -dr com.apple.quarantine /Applications/Neight.app"
 echo ""
+# Keyed on whether the publish actually happened.  This banner used to print
+# unconditionally, so a build whose publish was skipped -- no network, no
+# remote, a deliberate build in a clone with origin removed -- still ended by
+# announcing it had gone live, three lines below the warning saying it had not.
+# Of the two ways to be wrong here, telling someone a private build is public
+# is the harmless one; telling them a public one is private is not.  Both are
+# avoidable.
 echo "========================================"
-echo "This build is now the public macOS download."
-echo "dist-latest is what the website and README"
-echo "link to, so it went live the moment it was"
-echo "published above."
+if [ "${PUBLISHED}" -eq 1 ]; then
+    echo "This build is now the public macOS download."
+    echo "dist-latest is what the website and README"
+    echo "link to, so it went live the moment it was"
+    echo "published above."
+else
+    echo "NOT published.  The public macOS download is"
+    echo "unchanged -- dist-latest still holds whatever"
+    echo "it held before this run.  dist/ here is a"
+    echo "local artifact only."
+fi
 echo ""
 echo "For the Mac App Store, hand the signer:"
 echo "  dist/${ZIP_NAME}"
