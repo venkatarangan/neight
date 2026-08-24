@@ -1,16 +1,45 @@
-# Neight 2026.085 — handover for the Mac App Store update
+# Neight 2026.087 — handover for the Mac App Store update
 
 **For:** whoever signs and submits Neight to the Mac App Store.
 **From:** the Neight repository, <https://github.com/venkatarangan/neight>.
-**Date:** 2026-08-23.
+**Date:** 2026-08-24.
 
-Thank you for the diagnostic run, and for the follow-up telling us **opening
-now works but saving does not** — that second report is what found the
-remaining bug. This is a **normal submission**, not another diagnostic: sign
-it as you did the 2026.084 test build and upload it. This document is
+**2026.086 is live on the Store and its file I/O works** — thank you for
+signing it. This is the follow-up submission, a **normal one**, not a
+diagnostic: sign it as you did before and upload it. This document is
 self-contained — you do not need the rest of the repository.
 
-## What your diagnostic run found, and what changed
+## What is new in 2026.087
+
+Two things the 2026.086 fix left undone, both found by a user on the live
+Store build, and one bug that has nothing to do with the sandbox:
+
+1. **Exporting to PDF worked, but clicking Open in the confirmation dialog
+   was refused** by macOS — "Neight does not have permission to open …" — for
+   a file Neight had just written. `QDesktopServices.openUrl` does not go
+   through a file engine at all: it asks LaunchServices, which checks the
+   calling process's own access, and Qt holds the grant dormant as a bookmark.
+   The file is now opened through `QFile` first, which wakes the grant, and
+   the handle is held open across the call.
+
+2. **A file that opened could then fail to save.** The open path used the
+   exact path string the panel returned, then stored the normalised form,
+   which every later save used — so Qt's bookmark lookup missed. The grant's
+   own spelling is now kept and used for writes.
+
+3. **Two Neight windows on one file destroyed each other's work.** Every
+   window is a separate process and both auto-saved to the same path with no
+   coordination. A document is now owned by one window; the second still opens
+   and edits it, says so, and keeps its typing in a recovery copy instead of
+   overwriting. This one is not macOS-specific.
+
+A failed auto-save now also stops, keeps a copy, and says so in a dialog
+rather than a three-second status message.
+
+**Step 7 and steps 9–11 of the test below are the new ones** — everything else
+is the pass you already know.
+
+## Background: what your diagnostic run found
 
 Your log proved that the Open panel *was* granting access, and that Qt was
 converting the grant into a bookmark in its own store at the same instant
@@ -95,16 +124,16 @@ be traced to a build.
 
 | | |
 |---|---|
-| **Version** | 2026.085 |
+| **Version** | 2026.087 |
 | **Bundle identifier** | `com.murasu.neight` |
 | **Architecture** | Apple Silicon (arm64) only — deliberately no Intel or universal slice |
 | **Minimum macOS** | 15.0 (Sequoia) |
 | **Artifact** | `Neight-mac-arm64-unsigned.app.zip` |
-| **SHA-256** | `FILL IN AFTER THE BUILD` — see note below |
+| **SHA-256** | `5d16a56f0c97f7cef3ceee05970e6d37a900a949a4af2e3fc89063593ea5bb3f` |
 
-> **The SHA-256 above must be filled in from the actual 2026.085 artifact
-> before this document is sent.** Any hash carried over from an earlier build
-> is wrong by definition — `buildme_mac_app.sh` produces a new artifact.
+> The SHA-256 above is from the actual 2026.087 artifact, taken at build
+> time. Any hash carried over from an earlier build is wrong by definition —
+> `buildme_mac_app.sh` produces a new artifact every run.
 
 Verify before you start — the `dist-latest` branch is force-pushed on every
 build and may have moved on:
@@ -257,17 +286,19 @@ If all eleven steps pass, upload.
 
 ## Context you may want
 
-- **The only functional changes since 2026.083** are the sandboxed file I/O
-  fixes described above (2026.084 was your diagnostic build and was never
-  submitted). Nothing outside the sandbox path changed behaviour. The macOS
-  15.0 floor work from 2026.083 is carried forward.
+- **The functional changes since the live 2026.086** are the three listed at
+  the top, plus the louder auto-save failure. Nothing else changed behaviour.
+  The macOS 15.0 floor work is carried forward.
+- **Not yet exercised on Windows.** Neight ships on the Microsoft Store too,
+  and the document-ownership change affects both platforms; it has been run on
+  macOS and Linux only. Irrelevant to your signing, noted for completeness.
 - **The app makes no network calls on its own.** It never checks for updates
   or contacts a server unless the user clicks something. Worth knowing if App
   Review asks.
 - **Neight is a Tamil and English text editor**, PySide6 (Qt 6) on Python
   3.14, single-window, document-based. It declares plain-text and Markdown
   document types so it appears in Finder's **Open With**.
-- **Version numbering.** `YYYY.NNN` — `2026.085` is the 85th build of 2026,
+- **Version numbering.** `YYYY.NNN` — `2026.087` is the 87th build of 2026,
   not a semantic version.
 - **Full reference:** `packaging/MAC-APP-STORE-SIGNING.md` in the repository,
   which this document condenses. The live listing is at
