@@ -84,6 +84,11 @@ Anything untagged is cross-platform.
   an unresolvable bookmark apart from a wrong lookup key the next time this
   happens, without another signed diagnostic round trip.
 
+  *Published on macOS only on 2026-08-24. The Windows build of the same
+  version — `Neight.exe` on `dist-latest` — followed on 2026-08-25, built
+  `--no-bump` from this same commit so both direct downloads carry identical
+  code under one version number.*
+
 ---
 
 ## 2026.086 — 2026-08-24
